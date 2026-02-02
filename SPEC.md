@@ -29,9 +29,14 @@ happen outside ECS systems**:
   (and only mutate the targeted rider/driver).
 - Systems may schedule follow-up events back onto `SimulationClock`.
 
-Events are **targeted** via an optional subject (`EventSubject::Rider(Entity)` or
-`EventSubject::Driver(Entity)`), which allows multiple trips to be “in flight” at
-once without global “scan everything” transitions.
+Events are **targeted** via an optional subject (e.g. `EventSubject::Rider(Entity)`,
+`EventSubject::Driver(Entity)`, or `EventSubject::Trip(Entity)`), which allows
+multiple trips to be “in flight” at once without global “scan everything”
+transitions.
+
+Once a driver accepts, the simulation creates a dedicated **Trip entity** that
+becomes the stable identifier for the rest of the lifecycle (movement, start,
+completion).
 
 In the current flow, riders start by requesting a trip, browse a quote, then
 wait for matching. Drivers start idle, evaluate a match offer, drive en route to
@@ -98,6 +103,7 @@ crates/
 - `EventSubject`:
   - `Rider(Entity)`
   - `Driver(Entity)`
+  - `Trip(Entity)`
 - `Event`:
   - `timestamp: u64`
   - `kind: EventKind`
@@ -114,6 +120,8 @@ Components and state enums:
 - `Rider` component: `{ state: RiderState, matched_driver: Option<Entity> }`
 - `DriverState`: `Idle`, `Evaluating`, `EnRoute`, `OnTrip`, `OffDuty`
 - `Driver` component: `{ state: DriverState, matched_rider: Option<Entity> }`
+- `TripState`: `EnRoute`, `OnTrip`, `Completed`
+- `Trip` component: `{ state: TripState, rider: Entity, driver: Entity }`
 - `Position` component: `{ CellIndex }` H3 cell position for spatial matching
 
 These are minimal placeholders to validate state transitions via systems.
@@ -163,7 +171,8 @@ System: `driver_decision_system`
 - Reacts to `CurrentEvent`.
 - On `EventKind::DriverDecision` with subject `Driver(driver_entity)`:
   - Applies a logit accept rule:
-    - Accept: `Evaluating` → `EnRoute` and schedules `MoveStep` for that driver.
+    - Accept: `Evaluating` → `EnRoute`, **spawns a `Trip` entity**, and schedules
+      `MoveStep` for that trip (`subject: Trip(trip_entity)`).
     - Reject: `Evaluating` → `Idle` and clears `matched_rider`.
 
 ### `sim_core::systems::movement`
@@ -171,10 +180,10 @@ System: `driver_decision_system`
 System: `movement_system`
 
 - Reacts to `CurrentEvent`.
-- On `EventKind::MoveStep` with subject `Driver(driver_entity)`:
-  - If that driver is `EnRoute`, moves it one H3 hop toward its matched rider.
-  - Reschedules `MoveStep` for the same driver if still en route.
-  - Schedules `TripStarted` for the same driver when it reaches the rider cell.
+- On `EventKind::MoveStep` with subject `Trip(trip_entity)`:
+  - If that trip is `EnRoute`, moves the trip’s driver one H3 hop toward the trip’s rider.
+  - Reschedules `MoveStep` for the same trip if still en route.
+  - Schedules `TripStarted` for the same trip when the driver reaches the rider cell.
 - Uses a simple ETA helper based on H3 grid distance to pick the next
   `MoveStep` timestamp.
 
@@ -186,21 +195,23 @@ is implemented yet beyond H3 grid distance.
 System: `trip_started_system`
 
 - Reacts to `CurrentEvent`.
-- On `EventKind::TripStarted` with subject `Driver(driver_entity)`:
-  - If driver is `EnRoute` and co-located with its matched rider (who is `Waiting`
+- On `EventKind::TripStarted` with subject `Trip(trip_entity)`:
+  - If trip is `EnRoute` and the driver is co-located with the rider (who is `Waiting`
     and matched back to this driver), transitions:
     - Rider: `Waiting` → `InTransit`
     - Driver: `EnRoute` → `OnTrip`
-  - Schedules `TripCompleted` at `clock.now() + 1` for the same driver.
+    - Trip: `EnRoute` → `OnTrip`
+  - Schedules `TripCompleted` at `clock.now() + 1` for the same trip.
 
 ### `sim_core::systems::trip_completed`
 
 System: `trip_completed_system`
 
 - Reacts to `CurrentEvent`.
-- On `EventKind::TripCompleted` with subject `Driver(driver_entity)`:
+- On `EventKind::TripCompleted` with subject `Trip(trip_entity)`:
   - Driver: `OnTrip` → `Idle` and clears `matched_rider`
-  - Rider (matched to that driver): `InTransit` → `Completed` and clears `matched_driver`
+  - Rider: `InTransit` → `Completed` and clears `matched_driver`
+  - Trip: `OnTrip` → `Completed`
 
 ## Tests
 

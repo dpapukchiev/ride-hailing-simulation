@@ -1,7 +1,7 @@
 use bevy_ecs::prelude::{Entity, ParamSet, Query, Res, ResMut, With};
 
 use crate::clock::{CurrentEvent, Event, EventKind, EventSubject, SimulationClock};
-use crate::ecs::{Driver, DriverState, Position, Rider};
+use crate::ecs::{Driver, DriverState, Position, Rider, Trip, TripState};
 
 fn eta_ticks(distance: i32) -> u64 {
     if distance <= 0 {
@@ -14,6 +14,7 @@ fn eta_ticks(distance: i32) -> u64 {
 pub fn movement_system(
     mut clock: ResMut<SimulationClock>,
     event: Res<CurrentEvent>,
+    trips: Query<&Trip>,
     mut queries: ParamSet<(
         Query<(Entity, &mut Driver, &mut Position)>,
         Query<(Entity, &Position), With<Rider>>,
@@ -23,22 +24,18 @@ pub fn movement_system(
         return;
     }
 
-    let Some(EventSubject::Driver(driver_entity)) = event.0.subject else {
+    let Some(EventSubject::Trip(trip_entity)) = event.0.subject else {
         return;
     };
 
-    let rider_entity = {
-        let drivers = queries.p0();
-        let Ok((_entity, driver, _pos)) = drivers.get(driver_entity) else {
+    let (driver_entity, rider_entity) = {
+        let Ok(trip) = trips.get(trip_entity) else {
             return;
         };
-        if driver.state != DriverState::EnRoute {
+        if trip.state != TripState::EnRoute {
             return;
         }
-        let Some(rider_entity) = driver.matched_rider else {
-            return;
-        };
-        rider_entity
+        (trip.driver, trip.rider)
     };
 
     let rider_pos = {
@@ -50,9 +47,12 @@ pub fn movement_system(
     };
 
     let mut drivers = queries.p0();
-    let Ok((_entity, _driver, mut driver_pos)) = drivers.get_mut(driver_entity) else {
+    let Ok((_entity, driver, mut driver_pos)) = drivers.get_mut(driver_entity) else {
         return;
     };
+    if driver.state != DriverState::EnRoute {
+        return;
+    }
 
     let distance = driver_pos.0.grid_distance(rider_pos).unwrap_or(0);
     if distance <= 0 {
@@ -60,7 +60,7 @@ pub fn movement_system(
         clock.schedule(Event {
             timestamp: next_timestamp,
             kind: EventKind::TripStarted,
-            subject: Some(EventSubject::Driver(driver_entity)),
+            subject: Some(EventSubject::Trip(trip_entity)),
         });
         return;
     }
@@ -79,14 +79,14 @@ pub fn movement_system(
         clock.schedule(Event {
             timestamp: next_timestamp,
             kind: EventKind::TripStarted,
-            subject: Some(EventSubject::Driver(driver_entity)),
+            subject: Some(EventSubject::Trip(trip_entity)),
         });
     } else {
         let next_timestamp = clock.now() + eta_ticks(remaining);
         clock.schedule(Event {
             timestamp: next_timestamp,
             kind: EventKind::MoveStep,
-            subject: Some(EventSubject::Driver(driver_entity)),
+            subject: Some(EventSubject::Trip(trip_entity)),
         });
     }
 }
@@ -127,13 +127,20 @@ mod tests {
                 Position(origin),
             ))
             .id();
+        let trip_entity = world
+            .spawn(Trip {
+                state: TripState::EnRoute,
+                rider: rider_entity,
+                driver: driver_entity,
+            })
+            .id();
 
         world
             .resource_mut::<SimulationClock>()
             .schedule(Event {
                 timestamp: 1,
                 kind: EventKind::MoveStep,
-                subject: Some(EventSubject::Driver(driver_entity)),
+                subject: Some(EventSubject::Trip(trip_entity)),
             });
         let event = world
             .resource_mut::<SimulationClock>()
@@ -157,7 +164,7 @@ mod tests {
             .expect("trip started event");
         assert_eq!(next_event.kind, EventKind::TripStarted);
         assert_eq!(next_event.timestamp, 2);
-        assert_eq!(next_event.subject, Some(EventSubject::Driver(driver_entity)));
+        assert_eq!(next_event.subject, Some(EventSubject::Trip(trip_entity)));
     }
 
     #[test]

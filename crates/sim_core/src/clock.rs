@@ -19,6 +19,7 @@ pub enum EventKind {
 pub enum EventSubject {
     Rider(Entity),
     Driver(Entity),
+    Trip(Entity),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

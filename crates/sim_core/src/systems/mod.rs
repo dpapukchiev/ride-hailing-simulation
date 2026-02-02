@@ -9,6 +9,7 @@ pub mod trip_completed;
 
 #[cfg(test)]
 mod end_to_end_tests {
+    use bevy_ecs::schedule::apply_deferred;
     use bevy_ecs::prelude::{Schedule, World};
 
     use crate::clock::{CurrentEvent, Event, EventKind, EventSubject, SimulationClock};
@@ -64,6 +65,7 @@ mod end_to_end_tests {
             movement_system,
             trip_started_system,
             trip_completed_system,
+            apply_deferred,
         ));
 
         // Runner loop: advance clock externally, route event via CurrentEvent.

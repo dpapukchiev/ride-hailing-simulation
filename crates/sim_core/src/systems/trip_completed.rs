@@ -1,10 +1,11 @@
 use bevy_ecs::prelude::{Query, Res};
 
 use crate::clock::{CurrentEvent, EventKind, EventSubject};
-use crate::ecs::{Driver, DriverState, Rider, RiderState};
+use crate::ecs::{Driver, DriverState, Rider, RiderState, Trip, TripState};
 
 pub fn trip_completed_system(
     event: Res<CurrentEvent>,
+    mut trips: Query<&mut Trip>,
     mut riders: Query<&mut Rider>,
     mut drivers: Query<&mut Driver>,
 ) {
@@ -12,30 +13,35 @@ pub fn trip_completed_system(
         return;
     }
 
-    let Some(EventSubject::Driver(driver_entity)) = event.0.subject else {
+    let Some(EventSubject::Trip(trip_entity)) = event.0.subject else {
         return;
     };
-    let Ok(mut driver) = drivers.get_mut(driver_entity) else {
+
+    let Ok(mut trip) = trips.get_mut(trip_entity) else {
         return;
     };
-    if driver.state != DriverState::OnTrip {
+    if trip.state != TripState::OnTrip {
         return;
     }
 
-    let rider_entity = driver.matched_rider;
-    driver.state = DriverState::Idle;
-    driver.matched_rider = None;
+    let driver_entity = trip.driver;
+    let rider_entity = trip.rider;
 
-    let Some(rider_entity) = rider_entity else {
-        return;
-    };
-    let Ok(mut rider) = riders.get_mut(rider_entity) else {
-        return;
-    };
-    if rider.state == RiderState::InTransit {
-        rider.state = RiderState::Completed;
+    if let Ok(mut driver) = drivers.get_mut(driver_entity) {
+        if driver.state == DriverState::OnTrip {
+            driver.state = DriverState::Idle;
+        }
+        driver.matched_rider = None;
+    }
+
+    if let Ok(mut rider) = riders.get_mut(rider_entity) {
+        if rider.state == RiderState::InTransit {
+            rider.state = RiderState::Completed;
+        }
         rider.matched_driver = None;
     }
+
+    trip.state = TripState::Completed;
 }
 
 #[cfg(test)]
@@ -61,6 +67,13 @@ mod tests {
                 matched_rider: None,
             })
             .id();
+        let trip_entity = world
+            .spawn(Trip {
+                state: TripState::OnTrip,
+                rider: rider_entity,
+                driver: driver_entity,
+            })
+            .id();
 
         {
             let mut rider_entity_mut = world.entity_mut(rider_entity);
@@ -78,7 +91,7 @@ mod tests {
             .schedule(Event {
                 timestamp: 2,
                 kind: EventKind::TripCompleted,
-                subject: Some(EventSubject::Driver(driver_entity)),
+                subject: Some(EventSubject::Trip(trip_entity)),
             });
 
         let event = world
@@ -104,5 +117,8 @@ mod tests {
         assert_eq!(driver_state, DriverState::Idle);
         assert_eq!(matched_driver, None);
         assert_eq!(matched_rider, None);
+
+        let trip_state = world.entity(trip_entity).get::<Trip>().expect("trip").state;
+        assert_eq!(trip_state, TripState::Completed);
     }
 }

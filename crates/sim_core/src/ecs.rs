@@ -31,5 +31,19 @@ pub struct Driver {
     pub matched_rider: Option<Entity>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TripState {
+    EnRoute,
+    OnTrip,
+    Completed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]
+pub struct Trip {
+    pub state: TripState,
+    pub rider: Entity,
+    pub driver: Entity,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]
 pub struct Position(pub CellIndex);
