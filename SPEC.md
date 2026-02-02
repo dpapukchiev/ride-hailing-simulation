@@ -161,7 +161,7 @@ System: `request_inbound_system`
 - Reacts to `CurrentEvent`.
 - On `EventKind::RequestInbound` with subject `Rider(rider_entity)`:
   - Rider: `Requesting` → `Browsing`; sets `requested_at = Some(clock.now())`.
-  - Schedules `QuoteAccepted` at `clock.now() + 1` for the same rider.
+  - Schedules `QuoteAccepted` 1 second from now (`schedule_in_secs(1, ...)`) for the same rider.
 
 ### `sim_core::systems::quote_accepted`
 
@@ -170,7 +170,7 @@ System: `quote_accepted_system`
 - Reacts to `CurrentEvent`.
 - On `EventKind::QuoteAccepted` with subject `Rider(rider_entity)`:
   - Rider: `Browsing` → `Waiting`
-  - Schedules `TryMatch` at `clock.now() + 1` for the same rider.
+  - Schedules `TryMatch` 1 second from now (`schedule_in_secs(1, ...)`) for the same rider.
 
 ### `sim_core::systems::simple_matching`
 
@@ -182,7 +182,7 @@ System: `simple_matching_system`
   - If both exist:
     - Rider stores `matched_driver = Some(driver_entity)`
     - Driver: `Idle` → `Evaluating` and stores `matched_rider = Some(rider_entity)`
-    - Schedules `MatchAccepted` at `clock.now() + 1` with subject `Driver(driver_entity)`.
+    - Schedules `MatchAccepted` 1 second from now (`schedule_in_secs(1, ...)`) with subject `Driver(driver_entity)`.
 
 ### `sim_core::systems::match_accepted`
 
@@ -190,7 +190,7 @@ System: `match_accepted_system`
 
 - Reacts to `CurrentEvent`.
 - On `EventKind::MatchAccepted` with subject `Driver(driver_entity)`:
-  - Schedules `DriverDecision` at `clock.now() + 1` for the same driver.
+  - Schedules `DriverDecision` 1 second from now (`schedule_in_secs(1, ...)`) for the same driver.
 
 ### `sim_core::systems::driver_decision`
 
@@ -202,7 +202,7 @@ System: `driver_decision_system`
     - Accept: `Evaluating` → `EnRoute`, **spawns a `Trip` entity** with `pickup` =
       rider’s position, `dropoff` = rider’s `destination` or a neighbor of pickup,
       `requested_at` = rider’s `requested_at`, `matched_at` = clock.now(), `pickup_at` = None;
-      schedules `MoveStep` for that trip (`subject: Trip(trip_entity)`).
+      schedules `MoveStep` 1 second from now (`schedule_in_secs(1, ...)`) for that trip (`subject: Trip(trip_entity)`).
     - Reject: `Evaluating` → `Idle` and clears `matched_rider`.
 
 ### `sim_core::systems::movement`
@@ -212,11 +212,12 @@ System: `movement_system`
 - Reacts to `CurrentEvent`.
 - On `EventKind::MoveStep` with subject `Trip(trip_entity)`:
   - **EnRoute**: moves the trip’s driver one H3 hop toward `trip.pickup` (rider cell).
-    Reschedules `MoveStep` if still en route; schedules `TripStarted` when driver
-    reaches pickup.
-  - **OnTrip**: moves the trip’s driver one H3 hop toward `trip.dropoff`. Reschedules
-    `MoveStep` if still en route; schedules `TripCompleted` when driver reaches dropoff.
-- ETA in ms: `eta_ms(distance)` — at least 1 second; otherwise distance × 1 min per H3 cell (`ONE_MIN_MS`).
+    If still en route, reschedules `MoveStep` with `schedule_in(eta_ms(remaining), ...)`; when driver
+    reaches pickup, schedules `TripStarted` 1 second from now (`schedule_in_secs(1, ...)`).
+  - **OnTrip**: moves the trip’s driver one H3 hop toward `trip.dropoff`. If still en route,
+    reschedules `MoveStep` with `schedule_in(eta_ms(remaining), ...)`; when driver reaches dropoff,
+    schedules `TripCompleted` 1 second from now (`schedule_in_secs(1, ...)`).
+- ETA in ms: `eta_ms(distance)` — at least 1 second (`ONE_SEC_MS`); otherwise distance × 1 min per H3 cell (`ONE_MIN_MS`). Used for `schedule_in(eta_ms(remaining), ...)`.
 
 This is a deterministic, FCFS-style placeholder. No distance or cost logic
 is implemented yet beyond H3 grid distance.
@@ -232,8 +233,7 @@ System: `trip_started_system`
     - Rider: `Waiting` → `InTransit`
     - Driver: `EnRoute` → `OnTrip`
     - Trip: `EnRoute` → `OnTrip`; sets `pickup_at = Some(clock.now())`.
-  - Schedules `MoveStep` for the same trip so the driver moves toward dropoff;
-    completion is scheduled by the movement system when the driver reaches dropoff.
+  - Schedules `MoveStep` 1 second from now (`schedule_in_secs(1, ...)`) for the same trip so the driver moves toward dropoff; completion is scheduled by the movement system when the driver reaches dropoff.
 
 ### `sim_core::systems::trip_completed`
 
@@ -251,13 +251,13 @@ System: `trip_completed_system`
 Unit tests exist in each module to confirm behavior:
 
 - `spatial`: grid disk neighbors within K.
-- `clock`: events pop in chronological order.
+- `clock`: events pop in time order; `schedule_in_secs` / `schedule_in_mins` and sim↔real conversion.
 - `request_inbound`: rider transitions to `Browsing` and sets `requested_at`.
 - `quote_accepted`: rider transitions to `Waiting` and schedules `TryMatch`.
 - `simple_matching`: targeted match attempt and transition.
 - `match_accepted`: driver decision scheduled.
 - `driver_decision`: driver accept/reject decision.
-- `movement`: driver moves toward rider and schedules trip start.
+- `movement`: driver moves toward rider and schedules trip start; `eta_ms` scales with distance.
 - `trip_started`: trip start transitions and completion scheduling.
 - `trip_completed`: rider/driver transition after completion.
 - **End-to-end (single ride)**: Inserts `SimulationClock`, `SimTelemetry`. Seeds one
