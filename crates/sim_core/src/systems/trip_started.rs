@@ -18,19 +18,20 @@ pub fn trip_started_system(
     }
 
     for mut rider in riders.iter_mut() {
-        if rider.state == RiderState::Matched {
+        if rider.state == RiderState::Waiting {
             rider.state = RiderState::InTransit;
         }
     }
 
     for mut driver in drivers.iter_mut() {
-        if driver.state == DriverState::Assigned {
+        if driver.state == DriverState::EnRoute {
             driver.state = DriverState::OnTrip;
         }
     }
 
+    let next_timestamp = clock.now() + 1;
     clock.schedule(Event {
-        timestamp: clock.now() + 1,
+        timestamp: next_timestamp,
         kind: EventKind::TripCompleted,
     });
 }
@@ -45,11 +46,11 @@ mod tests {
         let mut world = World::new();
         world.insert_resource(SimulationClock::default());
         world.spawn(Rider {
-            state: RiderState::Matched,
+            state: RiderState::Waiting,
             matched_driver: None,
         });
         world.spawn(Driver {
-            state: DriverState::Assigned,
+            state: DriverState::EnRoute,
             matched_rider: None,
         });
 

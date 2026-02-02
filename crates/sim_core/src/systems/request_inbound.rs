@@ -1,6 +1,6 @@
 use bevy_ecs::prelude::{Query, ResMut};
 
-use crate::clock::{EventKind, SimulationClock};
+use crate::clock::{Event, EventKind, SimulationClock};
 use crate::ecs::{Rider, RiderState};
 
 pub fn request_inbound_system(
@@ -18,9 +18,15 @@ pub fn request_inbound_system(
 
     for mut rider in riders.iter_mut() {
         if rider.state == RiderState::Requesting {
-            rider.state = RiderState::WaitingForMatch;
+            rider.state = RiderState::Browsing;
         }
     }
+
+    let next_timestamp = clock.now() + 1;
+    clock.schedule(Event {
+        timestamp: next_timestamp,
+        kind: EventKind::QuoteAccepted,
+    });
 }
 
 #[cfg(test)]
@@ -51,6 +57,13 @@ mod tests {
         schedule.run(&mut world);
 
         let rider = world.query::<&Rider>().single(&world);
-        assert_eq!(rider.state, RiderState::WaitingForMatch);
+        assert_eq!(rider.state, RiderState::Browsing);
+
+        let next_event = world
+            .resource_mut::<SimulationClock>()
+            .pop_next()
+            .expect("quote accepted event");
+        assert_eq!(next_event.kind, EventKind::QuoteAccepted);
+        assert_eq!(next_event.timestamp, 2);
     }
 }

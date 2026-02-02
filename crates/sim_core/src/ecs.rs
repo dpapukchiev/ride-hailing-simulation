@@ -3,8 +3,8 @@ use bevy_ecs::prelude::{Component, Entity};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RiderState {
     Requesting,
-    WaitingForMatch,
-    Matched,
+    Browsing,
+    Waiting,
     InTransit,
     Completed,
 }
@@ -18,8 +18,10 @@ pub struct Rider {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DriverState {
     Idle,
-    Assigned,
+    Evaluating,
+    EnRoute,
     OnTrip,
+    OffDuty,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]

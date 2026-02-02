@@ -10,7 +10,7 @@ pub fn simple_matching_system(
 ) {
     let rider_entity = riders
         .iter()
-        .find(|(_, rider)| rider.state == RiderState::WaitingForMatch)
+        .find(|(_, rider)| rider.state == RiderState::Waiting)
         .map(|(entity, _)| entity);
     let driver_entity = drivers
         .iter()
@@ -22,17 +22,18 @@ pub fn simple_matching_system(
     };
 
     if let Ok((_, mut rider)) = riders.get_mut(rider_entity) {
-        rider.state = RiderState::Matched;
+        rider.state = RiderState::Waiting;
         rider.matched_driver = Some(driver_entity);
     }
     if let Ok((_, mut driver)) = drivers.get_mut(driver_entity) {
-        driver.state = DriverState::Assigned;
+        driver.state = DriverState::Evaluating;
         driver.matched_rider = Some(rider_entity);
     }
 
+    let next_timestamp = clock.now() + 1;
     clock.schedule(Event {
-        timestamp: clock.now() + 1,
-        kind: EventKind::TripStarted,
+        timestamp: next_timestamp,
+        kind: EventKind::MatchAccepted,
     });
 }
 
@@ -47,7 +48,7 @@ mod tests {
         world.insert_resource(SimulationClock::default());
         let rider_entity = world
             .spawn(Rider {
-                state: RiderState::WaitingForMatch,
+                state: RiderState::Waiting,
                 matched_driver: None,
             })
             .id();
@@ -71,8 +72,8 @@ mod tests {
             (driver.state, driver.matched_rider)
         };
 
-        assert_eq!(rider_state, RiderState::Matched);
-        assert_eq!(driver_state, DriverState::Assigned);
+        assert_eq!(rider_state, RiderState::Waiting);
+        assert_eq!(driver_state, DriverState::Evaluating);
         assert_eq!(matched_driver, Some(driver_entity));
         assert_eq!(matched_rider, Some(rider_entity));
 
@@ -80,7 +81,7 @@ mod tests {
             .resource_mut::<SimulationClock>()
             .pop_next()
             .expect("trip started event");
-        assert_eq!(next_event.kind, EventKind::TripStarted);
+        assert_eq!(next_event.kind, EventKind::MatchAccepted);
         assert_eq!(next_event.timestamp, 1);
     }
 }

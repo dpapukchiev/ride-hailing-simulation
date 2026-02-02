@@ -18,6 +18,17 @@ minimal ECS-based agent model. It currently supports:
 
 This is a "crawl/walk" foundation aligned with the research plan.
 
+## Human-Readable System Flow
+
+The system is a discrete-event loop that advances time by popping events from
+the `SimulationClock`. Each event triggers an ECS system that updates rider and
+driver states. Riders start by requesting a trip, browse a quote, then wait for
+matching. Drivers start idle, evaluate a match offer, drive en route to pickup,
+and then move into an on-trip state. When the trip completes, the rider is
+marked completed and the driver returns to idle. Throughout this flow, riders
+and drivers store links to each other so the pairing is explicit while a trip
+is in progress.
+
 ## Workspace Layout
 
 ```
@@ -36,7 +47,10 @@ crates/
       systems/
         mod.rs
         request_inbound.rs
+        quote_accepted.rs
         simple_matching.rs
+        match_accepted.rs
+        trip_started.rs
         trip_completed.rs
 ```
 
@@ -63,6 +77,8 @@ crates/
   - `events: BinaryHeap<Event>`
 - `EventKind`:
   - `RequestInbound`
+  - `QuoteAccepted`
+  - `MatchAccepted`
   - `TripStarted`
   - `TripCompleted`
 - `Event`:
@@ -74,9 +90,9 @@ crates/
 
 Components and state enums:
 
-- `RiderState`: `Requesting`, `WaitingForMatch`, `Matched`, `InTransit`, `Completed`
+- `RiderState`: `Requesting`, `Browsing`, `Waiting`, `InTransit`, `Completed`
 - `Rider` component: `{ state: RiderState, matched_driver: Option<Entity> }`
-- `DriverState`: `Idle`, `Assigned`, `OnTrip`
+- `DriverState`: `Idle`, `Evaluating`, `EnRoute`, `OnTrip`, `OffDuty`
 - `Driver` component: `{ state: DriverState, matched_rider: Option<Entity> }`
 
 These are minimal placeholders to validate state transitions via systems.
@@ -87,16 +103,34 @@ System: `request_inbound_system`
 
 - Pops the next event from `SimulationClock`.
 - If `EventKind::RequestInbound`, transitions:
-  - `RiderState::Requesting` → `RiderState::WaitingForMatch`
+  - `RiderState::Requesting` → `RiderState::Browsing`
+- Schedules `QuoteAccepted` at `clock.now() + 1`.
+
+### `sim_core::systems::quote_accepted`
+
+System: `quote_accepted_system`
+
+- Pops the next event from `SimulationClock`.
+- If `EventKind::QuoteAccepted`, transitions:
+  - `RiderState::Browsing` → `RiderState::Waiting`
 
 ### `sim_core::systems::simple_matching`
 
 System: `simple_matching_system`
 
-- Finds the first rider in `WaitingForMatch` and the first driver in `Idle`.
+- Finds the first rider in `Waiting` and the first driver in `Idle`.
 - If both exist, transitions:
-  - Rider: `WaitingForMatch` → `Matched` and stores `matched_driver`
-  - Driver: `Idle` → `Assigned` and stores `matched_rider`
+  - Rider: `Waiting` stays `Waiting` and stores `matched_driver`
+  - Driver: `Idle` → `Evaluating` and stores `matched_rider`
+- Schedules `MatchAccepted` at `clock.now() + 1`.
+
+### `sim_core::systems::match_accepted`
+
+System: `match_accepted_system`
+
+- Pops the next event from `SimulationClock`.
+- If `EventKind::MatchAccepted`, transitions:
+  - Driver: `Evaluating` → `EnRoute`
 - Schedules `TripStarted` at `clock.now() + 1`.
 
 This is a deterministic, FCFS-style placeholder. No distance or cost logic
@@ -108,8 +142,8 @@ System: `trip_started_system`
 
 - Pops the next event from `SimulationClock`.
 - If `EventKind::TripStarted`, transitions:
-  - Rider: `Matched` → `InTransit`
-  - Driver: `Assigned` → `OnTrip`
+  - Rider: `Waiting` → `InTransit`
+  - Driver: `EnRoute` → `OnTrip`
 - Schedules `TripCompleted` at `clock.now() + 1`.
 
 ### `sim_core::systems::trip_completed`
@@ -127,8 +161,10 @@ Unit tests exist in each module to confirm behavior:
 
 - `spatial`: grid disk neighbors within K.
 - `clock`: events pop in chronological order.
-- `request_inbound`: rider transitions to `WaitingForMatch`.
+- `request_inbound`: rider transitions to `Browsing`.
+- `quote_accepted`: rider transitions to `Waiting`.
 - `simple_matching`: rider/driver match and transition.
+- `match_accepted`: driver transitions to `EnRoute`.
 - `trip_started`: trip start transitions and completion scheduling.
 - `trip_completed`: rider/driver transition after completion.
 
