@@ -46,6 +46,7 @@ pub fn trip_completed_system(
 
     let completed_at = clock.now();
     let pickup_at = trip.pickup_at.unwrap_or(completed_at);
+    trip.dropoff_at = Some(completed_at);
     trip.state = TripState::Completed;
 
     telemetry.completed_trips.push(CompletedTripRecord {
@@ -95,6 +96,7 @@ mod tests {
                 requested_at: 0,
                 matched_at: 1,
                 pickup_at: Some(2),
+                dropoff_at: None,
             })
             .id();
 

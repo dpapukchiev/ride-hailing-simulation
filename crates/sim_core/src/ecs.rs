@@ -55,6 +55,8 @@ pub struct Trip {
     pub matched_at: u64,
     /// Simulation time when the driver reached pickup and trip started; set in trip_started_system.
     pub pickup_at: Option<u64>,
+    /// Simulation time when the driver reached dropoff (trip completed); set in trip_completed_system.
+    pub dropoff_at: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]

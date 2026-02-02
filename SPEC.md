@@ -124,9 +124,9 @@ Components and state enums:
 - `DriverState`: `Idle`, `Evaluating`, `EnRoute`, `OnTrip`, `OffDuty`
 - `Driver` component: `{ state: DriverState, matched_rider: Option<Entity> }`
 - `TripState`: `EnRoute`, `OnTrip`, `Completed`
-- `Trip` component: `{ state, rider, driver, pickup, dropoff, requested_at: u64, matched_at: u64, pickup_at: Option<u64> }`
+- `Trip` component: `{ state, rider, driver, pickup, dropoff, requested_at: u64, matched_at: u64, pickup_at: Option<u64>, dropoff_at: Option<u64> }`
   - `pickup` / `dropoff`: trip is completed when the driver reaches `dropoff` (not a fixed +1 tick).
-  - `requested_at` / `matched_at` / `pickup_at`: simulation time in ms; used for KPIs.
+  - `requested_at` / `matched_at` / `pickup_at` / `dropoff_at`: simulation time in ms; used for KPIs. `dropoff_at` is set in `trip_completed_system`.
 - `Position` component: `{ CellIndex }` H3 cell position for spatial matching
 
 These are minimal placeholders to validate state transitions via systems.

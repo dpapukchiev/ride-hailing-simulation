@@ -131,6 +131,7 @@ mod tests {
                 requested_at: 0,
                 matched_at: 0,
                 pickup_at: None,
+                dropoff_at: None,
             })
             .id();
 

@@ -70,6 +70,7 @@ pub fn driver_decision_system(
                 requested_at,
                 matched_at,
                 pickup_at: None,
+                dropoff_at: None,
             })
             .id();
 
