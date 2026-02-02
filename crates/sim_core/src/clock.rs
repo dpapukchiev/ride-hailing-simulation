@@ -8,6 +8,7 @@ pub enum EventKind {
     RequestInbound,
     QuoteAccepted,
     MatchAccepted,
+    DriverDecision,
     TripStarted,
     TripCompleted,
 }

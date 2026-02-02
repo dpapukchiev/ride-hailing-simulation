@@ -47,6 +47,7 @@ crates/
         quote_accepted.rs
         simple_matching.rs
         match_accepted.rs
+        driver_decision.rs
         trip_started.rs
         trip_completed.rs
 ```
@@ -76,6 +77,7 @@ crates/
   - `RequestInbound`
   - `QuoteAccepted`
   - `MatchAccepted`
+  - `DriverDecision`
   - `TripStarted`
   - `TripCompleted`
 - `Event`:
@@ -129,8 +131,17 @@ System: `match_accepted_system`
 
 - Pops the next event from `SimulationClock`.
 - If `EventKind::MatchAccepted`, transitions:
-  - Driver: `Evaluating` → `EnRoute`
-- Schedules `TripStarted` at `clock.now() + 1`.
+  - Driver remains `Evaluating` for decision.
+- Schedules `DriverDecision` at `clock.now() + 1`.
+
+### `sim_core::systems::driver_decision`
+
+System: `driver_decision_system`
+
+- Pops the next event from `SimulationClock`.
+- If `EventKind::DriverDecision`, applies a logit accept rule:
+  - Accept: `DriverState::Evaluating` → `EnRoute` and schedules `TripStarted`.
+  - Reject: `DriverState::Evaluating` → `Idle` and clears `matched_rider`.
 
 This is a deterministic, FCFS-style placeholder. No distance or cost logic
 is implemented yet.
@@ -163,7 +174,9 @@ Unit tests exist in each module to confirm behavior:
 - `request_inbound`: rider transitions to `Browsing`.
 - `quote_accepted`: rider transitions to `Waiting`.
 - `simple_matching`: rider/driver match and transition.
-- `match_accepted`: driver transitions to `EnRoute`.
+- `match_accepted`: driver decision scheduled.
+- `driver_decision`: driver accept/reject decision.
+- `driver_decision`: driver accept/reject decision.
 - `trip_started`: trip start transitions and completion scheduling.
 - `trip_completed`: rider/driver transition after completion.
 

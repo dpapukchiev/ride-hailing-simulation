@@ -16,16 +16,10 @@ pub fn match_accepted_system(
         return;
     }
 
-    for mut driver in drivers.iter_mut() {
-        if driver.state == DriverState::Evaluating {
-            driver.state = DriverState::EnRoute;
-        }
-    }
-
     let next_timestamp = clock.now() + 1;
     clock.schedule(Event {
         timestamp: next_timestamp,
-        kind: EventKind::TripStarted,
+        kind: EventKind::DriverDecision,
     });
 }
 
@@ -37,7 +31,7 @@ mod tests {
     use crate::clock::Event;
 
     #[test]
-    fn match_accepted_transitions_and_schedules_trip_start() {
+    fn match_accepted_schedules_driver_decision() {
         let mut world = World::new();
         world.insert_resource(SimulationClock::default());
         world.spawn(Driver {
@@ -56,17 +50,11 @@ mod tests {
         schedule.add_systems(match_accepted_system);
         schedule.run(&mut world);
 
-        let driver_state = {
-            let driver = world.query::<&Driver>().single(&world);
-            driver.state
-        };
-        assert_eq!(driver_state, DriverState::EnRoute);
-
         let next_event = world
             .resource_mut::<SimulationClock>()
             .pop_next()
-            .expect("trip started event");
-        assert_eq!(next_event.kind, EventKind::TripStarted);
+            .expect("driver decision event");
+        assert_eq!(next_event.kind, EventKind::DriverDecision);
         assert_eq!(next_event.timestamp, 3);
     }
 }
