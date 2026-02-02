@@ -1,11 +1,9 @@
-use bevy_ecs::prelude::{Query, ResMut};
+use bevy_ecs::prelude::ResMut;
 
 use crate::clock::{Event, EventKind, SimulationClock};
-use crate::ecs::{Driver, DriverState};
 
 pub fn match_accepted_system(
     mut clock: ResMut<SimulationClock>,
-    mut drivers: Query<&mut Driver>,
 ) {
     let event = match clock.pop_next() {
         Some(event) => event,
@@ -29,6 +27,7 @@ mod tests {
     use bevy_ecs::prelude::{Schedule, World};
 
     use crate::clock::Event;
+    use crate::ecs::{Driver, DriverState};
 
     #[test]
     fn match_accepted_schedules_driver_decision() {
