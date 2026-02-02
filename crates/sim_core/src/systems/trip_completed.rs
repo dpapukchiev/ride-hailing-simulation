@@ -1,10 +1,13 @@
-use bevy_ecs::prelude::{Query, Res};
+use bevy_ecs::prelude::{Query, Res, ResMut};
 
-use crate::clock::{CurrentEvent, EventKind, EventSubject};
+use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
 use crate::ecs::{Driver, DriverState, Rider, RiderState, Trip, TripState};
+use crate::telemetry::{CompletedTripRecord, SimTelemetry};
 
 pub fn trip_completed_system(
     event: Res<CurrentEvent>,
+    clock: Res<SimulationClock>,
+    mut telemetry: ResMut<SimTelemetry>,
     mut trips: Query<&mut Trip>,
     mut riders: Query<&mut Rider>,
     mut drivers: Query<&mut Driver>,
@@ -42,6 +45,13 @@ pub fn trip_completed_system(
     }
 
     trip.state = TripState::Completed;
+
+    telemetry.completed_trips.push(CompletedTripRecord {
+        trip_entity,
+        rider_entity,
+        driver_entity,
+        completed_at: clock.now(),
+    });
 }
 
 #[cfg(test)]
@@ -55,10 +65,12 @@ mod tests {
     fn trip_completed_transitions_driver_and_rider() {
         let mut world = World::new();
         world.insert_resource(SimulationClock::default());
+        world.insert_resource(crate::telemetry::SimTelemetry::default());
         let rider_entity = world
             .spawn(Rider {
                 state: RiderState::InTransit,
                 matched_driver: None,
+                destination: None,
             })
             .id();
         let driver_entity = world
@@ -72,6 +84,8 @@ mod tests {
                 state: TripState::OnTrip,
                 rider: rider_entity,
                 driver: driver_entity,
+                pickup: h3o::CellIndex::try_from(0x8a1fb46622dffff).expect("cell"),
+                dropoff: h3o::CellIndex::try_from(0x8a1fb46622dffff).expect("cell"),
             })
             .id();
 

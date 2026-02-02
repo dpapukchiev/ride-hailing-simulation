@@ -45,6 +45,7 @@ mod tests {
             .spawn(Rider {
                 state: RiderState::Requesting,
                 matched_driver: None,
+                destination: None,
             })
             .id();
 

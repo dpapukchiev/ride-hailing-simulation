@@ -14,11 +14,13 @@ mod end_to_end_tests {
     use crate::clock::{Event, EventKind, EventSubject, SimulationClock};
     use crate::ecs::{Driver, DriverState, Position, Rider, RiderState, Trip, TripState};
     use crate::runner::{run_until_empty, simulation_schedule};
+    use crate::telemetry::SimTelemetry;
 
     #[test]
     fn simulates_one_ride_end_to_end() {
         let mut world = World::new();
         world.insert_resource(SimulationClock::default());
+        world.insert_resource(SimTelemetry::default());
 
         let cell = h3o::CellIndex::try_from(0x8a1fb46622dffff).expect("cell");
 
@@ -27,6 +29,7 @@ mod end_to_end_tests {
                 Rider {
                     state: RiderState::Requesting,
                     matched_driver: None,
+                    destination: None,
                 },
                 Position(cell),
             ))
@@ -72,16 +75,28 @@ mod end_to_end_tests {
         assert_eq!(trip.state, TripState::Completed);
         assert_eq!(trip.rider, rider_entity);
         assert_eq!(trip.driver, driver_entity);
+        assert_eq!(trip.pickup, cell);
+        // When destination is None, dropoff is a neighbor of pickup
+        assert_ne!(trip.dropoff, trip.pickup, "dropoff should differ from pickup when defaulted");
         assert_eq!(rider.state, RiderState::Completed);
         assert_eq!(rider.matched_driver, None);
         assert_eq!(driver.state, DriverState::Idle);
         assert_eq!(driver.matched_rider, None);
+
+        let telemetry = world.resource::<SimTelemetry>();
+        assert_eq!(telemetry.completed_trips.len(), 1);
+        let record = &telemetry.completed_trips[0];
+        assert_eq!(record.rider_entity, rider_entity);
+        assert_eq!(record.driver_entity, driver_entity);
+        assert_eq!(record.trip_entity, trip_entity);
+        assert!(record.completed_at >= 1, "completed_at should reflect simulation time");
     }
 
     #[test]
     fn simulates_two_concurrent_rides_end_to_end() {
         let mut world = World::new();
         world.insert_resource(SimulationClock::default());
+        world.insert_resource(SimTelemetry::default());
 
         let cell = h3o::CellIndex::try_from(0x8a1fb46622dffff).expect("cell");
 
@@ -90,6 +105,7 @@ mod end_to_end_tests {
                 Rider {
                     state: RiderState::Requesting,
                     matched_driver: None,
+                    destination: None,
                 },
                 Position(cell),
             ))
@@ -99,6 +115,7 @@ mod end_to_end_tests {
                 Rider {
                     state: RiderState::Requesting,
                     matched_driver: None,
+                    destination: None,
                 },
                 Position(cell),
             ))
@@ -159,5 +176,18 @@ mod end_to_end_tests {
         let driver2_state = world.entity(driver2).get::<Driver>().expect("driver2").state;
         assert_eq!(driver1_state, DriverState::Idle);
         assert_eq!(driver2_state, DriverState::Idle);
+
+        let telemetry = world.resource::<SimTelemetry>();
+        assert_eq!(telemetry.completed_trips.len(), 2);
+        let riders_drivers: Vec<_> = telemetry
+            .completed_trips
+            .iter()
+            .map(|r| (r.rider_entity, r.driver_entity))
+            .collect();
+        assert!(riders_drivers.contains(&(rider1, driver1)));
+        assert!(riders_drivers.contains(&(rider2, driver2)));
+        for record in &telemetry.completed_trips {
+            assert!(record.completed_at >= 1);
+        }
     }
 }

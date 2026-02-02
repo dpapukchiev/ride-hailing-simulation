@@ -61,6 +61,7 @@ crates/
       lib.rs
       runner.rs
       spatial.rs
+      telemetry.rs
       systems/
         mod.rs
         request_inbound.rs
@@ -120,11 +121,13 @@ crates/
 Components and state enums:
 
 - `RiderState`: `Requesting`, `Browsing`, `Waiting`, `InTransit`, `Completed`
-- `Rider` component: `{ state: RiderState, matched_driver: Option<Entity> }`
+- `Rider` component: `{ state: RiderState, matched_driver: Option<Entity>, destination: Option<CellIndex> }`
+  - `destination`: requested dropoff cell; if `None`, a neighbor of pickup is used when the trip is created.
 - `DriverState`: `Idle`, `Evaluating`, `EnRoute`, `OnTrip`, `OffDuty`
 - `Driver` component: `{ state: DriverState, matched_rider: Option<Entity> }`
 - `TripState`: `EnRoute`, `OnTrip`, `Completed`
-- `Trip` component: `{ state: TripState, rider: Entity, driver: Entity }`
+- `Trip` component: `{ state: TripState, rider: Entity, driver: Entity, pickup: CellIndex, dropoff: CellIndex }`
+  - `pickup` / `dropoff`: trip is completed when the driver reaches `dropoff` (not a fixed +1 tick).
 - `Position` component: `{ CellIndex }` H3 cell position for spatial matching
 
 These are minimal placeholders to validate state transitions via systems.
@@ -145,6 +148,12 @@ Clock progression and event routing are implemented here (outside systems):
 
 Callers (tests or a binary) use the runner to drive the sim without
 duplicating the pop → route → run loop.
+
+### `sim_core::telemetry`
+
+- **`SimTelemetry`** (ECS `Resource`, default): holds `completed_trips: Vec<CompletedTripRecord>`.
+- **`CompletedTripRecord`**: `{ trip_entity, rider_entity, driver_entity, completed_at: u64 }`.
+- Insert `SimTelemetry::default()` when building the world to record completed trips; `trip_completed_system` pushes one record per completed trip.
 
 ### `sim_core::systems::request_inbound`
 
@@ -191,8 +200,9 @@ System: `driver_decision_system`
 - Reacts to `CurrentEvent`.
 - On `EventKind::DriverDecision` with subject `Driver(driver_entity)`:
   - Applies a logit accept rule:
-    - Accept: `Evaluating` → `EnRoute`, **spawns a `Trip` entity**, and schedules
-      `MoveStep` for that trip (`subject: Trip(trip_entity)`).
+    - Accept: `Evaluating` → `EnRoute`, **spawns a `Trip` entity** with `pickup` =
+      rider’s position and `dropoff` = rider’s `destination` or a neighbor of pickup,
+      and schedules `MoveStep` for that trip (`subject: Trip(trip_entity)`).
     - Reject: `Evaluating` → `Idle` and clears `matched_rider`.
 
 ### `sim_core::systems::movement`
@@ -201,9 +211,11 @@ System: `movement_system`
 
 - Reacts to `CurrentEvent`.
 - On `EventKind::MoveStep` with subject `Trip(trip_entity)`:
-  - If that trip is `EnRoute`, moves the trip’s driver one H3 hop toward the trip’s rider.
-  - Reschedules `MoveStep` for the same trip if still en route.
-  - Schedules `TripStarted` for the same trip when the driver reaches the rider cell.
+  - **EnRoute**: moves the trip’s driver one H3 hop toward `trip.pickup` (rider cell).
+    Reschedules `MoveStep` if still en route; schedules `TripStarted` when driver
+    reaches pickup.
+  - **OnTrip**: moves the trip’s driver one H3 hop toward `trip.dropoff`. Reschedules
+    `MoveStep` if still en route; schedules `TripCompleted` when driver reaches dropoff.
 - Uses a simple ETA helper based on H3 grid distance to pick the next
   `MoveStep` timestamp.
 
@@ -221,7 +233,8 @@ System: `trip_started_system`
     - Rider: `Waiting` → `InTransit`
     - Driver: `EnRoute` → `OnTrip`
     - Trip: `EnRoute` → `OnTrip`
-  - Schedules `TripCompleted` at `clock.now() + 1` for the same trip.
+  - Schedules `MoveStep` for the same trip so the driver moves toward dropoff;
+    completion is scheduled by the movement system when the driver reaches dropoff.
 
 ### `sim_core::systems::trip_completed`
 
@@ -232,6 +245,7 @@ System: `trip_completed_system`
   - Driver: `OnTrip` → `Idle` and clears `matched_rider`
   - Rider: `InTransit` → `Completed` and clears `matched_driver`
   - Trip: `OnTrip` → `Completed`
+  - Pushes a `CompletedTripRecord` to `SimTelemetry` (trip_entity, rider_entity, driver_entity, completed_at).
 
 ## Tests
 
@@ -247,14 +261,16 @@ Unit tests exist in each module to confirm behavior:
 - `movement`: driver moves toward rider and schedules trip start.
 - `trip_started`: trip start transitions and completion scheduling.
 - `trip_completed`: rider/driver transition after completion.
-- **End-to-end (single ride)**: Uses `sim_core::runner::run_until_empty` with
-  `simulation_schedule()`. Seeds one
-  `RequestInbound` (rider), runs until the clock is empty, then asserts one
-  `Trip` in `Completed`, rider `Completed`, driver `Idle`.
-- **End-to-end (concurrent trips)**: Seeds two riders and two drivers (same H3
-  cell), schedules `RequestInbound` for rider1 at t=1 and rider2 at t=2, runs
-  until empty. Asserts two `Trip` entities in `Completed`, both riders
-  `Completed`, both drivers `Idle`.
+- **End-to-end (single ride)**: Inserts `SimulationClock`, `SimTelemetry`. Seeds one
+  rider (with `destination: None`) and one driver in the same cell, schedules
+  `RequestInbound` (rider). Runs `run_until_empty` with `simulation_schedule()`.
+  Asserts: one `Trip` in `Completed` with correct rider/driver and pickup/dropoff;
+  rider `Completed`, driver `Idle`; `SimTelemetry.completed_trips.len() == 1` and
+  record matches rider/driver.
+- **End-to-end (concurrent trips)**: Same setup with two riders and two drivers
+  (same cell), `RequestInbound` at t=1 and t=2. Runs until empty. Asserts: two
+  `Trip` entities in `Completed`, both riders `Completed`, both drivers `Idle`;
+  `SimTelemetry.completed_trips.len() == 2`.
 
 All per-system unit tests emulate the runner by popping one event, inserting
 `CurrentEvent`, then running the ECS schedule.
@@ -263,6 +279,6 @@ All per-system unit tests emulate the runner by popping one event, inserting
 
 - Real matching algorithms (bipartite matching / cost matrices).
 - Driver acceptance models and rider conversion.
-- Event scheduling after match beyond fixed delays (pickup, durations).
+- Event scheduling after match beyond fixed delays (e.g. variable trip duration).
 - H3-based movement or routing.
-- Telemetry output / KPIs.
+- Richer KPIs (time-to-match, time-to-pickup, trip duration derived from telemetry).

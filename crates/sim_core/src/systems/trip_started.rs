@@ -62,10 +62,11 @@ pub fn trip_started_system(
         trip.state = TripState::OnTrip;
     }
 
+    // Start moving driver toward dropoff; completion is scheduled by movement when driver arrives.
     let next_timestamp = clock.now() + 1;
     clock.schedule(Event {
         timestamp: next_timestamp,
-        kind: EventKind::TripCompleted,
+        kind: EventKind::MoveStep,
         subject: Some(EventSubject::Trip(trip_entity)),
     });
 }
@@ -85,6 +86,7 @@ mod tests {
                 Rider {
                     state: RiderState::Waiting,
                     matched_driver: None,
+                    destination: None,
                 },
                 Position(cell),
             ))
@@ -103,6 +105,8 @@ mod tests {
                 state: TripState::EnRoute,
                 rider: rider_entity,
                 driver: driver_entity,
+                pickup: cell,
+                dropoff: cell,
             })
             .id();
 
@@ -147,8 +151,8 @@ mod tests {
         let next_event = world
             .resource_mut::<SimulationClock>()
             .pop_next()
-            .expect("completion event");
-        assert_eq!(next_event.kind, EventKind::TripCompleted);
+            .expect("move step toward dropoff");
+        assert_eq!(next_event.kind, EventKind::MoveStep);
         assert_eq!(next_event.timestamp, 4);
         assert_eq!(next_event.subject, Some(EventSubject::Trip(trip_entity)));
     }

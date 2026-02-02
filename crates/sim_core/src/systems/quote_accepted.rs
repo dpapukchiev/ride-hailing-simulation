@@ -43,9 +43,10 @@ mod tests {
         world.insert_resource(SimulationClock::default());
         let rider_entity = world
             .spawn(Rider {
-            state: RiderState::Browsing,
-            matched_driver: None,
-        })
+                state: RiderState::Browsing,
+                matched_driver: None,
+                destination: None,
+            })
             .id();
 
         world

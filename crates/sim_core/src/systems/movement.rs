@@ -1,7 +1,7 @@
-use bevy_ecs::prelude::{Entity, ParamSet, Query, Res, ResMut, With};
+use bevy_ecs::prelude::{Query, Res, ResMut};
 
 use crate::clock::{CurrentEvent, Event, EventKind, EventSubject, SimulationClock};
-use crate::ecs::{Driver, DriverState, Position, Rider, Trip, TripState};
+use crate::ecs::{Driver, DriverState, Position, Trip, TripState};
 
 fn eta_ticks(distance: i32) -> u64 {
     if distance <= 0 {
@@ -15,10 +15,7 @@ pub fn movement_system(
     mut clock: ResMut<SimulationClock>,
     event: Res<CurrentEvent>,
     trips: Query<&Trip>,
-    mut queries: ParamSet<(
-        Query<(Entity, &mut Driver, &mut Position)>,
-        Query<(Entity, &Position), With<Rider>>,
-    )>,
+    mut drivers: Query<(&mut Driver, &mut Position)>,
 ) {
     if event.0.kind != EventKind::MoveStep {
         return;
@@ -28,44 +25,47 @@ pub fn movement_system(
         return;
     };
 
-    let (driver_entity, rider_entity) = {
+    let (driver_entity, target_cell, is_en_route) = {
         let Ok(trip) = trips.get(trip_entity) else {
             return;
         };
-        if trip.state != TripState::EnRoute {
-            return;
-        }
-        (trip.driver, trip.rider)
-    };
-
-    let rider_pos = {
-        let riders = queries.p1();
-        let Ok((_entity, pos)) = riders.get(rider_entity) else {
-            return;
+        let target = match trip.state {
+            TripState::EnRoute => trip.pickup,
+            TripState::OnTrip => trip.dropoff,
+            TripState::Completed => return,
         };
-        pos.0
+        (trip.driver, target, trip.state == TripState::EnRoute)
     };
 
-    let mut drivers = queries.p0();
-    let Ok((_entity, driver, mut driver_pos)) = drivers.get_mut(driver_entity) else {
+    let Ok((driver, mut driver_pos)) = drivers.get_mut(driver_entity) else {
         return;
     };
-    if driver.state != DriverState::EnRoute {
+    let expected_state = if is_en_route {
+        DriverState::EnRoute
+    } else {
+        DriverState::OnTrip
+    };
+    if driver.state != expected_state {
         return;
     }
 
-    let distance = driver_pos.0.grid_distance(rider_pos).unwrap_or(0);
+    let distance = driver_pos.0.grid_distance(target_cell).unwrap_or(0);
     if distance <= 0 {
         let next_timestamp = clock.now() + eta_ticks(0);
+        let kind = if is_en_route {
+            EventKind::TripStarted
+        } else {
+            EventKind::TripCompleted
+        };
         clock.schedule(Event {
             timestamp: next_timestamp,
-            kind: EventKind::TripStarted,
+            kind,
             subject: Some(EventSubject::Trip(trip_entity)),
         });
         return;
     }
 
-    if let Ok(path) = driver_pos.0.grid_path_cells(rider_pos) {
+    if let Ok(path) = driver_pos.0.grid_path_cells(target_cell) {
         let mut iter = path.filter_map(|cell| cell.ok());
         let _current = iter.next();
         if let Some(next_cell) = iter.next() {
@@ -73,12 +73,17 @@ pub fn movement_system(
         }
     }
 
-    let remaining = driver_pos.0.grid_distance(rider_pos).unwrap_or(0);
+    let remaining = driver_pos.0.grid_distance(target_cell).unwrap_or(0);
     if remaining == 0 {
         let next_timestamp = clock.now() + eta_ticks(0);
+        let kind = if is_en_route {
+            EventKind::TripStarted
+        } else {
+            EventKind::TripCompleted
+        };
         clock.schedule(Event {
             timestamp: next_timestamp,
-            kind: EventKind::TripStarted,
+            kind,
             subject: Some(EventSubject::Trip(trip_entity)),
         });
     } else {
@@ -95,7 +100,7 @@ pub fn movement_system(
 mod tests {
     use super::*;
     use bevy_ecs::prelude::{Schedule, World};
-    use crate::ecs::RiderState;
+    use crate::ecs::{Rider, RiderState};
 
     #[test]
     fn movement_steps_toward_rider_and_schedules_trip_start() {
@@ -114,6 +119,7 @@ mod tests {
                 Rider {
                     state: RiderState::Waiting,
                     matched_driver: None,
+                    destination: None,
                 },
                 Position(neighbor),
             ))
@@ -132,6 +138,8 @@ mod tests {
                 state: TripState::EnRoute,
                 rider: rider_entity,
                 driver: driver_entity,
+                pickup: neighbor,
+                dropoff: neighbor,
             })
             .id();
 

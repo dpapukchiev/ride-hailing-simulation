@@ -14,6 +14,8 @@ pub enum RiderState {
 pub struct Rider {
     pub state: RiderState,
     pub matched_driver: Option<Entity>,
+    /// Requested dropoff cell; if `None`, a neighbor of pickup is used when the trip is created.
+    pub destination: Option<CellIndex>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,6 +45,8 @@ pub struct Trip {
     pub state: TripState,
     pub rider: Entity,
     pub driver: Entity,
+    pub pickup: CellIndex,
+    pub dropoff: CellIndex,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]
