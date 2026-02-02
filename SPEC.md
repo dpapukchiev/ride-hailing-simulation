@@ -63,6 +63,7 @@ crates/
   - `events: BinaryHeap<Event>`
 - `EventKind`:
   - `RequestInbound`
+  - `TripStarted`
   - `TripCompleted`
 - `Event`:
   - `timestamp: u64`
@@ -73,9 +74,9 @@ crates/
 
 Components and state enums:
 
-- `RiderState`: `Requesting`, `WaitingForMatch`, `Matched`, `Completed`
+- `RiderState`: `Requesting`, `WaitingForMatch`, `Matched`, `InTransit`, `Completed`
 - `Rider` component: `{ state: RiderState, matched_driver: Option<Entity> }`
-- `DriverState`: `Idle`, `Assigned`
+- `DriverState`: `Idle`, `Assigned`, `OnTrip`
 - `Driver` component: `{ state: DriverState, matched_rider: Option<Entity> }`
 
 These are minimal placeholders to validate state transitions via systems.
@@ -96,9 +97,20 @@ System: `simple_matching_system`
 - If both exist, transitions:
   - Rider: `WaitingForMatch` → `Matched` and stores `matched_driver`
   - Driver: `Idle` → `Assigned` and stores `matched_rider`
+- Schedules `TripStarted` at `clock.now() + 1`.
 
 This is a deterministic, FCFS-style placeholder. No distance or cost logic
 is implemented yet.
+
+### `sim_core::systems::trip_started`
+
+System: `trip_started_system`
+
+- Pops the next event from `SimulationClock`.
+- If `EventKind::TripStarted`, transitions:
+  - Rider: `Matched` → `InTransit`
+  - Driver: `Assigned` → `OnTrip`
+- Schedules `TripCompleted` at `clock.now() + 1`.
 
 ### `sim_core::systems::trip_completed`
 
@@ -106,8 +118,8 @@ System: `trip_completed_system`
 
 - Pops the next event from `SimulationClock`.
 - If `EventKind::TripCompleted`, transitions:
-  - Rider: `Matched` → `Completed` and clears `matched_driver`
-  - Driver: `Assigned` → `Idle` and clears `matched_rider`
+  - Rider: `InTransit` → `Completed` and clears `matched_driver`
+  - Driver: `OnTrip` → `Idle` and clears `matched_rider`
 
 ## Tests
 
@@ -117,6 +129,7 @@ Unit tests exist in each module to confirm behavior:
 - `clock`: events pop in chronological order.
 - `request_inbound`: rider transitions to `WaitingForMatch`.
 - `simple_matching`: rider/driver match and transition.
+- `trip_started`: trip start transitions and completion scheduling.
 - `trip_completed`: rider/driver transition after completion.
 
 ## Running in Docker
@@ -133,6 +146,6 @@ The container runs `cargo test --workspace`.
 
 - Real matching algorithms (bipartite matching / cost matrices).
 - Driver acceptance models and rider conversion.
-- Event scheduling after match (pickup, trip duration, etc.).
+- Event scheduling after match beyond fixed delays (pickup, durations).
 - H3-based movement or routing.
 - Telemetry output / KPIs.

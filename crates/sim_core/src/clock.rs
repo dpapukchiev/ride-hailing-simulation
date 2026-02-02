@@ -6,6 +6,7 @@ use bevy_ecs::prelude::Resource;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum EventKind {
     RequestInbound,
+    TripStarted,
     TripCompleted,
 }
 

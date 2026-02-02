@@ -1,8 +1,10 @@
-use bevy_ecs::prelude::{Entity, Query};
+use bevy_ecs::prelude::{Entity, Query, ResMut};
 
+use crate::clock::{Event, EventKind, SimulationClock};
 use crate::ecs::{Driver, DriverState, Rider, RiderState};
 
 pub fn simple_matching_system(
+    mut clock: ResMut<SimulationClock>,
     mut riders: Query<(Entity, &mut Rider)>,
     mut drivers: Query<(Entity, &mut Driver)>,
 ) {
@@ -27,6 +29,11 @@ pub fn simple_matching_system(
         driver.state = DriverState::Assigned;
         driver.matched_rider = Some(rider_entity);
     }
+
+    clock.schedule(Event {
+        timestamp: clock.now() + 1,
+        kind: EventKind::TripStarted,
+    });
 }
 
 #[cfg(test)]
@@ -37,14 +44,19 @@ mod tests {
     #[test]
     fn matches_waiting_rider_to_idle_driver() {
         let mut world = World::new();
-        let rider_entity = world.spawn(Rider {
-            state: RiderState::WaitingForMatch,
-            matched_driver: None,
-        }).id();
-        let driver_entity = world.spawn(Driver {
-            state: DriverState::Idle,
-            matched_rider: None,
-        }).id();
+        world.insert_resource(SimulationClock::default());
+        let rider_entity = world
+            .spawn(Rider {
+                state: RiderState::WaitingForMatch,
+                matched_driver: None,
+            })
+            .id();
+        let driver_entity = world
+            .spawn(Driver {
+                state: DriverState::Idle,
+                matched_rider: None,
+            })
+            .id();
 
         let mut schedule = Schedule::default();
         schedule.add_systems(simple_matching_system);
@@ -63,5 +75,12 @@ mod tests {
         assert_eq!(driver_state, DriverState::Assigned);
         assert_eq!(matched_driver, Some(driver_entity));
         assert_eq!(matched_rider, Some(rider_entity));
+
+        let next_event = world
+            .resource_mut::<SimulationClock>()
+            .pop_next()
+            .expect("trip started event");
+        assert_eq!(next_event.kind, EventKind::TripStarted);
+        assert_eq!(next_event.timestamp, 1);
     }
 }

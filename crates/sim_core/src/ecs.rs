@@ -5,6 +5,7 @@ pub enum RiderState {
     Requesting,
     WaitingForMatch,
     Matched,
+    InTransit,
     Completed,
 }
 
@@ -18,6 +19,7 @@ pub struct Rider {
 pub enum DriverState {
     Idle,
     Assigned,
+    OnTrip,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]

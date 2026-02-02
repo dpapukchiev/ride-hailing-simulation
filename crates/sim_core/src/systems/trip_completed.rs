@@ -18,14 +18,14 @@ pub fn trip_completed_system(
     }
 
     for mut rider in riders.iter_mut() {
-        if rider.state == RiderState::Matched {
+        if rider.state == RiderState::InTransit {
             rider.state = RiderState::Completed;
             rider.matched_driver = None;
         }
     }
 
     for mut driver in drivers.iter_mut() {
-        if driver.state == DriverState::Assigned {
+        if driver.state == DriverState::OnTrip {
             driver.state = DriverState::Idle;
             driver.matched_rider = None;
         }
@@ -43,14 +43,18 @@ mod tests {
     fn trip_completed_transitions_driver_and_rider() {
         let mut world = World::new();
         world.insert_resource(SimulationClock::default());
-        let rider_entity = world.spawn(Rider {
-            state: RiderState::Matched,
-            matched_driver: None,
-        }).id();
-        let driver_entity = world.spawn(Driver {
-            state: DriverState::Assigned,
-            matched_rider: None,
-        }).id();
+        let rider_entity = world
+            .spawn(Rider {
+                state: RiderState::InTransit,
+                matched_driver: None,
+            })
+            .id();
+        let driver_entity = world
+            .spawn(Driver {
+                state: DriverState::OnTrip,
+                matched_rider: None,
+            })
+            .id();
 
         {
             let mut rider_entity_mut = world.entity_mut(rider_entity);
