@@ -13,7 +13,7 @@ mod end_to_end_tests {
     use bevy_ecs::prelude::{Schedule, World};
 
     use crate::clock::{CurrentEvent, Event, EventKind, EventSubject, SimulationClock};
-    use crate::ecs::{Driver, DriverState, Position, Rider, RiderState};
+    use crate::ecs::{Driver, DriverState, Position, Rider, RiderState, Trip, TripState};
     use crate::systems::{
         driver_decision::driver_decision_system, match_accepted::match_accepted_system,
         movement::movement_system, quote_accepted::quote_accepted_system,
@@ -82,6 +82,13 @@ mod end_to_end_tests {
             schedule.run(&mut world);
         }
 
+        let trip_entity = world
+            .query::<bevy_ecs::prelude::Entity>()
+            .iter(&world)
+            .find(|entity| world.entity(*entity).contains::<Trip>())
+            .expect("trip entity");
+        let trip = world.entity(trip_entity).get::<Trip>().expect("trip");
+
         let rider = world
             .entity(rider_entity)
             .get::<Rider>()
@@ -91,6 +98,9 @@ mod end_to_end_tests {
             .get::<Driver>()
             .expect("driver");
 
+        assert_eq!(trip.state, TripState::Completed);
+        assert_eq!(trip.rider, rider_entity);
+        assert_eq!(trip.driver, driver_entity);
         assert_eq!(rider.state, RiderState::Completed);
         assert_eq!(rider.matched_driver, None);
         assert_eq!(driver.state, DriverState::Idle);
