@@ -11,7 +11,7 @@ pub mod trip_completed;
 mod end_to_end_tests {
     use bevy_ecs::prelude::World;
 
-    use crate::clock::{Event, EventKind, EventSubject, SimulationClock};
+    use crate::clock::{EventKind, EventSubject, SimulationClock, ONE_SEC_MS};
     use crate::ecs::{Driver, DriverState, Position, Rider, RiderState, Trip, TripState};
     use crate::runner::{run_until_empty, simulation_schedule};
     use crate::telemetry::SimTelemetry;
@@ -47,11 +47,7 @@ mod end_to_end_tests {
 
         world
             .resource_mut::<SimulationClock>()
-            .schedule(Event {
-                timestamp: 1,
-                kind: EventKind::RequestInbound,
-                subject: Some(EventSubject::Rider(rider_entity)),
-            });
+            .schedule_at_secs(1, EventKind::RequestInbound, Some(EventSubject::Rider(rider_entity)));
 
         let mut schedule = simulation_schedule();
         let steps = run_until_empty(&mut world, &mut schedule, 1000);
@@ -90,7 +86,7 @@ mod end_to_end_tests {
         assert_eq!(record.rider_entity, rider_entity);
         assert_eq!(record.driver_entity, driver_entity);
         assert_eq!(record.trip_entity, trip_entity);
-        assert!(record.completed_at >= 1, "completed_at should reflect simulation time");
+        assert!(record.completed_at >= ONE_SEC_MS, "completed_at should be in ms (>= 1s)");
         assert!(record.requested_at <= record.matched_at);
         assert!(record.matched_at <= record.pickup_at);
         assert!(record.pickup_at <= record.completed_at);
@@ -150,18 +146,10 @@ mod end_to_end_tests {
 
         world
             .resource_mut::<SimulationClock>()
-            .schedule(Event {
-                timestamp: 1,
-                kind: EventKind::RequestInbound,
-                subject: Some(EventSubject::Rider(rider1)),
-            });
+            .schedule_at_secs(1, EventKind::RequestInbound, Some(EventSubject::Rider(rider1)));
         world
             .resource_mut::<SimulationClock>()
-            .schedule(Event {
-                timestamp: 2,
-                kind: EventKind::RequestInbound,
-                subject: Some(EventSubject::Rider(rider2)),
-            });
+            .schedule_at_secs(2, EventKind::RequestInbound, Some(EventSubject::Rider(rider2)));
 
         let mut schedule = simulation_schedule();
         let steps = run_until_empty(&mut world, &mut schedule, 1000);
@@ -196,7 +184,7 @@ mod end_to_end_tests {
         assert!(riders_drivers.contains(&(rider1, driver1)));
         assert!(riders_drivers.contains(&(rider2, driver2)));
         for record in &telemetry.completed_trips {
-            assert!(record.completed_at >= 1);
+            assert!(record.completed_at >= ONE_SEC_MS);
         }
     }
 }

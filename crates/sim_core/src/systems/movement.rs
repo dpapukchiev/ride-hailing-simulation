@@ -1,13 +1,14 @@
 use bevy_ecs::prelude::{Query, Res, ResMut};
 
-use crate::clock::{CurrentEvent, Event, EventKind, EventSubject, SimulationClock};
+use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock, ONE_MIN_MS, ONE_SEC_MS};
 use crate::ecs::{Driver, DriverState, Position, Trip, TripState};
 
-fn eta_ticks(distance: i32) -> u64 {
+/// ETA in ms: at least 1 second; otherwise distance × 1 min per H3 cell.
+fn eta_ms(distance: i32) -> u64 {
     if distance <= 0 {
-        1
+        ONE_SEC_MS
     } else {
-        distance as u64
+        (distance as u64).saturating_mul(ONE_MIN_MS)
     }
 }
 
@@ -51,17 +52,12 @@ pub fn movement_system(
 
     let distance = driver_pos.0.grid_distance(target_cell).unwrap_or(0);
     if distance <= 0 {
-        let next_timestamp = clock.now() + eta_ticks(0);
         let kind = if is_en_route {
             EventKind::TripStarted
         } else {
             EventKind::TripCompleted
         };
-        clock.schedule(Event {
-            timestamp: next_timestamp,
-            kind,
-            subject: Some(EventSubject::Trip(trip_entity)),
-        });
+        clock.schedule_in_secs(1, kind, Some(EventSubject::Trip(trip_entity)));
         return;
     }
 
@@ -75,24 +71,14 @@ pub fn movement_system(
 
     let remaining = driver_pos.0.grid_distance(target_cell).unwrap_or(0);
     if remaining == 0 {
-        let next_timestamp = clock.now() + eta_ticks(0);
         let kind = if is_en_route {
             EventKind::TripStarted
         } else {
             EventKind::TripCompleted
         };
-        clock.schedule(Event {
-            timestamp: next_timestamp,
-            kind,
-            subject: Some(EventSubject::Trip(trip_entity)),
-        });
+        clock.schedule_in_secs(1, kind, Some(EventSubject::Trip(trip_entity)));
     } else {
-        let next_timestamp = clock.now() + eta_ticks(remaining);
-        clock.schedule(Event {
-            timestamp: next_timestamp,
-            kind: EventKind::MoveStep,
-            subject: Some(EventSubject::Trip(trip_entity)),
-        });
+        clock.schedule_in(eta_ms(remaining), EventKind::MoveStep, Some(EventSubject::Trip(trip_entity)));
     }
 }
 
@@ -100,6 +86,7 @@ pub fn movement_system(
 mod tests {
     use super::*;
     use bevy_ecs::prelude::{Schedule, World};
+    use crate::clock::ONE_SEC_MS;
     use crate::ecs::{Rider, RiderState};
 
     #[test]
@@ -149,11 +136,7 @@ mod tests {
 
         world
             .resource_mut::<SimulationClock>()
-            .schedule(Event {
-                timestamp: 1,
-                kind: EventKind::MoveStep,
-                subject: Some(EventSubject::Trip(trip_entity)),
-            });
+            .schedule_at_secs(1, EventKind::MoveStep, Some(EventSubject::Trip(trip_entity)));
         let event = world
             .resource_mut::<SimulationClock>()
             .pop_next()
@@ -175,14 +158,14 @@ mod tests {
             .pop_next()
             .expect("trip started event");
         assert_eq!(next_event.kind, EventKind::TripStarted);
-        assert_eq!(next_event.timestamp, 2);
+        assert_eq!(next_event.timestamp, 2000);
         assert_eq!(next_event.subject, Some(EventSubject::Trip(trip_entity)));
     }
 
     #[test]
-    fn eta_ticks_scales_with_distance() {
-        assert_eq!(eta_ticks(0), 1);
-        assert_eq!(eta_ticks(1), 1);
-        assert_eq!(eta_ticks(3), 3);
+    fn eta_ms_scales_with_distance() {
+        assert_eq!(eta_ms(0), ONE_SEC_MS);
+        assert_eq!(eta_ms(1), ONE_MIN_MS);
+        assert_eq!(eta_ms(3), 3 * ONE_MIN_MS);
     }
 }

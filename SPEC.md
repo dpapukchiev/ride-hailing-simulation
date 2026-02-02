@@ -21,6 +21,8 @@ This is a "crawl/walk" foundation aligned with the research plan.
 
 ## Human-Readable System Flow
 
+The simulation uses a **millisecond-scale timeline**: all timestamps and `clock.now()` are in ms. Time 0 maps to a real-world datetime via `epoch_ms` (e.g. Unix epoch or a fixed start time), so it is easy to convert simulation time ↔ real datetime. Events are scheduled at specific timestamps (`schedule_at`) or at a delta from current time (`schedule_in`). The timeline advances by popping the next scheduled event; when multiple events share the same ms, they are ordered by `EventKind` for determinism.
+
 The system is a discrete-event loop where **clock progression and event routing
 happen outside ECS systems**:
 
@@ -92,29 +94,24 @@ crates/
 
 ### `sim_core::clock`
 
-- `SimulationClock` is an ECS `Resource` holding:
-  - `now: u64`
-  - `events: BinaryHeap<Event>`
-- `EventKind`:
-  - `RequestInbound`
-  - `QuoteAccepted`
-  - `TryMatch`
-  - `MatchAccepted`
-  - `DriverDecision`
-  - `MoveStep`
-  - `TripStarted`
-  - `TripCompleted`
-- `EventSubject`:
-  - `Rider(Entity)`
-  - `Driver(Entity)`
-  - `Trip(Entity)`
-- `Event`:
-  - `timestamp: u64`
-  - `kind: EventKind`
-  - `subject: Option<EventSubject>`
-- `CurrentEvent` (ECS `Resource`):
-  - Wraps the concrete `Event` currently being handled by the ECS schedule.
-- The heap is a min-heap by timestamp.
+All time is in **milliseconds** (simulation ms). Time 0 maps to a real-world datetime via `epoch_ms`.
+
+- **`SimulationClock`** (ECS `Resource`):
+  - `now: u64` — current simulation time in ms (updated when an event is popped).
+  - `epoch_ms: i64` — real-world ms corresponding to sim time 0 (e.g. from a datetime). Use `with_epoch(epoch_ms)` to set.
+  - `events: BinaryHeap<Event>` — min-heap by timestamp; **same-ms events** are ordered by `EventKind` for determinism.
+- **Scheduling** (callers can use ms, seconds, or minutes):
+  - **Absolute**: `schedule_at(at_ms, ...)`, `schedule_at_secs(at_secs, ...)`, `schedule_at_mins(at_mins, ...)` — schedule at a simulation timestamp.
+  - **Relative**: `schedule_in(delta_ms, ...)`, `schedule_in_secs(delta_secs, ...)`, `schedule_in_mins(delta_mins, ...)` — schedule at `now + delta`.
+  - `schedule(event)` — low-level; `event.timestamp` must be in ms, ≥ now.
+- **Time readout**: `now()` (ms), `now_secs()`, `now_mins()`.
+- **Conversion**:
+  - `sim_to_real_ms(sim_ms) -> i64` = epoch_ms + sim_ms.
+  - `real_to_sim_ms(real_ms) -> Option<u64>`; `None` if real_ms is before the epoch.
+- **Constants**: `ONE_SEC_MS = 1000`, `ONE_MIN_MS = 60_000`.
+- **`Event`**: `timestamp` (u64, ms), `kind`, `subject`.
+- **`CurrentEvent`** (ECS `Resource`): the event currently being handled.
+- **`EventKind`** / **`EventSubject`**: unchanged.
 
 ### `sim_core::ecs`
 
@@ -123,15 +120,13 @@ Components and state enums:
 - `RiderState`: `Requesting`, `Browsing`, `Waiting`, `InTransit`, `Completed`
 - `Rider` component: `{ state, matched_driver, destination: Option<CellIndex>, requested_at: Option<u64> }`
   - `destination`: requested dropoff cell; if `None`, a neighbor of pickup is used when the trip is created.
-  - `requested_at`: simulation time when the rider transitioned to Browsing (set by `request_inbound_system`).
+  - `requested_at`: simulation time (ms) when the rider transitioned to Browsing (set by `request_inbound_system`).
 - `DriverState`: `Idle`, `Evaluating`, `EnRoute`, `OnTrip`, `OffDuty`
 - `Driver` component: `{ state: DriverState, matched_rider: Option<Entity> }`
 - `TripState`: `EnRoute`, `OnTrip`, `Completed`
 - `Trip` component: `{ state, rider, driver, pickup, dropoff, requested_at: u64, matched_at: u64, pickup_at: Option<u64> }`
   - `pickup` / `dropoff`: trip is completed when the driver reaches `dropoff` (not a fixed +1 tick).
-  - `requested_at`: copied from Rider when the trip is created; used for KPIs.
-  - `matched_at`: simulation time when the driver accepted (Trip created).
-  - `pickup_at`: set by `trip_started_system` when the driver reaches pickup.
+  - `requested_at` / `matched_at` / `pickup_at`: simulation time in ms; used for KPIs.
 - `Position` component: `{ CellIndex }` H3 cell position for spatial matching
 
 These are minimal placeholders to validate state transitions via systems.
@@ -156,7 +151,7 @@ duplicating the pop → route → run loop.
 ### `sim_core::telemetry`
 
 - **`SimTelemetry`** (ECS `Resource`, default): holds `completed_trips: Vec<CompletedTripRecord>`.
-- **`CompletedTripRecord`**: `{ trip_entity, rider_entity, driver_entity, completed_at, requested_at, matched_at, pickup_at }` (all timestamps in simulation ticks). Helper methods: **`time_to_match()`** = matched_at − requested_at, **`time_to_pickup()`** = pickup_at − matched_at, **`trip_duration()`** = completed_at − pickup_at.
+- **`CompletedTripRecord`**: `{ trip_entity, rider_entity, driver_entity, completed_at, requested_at, matched_at, pickup_at }` (all timestamps in **simulation ms**). Helper methods: **`time_to_match()`**, **`time_to_pickup()`**, **`trip_duration()`** (all in ms).
 - Insert `SimTelemetry::default()` when building the world to record completed trips; `trip_completed_system` pushes one record per completed trip with timestamps from the Trip and clock.
 
 ### `sim_core::systems::request_inbound`
@@ -221,8 +216,7 @@ System: `movement_system`
     reaches pickup.
   - **OnTrip**: moves the trip’s driver one H3 hop toward `trip.dropoff`. Reschedules
     `MoveStep` if still en route; schedules `TripCompleted` when driver reaches dropoff.
-- Uses a simple ETA helper based on H3 grid distance to pick the next
-  `MoveStep` timestamp.
+- ETA in ms: `eta_ms(distance)` — at least 1 second; otherwise distance × 1 min per H3 cell (`ONE_MIN_MS`).
 
 This is a deterministic, FCFS-style placeholder. No distance or cost logic
 is implemented yet beyond H3 grid distance.

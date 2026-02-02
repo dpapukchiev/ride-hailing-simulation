@@ -1,6 +1,6 @@
 use bevy_ecs::prelude::{Commands, Query, Res, ResMut};
 
-use crate::clock::{CurrentEvent, Event, EventKind, EventSubject, SimulationClock};
+use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
 use crate::ecs::{Driver, DriverState, Position, Rider, Trip, TripState};
 
 fn logit_accepts(score: f64) -> bool {
@@ -73,12 +73,7 @@ pub fn driver_decision_system(
             })
             .id();
 
-        let next_timestamp = clock.now() + 1;
-        clock.schedule(Event {
-            timestamp: next_timestamp,
-            kind: EventKind::MoveStep,
-            subject: Some(EventSubject::Trip(trip_entity)),
-        });
+        clock.schedule_in_secs(1, EventKind::MoveStep, Some(EventSubject::Trip(trip_entity)));
     } else {
         driver.state = DriverState::Idle;
         driver.matched_rider = None;
@@ -117,11 +112,7 @@ mod tests {
             .id();
         world
             .resource_mut::<SimulationClock>()
-            .schedule(Event {
-                timestamp: 1,
-                kind: EventKind::DriverDecision,
-                subject: Some(EventSubject::Driver(driver_entity)),
-            });
+            .schedule_at_secs(1, EventKind::DriverDecision, Some(EventSubject::Driver(driver_entity)));
 
         let event = world
             .resource_mut::<SimulationClock>()
@@ -141,7 +132,7 @@ mod tests {
             .pop_next()
             .expect("move step event");
         assert_eq!(next_event.kind, EventKind::MoveStep);
-        assert_eq!(next_event.timestamp, 2);
+        assert_eq!(next_event.timestamp, 2000);
         let trip_entity = match next_event.subject {
             Some(EventSubject::Trip(trip_entity)) => trip_entity,
             other => panic!("expected trip subject, got {other:?}"),

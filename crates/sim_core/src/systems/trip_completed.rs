@@ -64,7 +64,7 @@ mod tests {
     use super::*;
     use bevy_ecs::prelude::{Schedule, World};
 
-    use crate::clock::{Event, SimulationClock};
+    use crate::clock::SimulationClock;
 
     #[test]
     fn trip_completed_transitions_driver_and_rider() {
@@ -111,11 +111,7 @@ mod tests {
 
         world
             .resource_mut::<SimulationClock>()
-            .schedule(Event {
-                timestamp: 2,
-                kind: EventKind::TripCompleted,
-                subject: Some(EventSubject::Trip(trip_entity)),
-            });
+            .schedule_at_secs(2, EventKind::TripCompleted, Some(EventSubject::Trip(trip_entity)));
 
         let event = world
             .resource_mut::<SimulationClock>()

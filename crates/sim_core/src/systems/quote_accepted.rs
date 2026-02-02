@@ -1,6 +1,6 @@
 use bevy_ecs::prelude::{Query, Res, ResMut};
 
-use crate::clock::{CurrentEvent, Event, EventKind, EventSubject, SimulationClock};
+use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
 use crate::ecs::{Rider, RiderState};
 
 pub fn quote_accepted_system(
@@ -22,20 +22,13 @@ pub fn quote_accepted_system(
         rider.state = RiderState::Waiting;
     }
 
-    let next_timestamp = clock.now() + 1;
-    clock.schedule(Event {
-        timestamp: next_timestamp,
-        kind: EventKind::TryMatch,
-        subject: Some(EventSubject::Rider(rider_entity)),
-    });
+    clock.schedule_in_secs(1, EventKind::TryMatch, Some(EventSubject::Rider(rider_entity)));
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use bevy_ecs::prelude::{Schedule, World};
-
-    use crate::clock::Event;
 
     #[test]
     fn quote_accepted_transitions_rider_state() {
@@ -52,11 +45,7 @@ mod tests {
 
         world
             .resource_mut::<SimulationClock>()
-            .schedule(Event {
-                timestamp: 1,
-                kind: EventKind::QuoteAccepted,
-                subject: Some(EventSubject::Rider(rider_entity)),
-            });
+            .schedule_at_secs(1, EventKind::QuoteAccepted, Some(EventSubject::Rider(rider_entity)));
 
         let event = world
             .resource_mut::<SimulationClock>()
@@ -76,7 +65,7 @@ mod tests {
             .pop_next()
             .expect("try match event");
         assert_eq!(next_event.kind, EventKind::TryMatch);
-        assert_eq!(next_event.timestamp, 2);
+        assert_eq!(next_event.timestamp, 2000);
         assert_eq!(next_event.subject, Some(EventSubject::Rider(rider_entity)));
     }
 }

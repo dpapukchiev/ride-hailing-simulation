@@ -1,6 +1,6 @@
 use bevy_ecs::prelude::{Query, Res, ResMut};
 
-use crate::clock::{CurrentEvent, Event, EventKind, EventSubject, SimulationClock};
+use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
 use crate::ecs::{Rider, RiderState};
 
 pub fn request_inbound_system(
@@ -23,12 +23,7 @@ pub fn request_inbound_system(
         rider.requested_at = Some(clock.now());
     }
 
-    let next_timestamp = clock.now() + 1;
-    clock.schedule(Event {
-        timestamp: next_timestamp,
-        kind: EventKind::QuoteAccepted,
-        subject: Some(EventSubject::Rider(rider_entity)),
-    });
+    clock.schedule_in_secs(1, EventKind::QuoteAccepted, Some(EventSubject::Rider(rider_entity)));
 }
 
 #[cfg(test)]
@@ -36,7 +31,7 @@ mod tests {
     use super::*;
     use bevy_ecs::prelude::{Schedule, World};
 
-    use crate::clock::Event;
+    use crate::clock::ONE_SEC_MS;
 
     #[test]
     fn ecs_system_transitions_rider_state() {
@@ -53,11 +48,7 @@ mod tests {
 
         world
             .resource_mut::<SimulationClock>()
-            .schedule(Event {
-                timestamp: 1,
-                kind: EventKind::RequestInbound,
-                subject: Some(EventSubject::Rider(rider_entity)),
-            });
+            .schedule_at_secs(1, EventKind::RequestInbound, Some(EventSubject::Rider(rider_entity)));
 
         let event = world
             .resource_mut::<SimulationClock>()
@@ -71,14 +62,14 @@ mod tests {
 
         let rider = world.query::<&Rider>().single(&world);
         assert_eq!(rider.state, RiderState::Browsing);
-        assert_eq!(rider.requested_at, Some(1), "requested_at set when transitioning to Browsing");
+        assert_eq!(rider.requested_at, Some(ONE_SEC_MS), "requested_at set when transitioning to Browsing");
 
         let next_event = world
             .resource_mut::<SimulationClock>()
             .pop_next()
             .expect("quote accepted event");
         assert_eq!(next_event.kind, EventKind::QuoteAccepted);
-        assert_eq!(next_event.timestamp, 2);
+        assert_eq!(next_event.timestamp, 2 * ONE_SEC_MS);
         assert_eq!(next_event.subject, Some(EventSubject::Rider(rider_entity)));
     }
 }

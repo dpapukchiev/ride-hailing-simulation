@@ -1,6 +1,6 @@
 use bevy_ecs::prelude::{Res, ResMut};
 
-use crate::clock::{CurrentEvent, Event, EventKind, EventSubject, SimulationClock};
+use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
 
 pub fn match_accepted_system(
     mut clock: ResMut<SimulationClock>,
@@ -14,12 +14,7 @@ pub fn match_accepted_system(
         return;
     };
 
-    let next_timestamp = clock.now() + 1;
-    clock.schedule(Event {
-        timestamp: next_timestamp,
-        kind: EventKind::DriverDecision,
-        subject: Some(EventSubject::Driver(driver_entity)),
-    });
+    clock.schedule_in_secs(1, EventKind::DriverDecision, Some(EventSubject::Driver(driver_entity)));
 }
 
 #[cfg(test)]
@@ -27,7 +22,6 @@ mod tests {
     use super::*;
     use bevy_ecs::prelude::{Schedule, World};
 
-    use crate::clock::Event;
     use crate::ecs::{Driver, DriverState};
 
     #[test]
@@ -43,11 +37,7 @@ mod tests {
 
         world
             .resource_mut::<SimulationClock>()
-            .schedule(Event {
-                timestamp: 2,
-                kind: EventKind::MatchAccepted,
-                subject: Some(EventSubject::Driver(driver_entity)),
-            });
+            .schedule_at_secs(2, EventKind::MatchAccepted, Some(EventSubject::Driver(driver_entity)));
 
         let event = world
             .resource_mut::<SimulationClock>()
@@ -64,7 +54,7 @@ mod tests {
             .pop_next()
             .expect("driver decision event");
         assert_eq!(next_event.kind, EventKind::DriverDecision);
-        assert_eq!(next_event.timestamp, 3);
+        assert_eq!(next_event.timestamp, 3000);
         assert_eq!(next_event.subject, Some(EventSubject::Driver(driver_entity)));
     }
 }

@@ -1,6 +1,6 @@
 use bevy_ecs::prelude::{Query, Res, ResMut};
 
-use crate::clock::{CurrentEvent, Event, EventKind, EventSubject, SimulationClock};
+use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
 use crate::ecs::{Driver, DriverState, Position, Rider, RiderState, Trip, TripState};
 
 pub fn trip_started_system(
@@ -64,12 +64,7 @@ pub fn trip_started_system(
     }
 
     // Start moving driver toward dropoff; completion is scheduled by movement when driver arrives.
-    let next_timestamp = clock.now() + 1;
-    clock.schedule(Event {
-        timestamp: next_timestamp,
-        kind: EventKind::MoveStep,
-        subject: Some(EventSubject::Trip(trip_entity)),
-    });
+    clock.schedule_in_secs(1, EventKind::MoveStep, Some(EventSubject::Trip(trip_entity)));
 }
 
 #[cfg(test)]
@@ -123,11 +118,7 @@ mod tests {
 
         world
             .resource_mut::<SimulationClock>()
-            .schedule(Event {
-                timestamp: 3,
-                kind: EventKind::TripStarted,
-                subject: Some(EventSubject::Trip(trip_entity)),
-            });
+            .schedule_at_secs(3, EventKind::TripStarted, Some(EventSubject::Trip(trip_entity)));
 
         let event = world
             .resource_mut::<SimulationClock>()
@@ -158,7 +149,7 @@ mod tests {
             .pop_next()
             .expect("move step toward dropoff");
         assert_eq!(next_event.kind, EventKind::MoveStep);
-        assert_eq!(next_event.timestamp, 4);
+        assert_eq!(next_event.timestamp, 4000);
         assert_eq!(next_event.subject, Some(EventSubject::Trip(trip_entity)));
     }
 }

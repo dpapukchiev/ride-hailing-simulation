@@ -1,6 +1,6 @@
 use bevy_ecs::prelude::{Entity, Query, Res, ResMut};
 
-use crate::clock::{CurrentEvent, Event, EventKind, EventSubject, SimulationClock};
+use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
 use crate::ecs::{Driver, DriverState, Position, Rider, RiderState};
 
 pub fn simple_matching_system(
@@ -45,12 +45,7 @@ pub fn simple_matching_system(
         driver.matched_rider = Some(rider_entity);
     }
 
-    let next_timestamp = clock.now() + 1;
-    clock.schedule(Event {
-        timestamp: next_timestamp,
-        kind: EventKind::MatchAccepted,
-        subject: Some(EventSubject::Driver(driver_entity)),
-    });
+    clock.schedule_in_secs(1, EventKind::MatchAccepted, Some(EventSubject::Driver(driver_entity)));
 }
 
 #[cfg(test)]
@@ -86,11 +81,7 @@ mod tests {
 
         world
             .resource_mut::<SimulationClock>()
-            .schedule(Event {
-                timestamp: 0,
-                kind: EventKind::TryMatch,
-                subject: Some(EventSubject::Rider(rider_entity)),
-            });
+            .schedule_at_secs(0, EventKind::TryMatch, Some(EventSubject::Rider(rider_entity)));
         let event = world
             .resource_mut::<SimulationClock>()
             .pop_next()
@@ -120,7 +111,7 @@ mod tests {
             .pop_next()
             .expect("trip started event");
         assert_eq!(next_event.kind, EventKind::MatchAccepted);
-        assert_eq!(next_event.timestamp, 1);
+        assert_eq!(next_event.timestamp, crate::clock::ONE_SEC_MS);
         assert_eq!(next_event.subject, Some(EventSubject::Driver(driver_entity)));
     }
 }
