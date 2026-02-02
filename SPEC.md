@@ -216,6 +216,9 @@ Unit tests exist in each module to confirm behavior:
 - `movement`: driver moves toward rider and schedules trip start.
 - `trip_started`: trip start transitions and completion scheduling.
 - `trip_completed`: rider/driver transition after completion.
+- `systems (end-to-end)`: simulates one full ride end-to-end by running a
+  runner loop (pop clock → insert `CurrentEvent` → run schedule) until the event
+  queue is empty, asserting the rider ends `Completed` and the driver ends `Idle`.
 
 All system tests now emulate the runner: they pop the next event from the clock,
 insert it as `CurrentEvent`, then run the ECS schedule.
