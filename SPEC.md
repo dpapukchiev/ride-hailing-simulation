@@ -14,6 +14,8 @@ minimal ECS-based agent model. It currently supports:
 - ECS components for riders and drivers, including pairing links.
 - Simple, deterministic systems for request intake, matching, and trip
   completion.
+- A **runner API** that advances the clock and routes events (pop → insert
+  `CurrentEvent` → run schedule).
 
 This is a "crawl/walk" foundation aligned with the research plan.
 
@@ -56,8 +58,9 @@ crates/
     src/
       clock.rs
       ecs.rs
-      spatial.rs
       lib.rs
+      runner.rs
+      spatial.rs
       systems/
         mod.rs
         request_inbound.rs
@@ -125,6 +128,23 @@ Components and state enums:
 - `Position` component: `{ CellIndex }` H3 cell position for spatial matching
 
 These are minimal placeholders to validate state transitions via systems.
+
+### `sim_core::runner`
+
+Clock progression and event routing are implemented here (outside systems):
+
+- **`run_next_event(world, schedule)`**: Pops the next event from `SimulationClock`,
+  inserts it as `CurrentEvent`, runs the schedule. Returns `true` if an event was
+  processed, `false` if the clock was empty.
+- **`run_until_empty(world, schedule, max_steps)`**: Repeatedly calls
+  `run_next_event` until the event queue is empty or `max_steps` is reached.
+  Returns the number of steps executed.
+- **`simulation_schedule()`**: Builds the default schedule with all event-reacting
+  systems plus `apply_deferred` so that spawned entities (e.g. `Trip`) are
+  applied before the next step.
+
+Callers (tests or a binary) use the runner to drive the sim without
+duplicating the pop → route → run loop.
 
 ### `sim_core::systems::request_inbound`
 
@@ -227,12 +247,17 @@ Unit tests exist in each module to confirm behavior:
 - `movement`: driver moves toward rider and schedules trip start.
 - `trip_started`: trip start transitions and completion scheduling.
 - `trip_completed`: rider/driver transition after completion.
-- `systems (end-to-end)`: simulates one full ride end-to-end by running a
-  runner loop (pop clock → insert `CurrentEvent` → run schedule) until the event
-  queue is empty, asserting the rider ends `Completed` and the driver ends `Idle`.
+- **End-to-end (single ride)**: Uses `sim_core::runner::run_until_empty` with
+  `simulation_schedule()`. Seeds one
+  `RequestInbound` (rider), runs until the clock is empty, then asserts one
+  `Trip` in `Completed`, rider `Completed`, driver `Idle`.
+- **End-to-end (concurrent trips)**: Seeds two riders and two drivers (same H3
+  cell), schedules `RequestInbound` for rider1 at t=1 and rider2 at t=2, runs
+  until empty. Asserts two `Trip` entities in `Completed`, both riders
+  `Completed`, both drivers `Idle`.
 
-All system tests now emulate the runner: they pop the next event from the clock,
-insert it as `CurrentEvent`, then run the ECS schedule.
+All per-system unit tests emulate the runner by popping one event, inserting
+`CurrentEvent`, then running the ECS schedule.
 
 ## Known Gaps (Not Implemented Yet)
 
