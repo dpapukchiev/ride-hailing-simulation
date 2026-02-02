@@ -14,7 +14,6 @@ minimal ECS-based agent model. It currently supports:
 - ECS components for riders and drivers, including pairing links.
 - Simple, deterministic systems for request intake, matching, and trip
   completion.
-- Docker-based build and test execution.
 
 This is a "crawl/walk" foundation aligned with the research plan.
 
@@ -25,17 +24,15 @@ the `SimulationClock`. Each event triggers an ECS system that updates rider and
 driver states. Riders start by requesting a trip, browse a quote, then wait for
 matching. Drivers start idle, evaluate a match offer, drive en route to pickup,
 and then move into an on-trip state. When the trip completes, the rider is
-marked completed and the driver returns to idle. Throughout this flow, riders
-and drivers store links to each other so the pairing is explicit while a trip
-is in progress.
+marked completed and the driver returns to idle. Matching is currently limited
+to riders and drivers in the same H3 cell. Throughout this flow, riders and
+drivers store links to each other so the pairing is explicit while a trip is in
+progress.
 
 ## Workspace Layout
 
 ```
 Cargo.toml
-Dockerfile
-docker-run.sh
-.dockerignore
 crates/
   sim_core/
     Cargo.toml
@@ -94,6 +91,7 @@ Components and state enums:
 - `Rider` component: `{ state: RiderState, matched_driver: Option<Entity> }`
 - `DriverState`: `Idle`, `Evaluating`, `EnRoute`, `OnTrip`, `OffDuty`
 - `Driver` component: `{ state: DriverState, matched_rider: Option<Entity> }`
+- `Position` component: `{ CellIndex }` H3 cell position for spatial matching
 
 These are minimal placeholders to validate state transitions via systems.
 
@@ -118,7 +116,8 @@ System: `quote_accepted_system`
 
 System: `simple_matching_system`
 
-- Finds the first rider in `Waiting` and the first driver in `Idle`.
+- Finds the first rider in `Waiting` and the first driver in `Idle` within the
+  same H3 cell.
 - If both exist, transitions:
   - Rider: `Waiting` stays `Waiting` and stores `matched_driver`
   - Driver: `Idle` → `Evaluating` and stores `matched_rider`
@@ -167,16 +166,6 @@ Unit tests exist in each module to confirm behavior:
 - `match_accepted`: driver transitions to `EnRoute`.
 - `trip_started`: trip start transitions and completion scheduling.
 - `trip_completed`: rider/driver transition after completion.
-
-## Running in Docker
-
-Build and run tests via the provided script:
-
-```
-sh docker-run.sh
-```
-
-The container runs `cargo test --workspace`.
 
 ## Known Gaps (Not Implemented Yet)
 

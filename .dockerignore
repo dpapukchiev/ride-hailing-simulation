@@ -1,7 +1,0 @@
-target
-.git
-.gitignore
-.cursor
-.vscode
-research
-**/*.md

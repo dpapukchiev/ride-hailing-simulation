@@ -1,31 +1,35 @@
 use bevy_ecs::prelude::{Entity, Query, ResMut};
 
 use crate::clock::{Event, EventKind, SimulationClock};
-use crate::ecs::{Driver, DriverState, Rider, RiderState};
+use crate::ecs::{Driver, DriverState, Position, Rider, RiderState};
 
 pub fn simple_matching_system(
     mut clock: ResMut<SimulationClock>,
-    mut riders: Query<(Entity, &mut Rider)>,
-    mut drivers: Query<(Entity, &mut Driver)>,
+    mut riders: Query<(Entity, &mut Rider, &Position)>,
+    mut drivers: Query<(Entity, &mut Driver, &Position)>,
 ) {
-    let rider_entity = riders
+    let rider = riders
         .iter()
-        .find(|(_, rider)| rider.state == RiderState::Waiting)
-        .map(|(entity, _)| entity);
+        .find(|(_, rider, _)| rider.state == RiderState::Waiting)
+        .map(|(entity, _, position)| (entity, position.0));
+    let rider_position = rider.map(|(_, position)| position);
     let driver_entity = drivers
         .iter()
-        .find(|(_, driver)| driver.state == DriverState::Idle)
-        .map(|(entity, _)| entity);
+        .find(|(_, driver, position)| {
+            driver.state == DriverState::Idle
+                && rider_position.map(|rider_pos| rider_pos == position.0).unwrap_or(false)
+        })
+        .map(|(entity, _, _)| entity);
 
-    let (Some(rider_entity), Some(driver_entity)) = (rider_entity, driver_entity) else {
+    let (Some((rider_entity, _)), Some(driver_entity)) = (rider, driver_entity) else {
         return;
     };
 
-    if let Ok((_, mut rider)) = riders.get_mut(rider_entity) {
+    if let Ok((_, mut rider, _)) = riders.get_mut(rider_entity) {
         rider.state = RiderState::Waiting;
         rider.matched_driver = Some(driver_entity);
     }
-    if let Ok((_, mut driver)) = drivers.get_mut(driver_entity) {
+    if let Ok((_, mut driver, _)) = drivers.get_mut(driver_entity) {
         driver.state = DriverState::Evaluating;
         driver.matched_rider = Some(rider_entity);
     }
@@ -46,17 +50,24 @@ mod tests {
     fn matches_waiting_rider_to_idle_driver() {
         let mut world = World::new();
         world.insert_resource(SimulationClock::default());
+        let cell = h3o::CellIndex::try_from(0x8a1fb46622dffff).expect("cell");
         let rider_entity = world
-            .spawn(Rider {
-                state: RiderState::Waiting,
-                matched_driver: None,
-            })
+            .spawn((
+                Rider {
+                    state: RiderState::Waiting,
+                    matched_driver: None,
+                },
+                Position(cell),
+            ))
             .id();
         let driver_entity = world
-            .spawn(Driver {
-                state: DriverState::Idle,
-                matched_rider: None,
-            })
+            .spawn((
+                Driver {
+                    state: DriverState::Idle,
+                    matched_rider: None,
+                },
+                Position(cell),
+            ))
             .id();
 
         let mut schedule = Schedule::default();

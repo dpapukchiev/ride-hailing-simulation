@@ -1,0 +1,7 @@
+target/
+.cargo/
+.env
+.DS_Store
+*.log
+*.tmp
+*.swp
