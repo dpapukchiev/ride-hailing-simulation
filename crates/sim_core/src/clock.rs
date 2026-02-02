@@ -1,6 +1,8 @@
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
+use bevy_ecs::prelude::Resource;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum EventKind {
     RequestInbound,
@@ -28,7 +30,7 @@ impl PartialOrd for Event {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Resource)]
 pub struct SimulationClock {
     now: u64,
     events: BinaryHeap<Event>,
