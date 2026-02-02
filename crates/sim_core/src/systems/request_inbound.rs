@@ -18,7 +18,7 @@ pub fn request_inbound_system(
 
     for mut rider in riders.iter_mut() {
         if rider.state == RiderState::Requesting {
-            rider.state = RiderState::Waiting;
+            rider.state = RiderState::WaitingForMatch;
         }
     }
 }
@@ -50,6 +50,6 @@ mod tests {
         schedule.run(&mut world);
 
         let rider = world.query::<&Rider>().single(&world);
-        assert_eq!(rider.state, RiderState::Waiting);
+        assert_eq!(rider.state, RiderState::WaitingForMatch);
     }
 }
