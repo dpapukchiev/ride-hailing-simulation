@@ -20,12 +20,14 @@ pub fn trip_completed_system(
     for mut rider in riders.iter_mut() {
         if rider.state == RiderState::Matched {
             rider.state = RiderState::Completed;
+            rider.matched_driver = None;
         }
     }
 
     for mut driver in drivers.iter_mut() {
         if driver.state == DriverState::Assigned {
             driver.state = DriverState::Idle;
+            driver.matched_rider = None;
         }
     }
 }
@@ -41,12 +43,25 @@ mod tests {
     fn trip_completed_transitions_driver_and_rider() {
         let mut world = World::new();
         world.insert_resource(SimulationClock::default());
-        world.spawn(Rider {
+        let rider_entity = world.spawn(Rider {
             state: RiderState::Matched,
-        });
-        world.spawn(Driver {
+            matched_driver: None,
+        }).id();
+        let driver_entity = world.spawn(Driver {
             state: DriverState::Assigned,
-        });
+            matched_rider: None,
+        }).id();
+
+        {
+            let mut rider_entity_mut = world.entity_mut(rider_entity);
+            let mut rider = rider_entity_mut.get_mut::<Rider>().expect("rider");
+            rider.matched_driver = Some(driver_entity);
+        }
+        {
+            let mut driver_entity_mut = world.entity_mut(driver_entity);
+            let mut driver = driver_entity_mut.get_mut::<Driver>().expect("driver");
+            driver.matched_rider = Some(rider_entity);
+        }
 
         world
             .resource_mut::<SimulationClock>()
@@ -59,16 +74,18 @@ mod tests {
         schedule.add_systems(trip_completed_system);
         schedule.run(&mut world);
 
-        let rider_state = {
+        let (rider_state, matched_driver) = {
             let rider = world.query::<&Rider>().single(&world);
-            rider.state
+            (rider.state, rider.matched_driver)
         };
-        let driver_state = {
+        let (driver_state, matched_rider) = {
             let driver = world.query::<&Driver>().single(&world);
-            driver.state
+            (driver.state, driver.matched_rider)
         };
 
         assert_eq!(rider_state, RiderState::Completed);
         assert_eq!(driver_state, DriverState::Idle);
+        assert_eq!(matched_driver, None);
+        assert_eq!(matched_rider, None);
     }
 }

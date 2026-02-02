@@ -36,6 +36,7 @@ mod tests {
         world.insert_resource(SimulationClock::default());
         world.spawn(Rider {
             state: RiderState::Requesting,
+            matched_driver: None,
         });
 
         world

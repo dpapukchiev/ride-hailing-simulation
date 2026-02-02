@@ -11,7 +11,7 @@ minimal ECS-based agent model. It currently supports:
 
 - A H3-based spatial index wrapper.
 - A binary-heap simulation clock with discrete events.
-- ECS components for riders and drivers.
+- ECS components for riders and drivers, including pairing links.
 - Simple, deterministic systems for request intake, matching, and trip
   completion.
 - Docker-based build and test execution.
@@ -74,9 +74,9 @@ crates/
 Components and state enums:
 
 - `RiderState`: `Requesting`, `WaitingForMatch`, `Matched`, `Completed`
-- `Rider` component: `{ state: RiderState }`
+- `Rider` component: `{ state: RiderState, matched_driver: Option<Entity> }`
 - `DriverState`: `Idle`, `Assigned`
-- `Driver` component: `{ state: DriverState }`
+- `Driver` component: `{ state: DriverState, matched_rider: Option<Entity> }`
 
 These are minimal placeholders to validate state transitions via systems.
 
@@ -94,8 +94,8 @@ System: `simple_matching_system`
 
 - Finds the first rider in `WaitingForMatch` and the first driver in `Idle`.
 - If both exist, transitions:
-  - Rider: `WaitingForMatch` → `Matched`
-  - Driver: `Idle` → `Assigned`
+  - Rider: `WaitingForMatch` → `Matched` and stores `matched_driver`
+  - Driver: `Idle` → `Assigned` and stores `matched_rider`
 
 This is a deterministic, FCFS-style placeholder. No distance or cost logic
 is implemented yet.
@@ -106,8 +106,8 @@ System: `trip_completed_system`
 
 - Pops the next event from `SimulationClock`.
 - If `EventKind::TripCompleted`, transitions:
-  - Rider: `Matched` → `Completed`
-  - Driver: `Assigned` → `Idle`
+  - Rider: `Matched` → `Completed` and clears `matched_driver`
+  - Driver: `Assigned` → `Idle` and clears `matched_rider`
 
 ## Tests
 

@@ -21,9 +21,11 @@ pub fn simple_matching_system(
 
     if let Ok((_, mut rider)) = riders.get_mut(rider_entity) {
         rider.state = RiderState::Matched;
+        rider.matched_driver = Some(driver_entity);
     }
     if let Ok((_, mut driver)) = drivers.get_mut(driver_entity) {
         driver.state = DriverState::Assigned;
+        driver.matched_rider = Some(rider_entity);
     }
 }
 
@@ -35,27 +37,31 @@ mod tests {
     #[test]
     fn matches_waiting_rider_to_idle_driver() {
         let mut world = World::new();
-        world.spawn(Rider {
+        let rider_entity = world.spawn(Rider {
             state: RiderState::WaitingForMatch,
-        });
-        world.spawn(Driver {
+            matched_driver: None,
+        }).id();
+        let driver_entity = world.spawn(Driver {
             state: DriverState::Idle,
-        });
+            matched_rider: None,
+        }).id();
 
         let mut schedule = Schedule::default();
         schedule.add_systems(simple_matching_system);
         schedule.run(&mut world);
 
-        let rider_state = {
+        let (rider_state, matched_driver) = {
             let rider = world.query::<&Rider>().single(&world);
-            rider.state
+            (rider.state, rider.matched_driver)
         };
-        let driver_state = {
+        let (driver_state, matched_rider) = {
             let driver = world.query::<&Driver>().single(&world);
-            driver.state
+            (driver.state, driver.matched_rider)
         };
 
         assert_eq!(rider_state, RiderState::Matched);
         assert_eq!(driver_state, DriverState::Assigned);
+        assert_eq!(matched_driver, Some(driver_entity));
+        assert_eq!(matched_rider, Some(rider_entity));
     }
 }

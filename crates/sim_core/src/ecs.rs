@@ -1,4 +1,4 @@
-use bevy_ecs::prelude::Component;
+use bevy_ecs::prelude::{Component, Entity};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RiderState {
@@ -11,6 +11,7 @@ pub enum RiderState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]
 pub struct Rider {
     pub state: RiderState,
+    pub matched_driver: Option<Entity>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -22,4 +23,5 @@ pub enum DriverState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]
 pub struct Driver {
     pub state: DriverState,
+    pub matched_rider: Option<Entity>,
 }
