@@ -5,6 +5,7 @@ pub enum RiderState {
     Requesting,
     WaitingForMatch,
     Matched,
+    Completed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]
