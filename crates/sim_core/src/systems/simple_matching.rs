@@ -2,10 +2,12 @@ use bevy_ecs::prelude::{Entity, Query, Res, ResMut};
 
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
 use crate::ecs::{Driver, DriverState, Position, Rider, RiderState};
+use crate::scenario::MatchRadius;
 
 pub fn simple_matching_system(
     mut clock: ResMut<SimulationClock>,
     event: Res<CurrentEvent>,
+    match_radius: Option<Res<MatchRadius>>,
     mut riders: Query<(Entity, &mut Rider, &Position)>,
     mut drivers: Query<(Entity, &mut Driver, &Position)>,
 ) {
@@ -27,10 +29,16 @@ pub fn simple_matching_system(
         position.0
     };
 
+    let radius = match_radius.as_deref().map(|r| r.0).unwrap_or(0);
+
     let driver_entity = drivers
         .iter()
         .find(|(_, driver, position)| {
-            driver.state == DriverState::Idle && position.0 == rider_position
+            if driver.state != DriverState::Idle {
+                return false;
+            }
+            let dist = rider_position.grid_distance(position.0).unwrap_or(i32::MAX);
+            dist >= 0 && dist <= radius as i32
         })
         .map(|(entity, _, _)| entity);
     let Some(driver_entity) = driver_entity else {

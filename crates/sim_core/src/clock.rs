@@ -208,6 +208,11 @@ impl SimulationClock {
     pub fn is_empty(&self) -> bool {
         self.events.is_empty()
     }
+
+    /// Number of events still in the queue (for tests and scenario validation).
+    pub fn pending_event_count(&self) -> usize {
+        self.events.len()
+    }
 }
 
 #[cfg(test)]

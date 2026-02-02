@@ -16,6 +16,9 @@ minimal ECS-based agent model. It currently supports:
   completion.
 - A **runner API** that advances the clock and routes events (pop → insert
   `CurrentEvent` → run schedule).
+- A **scenario** module that spawns riders and drivers with random positions
+  (H3 cells in a bounding box) and random request times, plus configurable
+  match radius and trip duration (min/max H3 cells).
 
 This is a "crawl/walk" foundation aligned with the research plan.
 
@@ -45,10 +48,12 @@ completion).
 In the current flow, riders start by requesting a trip, browse a quote, then
 wait for matching. Drivers start idle, evaluate a match offer, drive en route to
 pickup, and then move into an on-trip state. When the trip completes, the rider
-is marked completed and the driver returns to idle. Matching is currently
-limited to riders and drivers in the same H3 cell. Throughout this flow, riders
-and drivers store links to each other so the pairing is explicit while a trip is
-in progress.
+is marked completed and the driver returns to idle. Matching uses a configurable
+**match radius** (H3 grid distance): 0 = same cell only; a larger radius allows
+matching to idle drivers within that many cells. Trip length is configurable via
+min/max H3 cells from pickup to dropoff (movement uses 1 min per cell, so e.g.
+5–60 cells ≈ 5 min–1h). Throughout this flow, riders and drivers store links
+to each other so the pairing is explicit while a trip is in progress.
 
 ## Workspace Layout
 
@@ -62,6 +67,7 @@ crates/
       ecs.rs
       lib.rs
       runner.rs
+      scenario.rs
       spatial.rs
       telemetry.rs
       systems/
@@ -74,6 +80,8 @@ crates/
         movement.rs
         trip_started.rs
         trip_completed.rs
+    examples/
+      scenario_run.rs
 ```
 
 ## Dependencies
@@ -82,6 +90,7 @@ crates/
 
 - `h3o = "0.8"` for H3 spatial indexing (stable toolchain compatible).
 - `bevy_ecs = "0.13"` for ECS world, components, and systems.
+- `rand = "0.8"` for scenario randomisation (positions, request times, destinations).
 
 ## Core Modules
 
@@ -112,6 +121,7 @@ All time is in **milliseconds** (simulation ms). Time 0 maps to a real-world dat
 - **`Event`**: `timestamp` (u64, ms), `kind`, `subject`.
 - **`CurrentEvent`** (ECS `Resource`): the event currently being handled.
 - **`EventKind`** / **`EventSubject`**: unchanged.
+- **`pending_event_count()`**: returns the number of events in the queue (for tests and scenario validation).
 
 ### `sim_core::ecs`
 
@@ -148,6 +158,23 @@ Clock progression and event routing are implemented here (outside systems):
 Callers (tests or a binary) use the runner to drive the sim without
 duplicating the pop → route → run loop.
 
+### `sim_core::scenario`
+
+Scenario setup: spawn riders and drivers with random positions and request times.
+
+- **`MatchRadius`** (ECS `Resource`, default 0): max H3 grid distance for matching rider to driver. 0 = same cell only; larger values allow matching to idle drivers within that many cells. Inserted by `build_scenario` from `ScenarioParams::match_radius`.
+- **`ScenarioParams`**: configurable scenario parameters:
+  - `num_riders`, `num_drivers`: counts.
+  - `seed`: optional RNG seed for reproducibility.
+  - `lat_min`, `lat_max`, `lng_min`, `lng_max`: bounding box (degrees) for random positions; default San Francisco Bay Area.
+  - `request_window_ms`: rider `RequestInbound` times are uniform in `[0, request_window_ms]`.
+  - `match_radius`: max H3 grid distance for matching (0 = same cell only).
+  - `min_trip_cells`, `max_trip_cells`: trip length in H3 cells; rider destinations are chosen at random distance in this range from pickup. Movement uses 1 min per cell (e.g. 5–60 ≈ 5 min–1h).
+  - Builders: `with_seed(seed)`, `with_request_window_hours(hours)`, `with_match_radius(radius)`, `with_trip_duration_cells(min, max)`.
+- **`build_scenario(world, params)`**: inserts `SimulationClock`, `SimTelemetry`, `MatchRadius`; spawns riders (with random `Position` and optional `destination` in `[min_trip_cells, max_trip_cells]` from pickup) and drivers (random `Position`); schedules one `RequestInbound` per rider at a random sim time in `[0, request_window_ms]`.
+
+Large scenarios (e.g. 500 riders, 100 drivers) are run via the **example** only, not in automated tests.
+
 ### `sim_core::telemetry`
 
 - **`SimTelemetry`** (ECS `Resource`, default): holds `completed_trips: Vec<CompletedTripRecord>`.
@@ -178,7 +205,7 @@ System: `simple_matching_system`
 
 - Reacts to `CurrentEvent`.
 - On `EventKind::TryMatch` with subject `Rider(rider_entity)`:
-  - If that rider is `Waiting`, finds an `Idle` driver in the same H3 cell.
+  - If that rider is `Waiting`, finds an `Idle` driver within H3 grid distance ≤ `MatchRadius` (optional resource; if absent, 0 = same cell only).
   - If both exist:
     - Rider stores `matched_driver = Some(driver_entity)`
     - Driver: `Idle` → `Evaluating` and stores `matched_rider = Some(rider_entity)`
@@ -270,9 +297,21 @@ Unit tests exist in each module to confirm behavior:
   (same cell), `RequestInbound` at t=1 and t=2. Runs until empty. Asserts: two
   `Trip` entities in `Completed`, both riders `Completed`, both drivers `Idle`;
   `SimTelemetry.completed_trips.len() == 2`.
+- **Scenario**: `build_scenario` with 10 riders, 3 drivers, seed 42; asserts
+  rider/driver counts, `pending_event_count() == 10`. Large scenarios (e.g.
+  500 riders, 100 drivers) are only in the example, not in automated tests.
 
 All per-system unit tests emulate the runner by popping one event, inserting
 `CurrentEvent`, then running the ECS schedule.
+
+## Example
+
+- **`scenario_run`** (`cargo run -p sim_core --example scenario_run`): Builds a
+  scenario with configurable rider/driver counts (default 500 / 100), 4h request
+  window, match radius 5, trip duration 5–60 cells. Runs until the event queue
+  is empty (up to 2M steps) and prints steps executed, simulation time, completed
+  trip count, and up to 100 sample completed trips (time_to_match, time_to_pickup,
+  trip_duration, completed_at in seconds).
 
 ## Known Gaps (Not Implemented Yet)
 
