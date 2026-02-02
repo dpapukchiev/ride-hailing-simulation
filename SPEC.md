@@ -48,6 +48,7 @@ crates/
         simple_matching.rs
         match_accepted.rs
         driver_decision.rs
+        movement.rs
         trip_started.rs
         trip_completed.rs
 ```
@@ -78,6 +79,7 @@ crates/
   - `QuoteAccepted`
   - `MatchAccepted`
   - `DriverDecision`
+  - `MoveStep`
   - `TripStarted`
   - `TripCompleted`
 - `Event`:
@@ -140,11 +142,20 @@ System: `driver_decision_system`
 
 - Pops the next event from `SimulationClock`.
 - If `EventKind::DriverDecision`, applies a logit accept rule:
-  - Accept: `DriverState::Evaluating` → `EnRoute` and schedules `TripStarted`.
+  - Accept: `DriverState::Evaluating` → `EnRoute` and schedules `MoveStep`.
   - Reject: `DriverState::Evaluating` → `Idle` and clears `matched_rider`.
 
+### `sim_core::systems::movement`
+
+System: `movement_system`
+
+- Pops the next event from `SimulationClock`.
+- If `EventKind::MoveStep`, moves `EnRoute` drivers one H3 hop toward their
+  matched rider and reschedules `MoveStep` if still en route.
+- Schedules `TripStarted` when driver reaches the rider cell.
+
 This is a deterministic, FCFS-style placeholder. No distance or cost logic
-is implemented yet.
+is implemented yet beyond H3 grid distance.
 
 ### `sim_core::systems::trip_started`
 
@@ -152,8 +163,8 @@ System: `trip_started_system`
 
 - Pops the next event from `SimulationClock`.
 - If `EventKind::TripStarted`, transitions:
-  - Rider: `Waiting` → `InTransit`
-  - Driver: `EnRoute` → `OnTrip`
+  - Rider: `Waiting` → `InTransit` when matched driver is co-located
+  - Driver: `EnRoute` → `OnTrip` when matched rider is co-located
 - Schedules `TripCompleted` at `clock.now() + 1`.
 
 ### `sim_core::systems::trip_completed`
@@ -176,7 +187,7 @@ Unit tests exist in each module to confirm behavior:
 - `simple_matching`: rider/driver match and transition.
 - `match_accepted`: driver decision scheduled.
 - `driver_decision`: driver accept/reject decision.
-- `driver_decision`: driver accept/reject decision.
+- `movement`: driver moves toward rider and schedules trip start.
 - `trip_started`: trip start transitions and completion scheduling.
 - `trip_completed`: rider/driver transition after completion.
 

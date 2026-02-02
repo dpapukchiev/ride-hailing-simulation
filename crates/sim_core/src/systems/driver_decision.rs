@@ -28,7 +28,7 @@ pub fn driver_decision_system(
                 let next_timestamp = clock.now() + 1;
                 clock.schedule(Event {
                     timestamp: next_timestamp,
-                    kind: EventKind::TripStarted,
+                    kind: EventKind::MoveStep,
                 });
             } else {
                 driver.state = DriverState::Idle;
@@ -68,8 +68,8 @@ mod tests {
         let next_event = world
             .resource_mut::<SimulationClock>()
             .pop_next()
-            .expect("trip started event");
-        assert_eq!(next_event.kind, EventKind::TripStarted);
+            .expect("move step event");
+        assert_eq!(next_event.kind, EventKind::MoveStep);
         assert_eq!(next_event.timestamp, 2);
     }
 }

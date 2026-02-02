@@ -9,6 +9,7 @@ pub enum EventKind {
     QuoteAccepted,
     MatchAccepted,
     DriverDecision,
+    MoveStep,
     TripStarted,
     TripCompleted,
 }
