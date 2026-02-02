@@ -153,6 +153,8 @@ System: `movement_system`
 - If `EventKind::MoveStep`, moves `EnRoute` drivers one H3 hop toward their
   matched rider and reschedules `MoveStep` if still en route.
 - Schedules `TripStarted` when driver reaches the rider cell.
+- Uses a simple ETA helper based on H3 grid distance to pick the next
+  `MoveStep` timestamp.
 
 This is a deterministic, FCFS-style placeholder. No distance or cost logic
 is implemented yet beyond H3 grid distance.

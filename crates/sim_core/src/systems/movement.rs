@@ -3,6 +3,14 @@ use bevy_ecs::prelude::{Entity, ParamSet, Query, ResMut, With};
 use crate::clock::{Event, EventKind, SimulationClock};
 use crate::ecs::{Driver, DriverState, Position, Rider};
 
+fn eta_ticks(distance: i32) -> u64 {
+    if distance <= 0 {
+        1
+    } else {
+        distance as u64
+    }
+}
+
 pub fn movement_system(
     mut clock: ResMut<SimulationClock>,
     mut queries: ParamSet<(
@@ -21,6 +29,7 @@ pub fn movement_system(
 
     let mut any_en_route = false;
     let mut any_arrived = false;
+    let mut min_remaining: Option<i32> = None;
 
     let rider_positions: Vec<(Entity, h3o::CellIndex)> = {
         let riders = queries.p1();
@@ -67,11 +76,15 @@ pub fn movement_system(
             any_arrived = true;
         } else {
             any_en_route = true;
+            min_remaining = Some(match min_remaining {
+                Some(current) => current.min(remaining),
+                None => remaining,
+            });
         }
     }
 
     if any_arrived {
-        let next_timestamp = clock.now() + 1;
+        let next_timestamp = clock.now() + eta_ticks(0);
         clock.schedule(Event {
             timestamp: next_timestamp,
             kind: EventKind::TripStarted,
@@ -79,7 +92,8 @@ pub fn movement_system(
     }
 
     if any_en_route {
-        let next_timestamp = clock.now() + 1;
+        let remaining = min_remaining.unwrap_or(1);
+        let next_timestamp = clock.now() + eta_ticks(remaining);
         clock.schedule(Event {
             timestamp: next_timestamp,
             kind: EventKind::MoveStep,
@@ -147,5 +161,12 @@ mod tests {
             .expect("trip started event");
         assert_eq!(next_event.kind, EventKind::TripStarted);
         assert_eq!(next_event.timestamp, 2);
+    }
+
+    #[test]
+    fn eta_ticks_scales_with_distance() {
+        assert_eq!(eta_ticks(0), 1);
+        assert_eq!(eta_ticks(1), 1);
+        assert_eq!(eta_ticks(3), 3);
     }
 }
