@@ -1,6 +1,6 @@
-use bevy_ecs::prelude::{Query, ResMut};
+use bevy_ecs::prelude::{Query, Res, ResMut};
 
-use crate::clock::{Event, EventKind, SimulationClock};
+use crate::clock::{CurrentEvent, Event, EventKind, EventSubject, SimulationClock};
 use crate::ecs::{Driver, DriverState};
 
 fn logit_accepts(score: f64) -> bool {
@@ -10,31 +10,34 @@ fn logit_accepts(score: f64) -> bool {
 
 pub fn driver_decision_system(
     mut clock: ResMut<SimulationClock>,
+    event: Res<CurrentEvent>,
     mut drivers: Query<&mut Driver>,
 ) {
-    let event = match clock.pop_next() {
-        Some(event) => event,
-        None => return,
-    };
-
-    if event.kind != EventKind::DriverDecision {
+    if event.0.kind != EventKind::DriverDecision {
         return;
     }
 
-    for mut driver in drivers.iter_mut() {
-        if driver.state == DriverState::Evaluating {
-            if logit_accepts(1.0) {
-                driver.state = DriverState::EnRoute;
-                let next_timestamp = clock.now() + 1;
-                clock.schedule(Event {
-                    timestamp: next_timestamp,
-                    kind: EventKind::MoveStep,
-                });
-            } else {
-                driver.state = DriverState::Idle;
-                driver.matched_rider = None;
-            }
-        }
+    let Some(EventSubject::Driver(driver_entity)) = event.0.subject else {
+        return;
+    };
+    let Ok(mut driver) = drivers.get_mut(driver_entity) else {
+        return;
+    };
+    if driver.state != DriverState::Evaluating {
+        return;
+    }
+
+    if logit_accepts(1.0) {
+        driver.state = DriverState::EnRoute;
+        let next_timestamp = clock.now() + 1;
+        clock.schedule(Event {
+            timestamp: next_timestamp,
+            kind: EventKind::MoveStep,
+            subject: Some(EventSubject::Driver(driver_entity)),
+        });
+    } else {
+        driver.state = DriverState::Idle;
+        driver.matched_rider = None;
     }
 }
 
@@ -47,16 +50,25 @@ mod tests {
     fn evaluating_driver_moves_to_en_route() {
         let mut world = World::new();
         world.insert_resource(SimulationClock::default());
-        world.spawn(Driver {
+        let driver_entity = world
+            .spawn(Driver {
             state: DriverState::Evaluating,
             matched_rider: None,
-        });
+        })
+            .id();
         world
             .resource_mut::<SimulationClock>()
             .schedule(Event {
                 timestamp: 1,
                 kind: EventKind::DriverDecision,
+                subject: Some(EventSubject::Driver(driver_entity)),
             });
+
+        let event = world
+            .resource_mut::<SimulationClock>()
+            .pop_next()
+            .expect("driver decision event");
+        world.insert_resource(CurrentEvent(event));
 
         let mut schedule = Schedule::default();
         schedule.add_systems(driver_decision_system);
@@ -71,5 +83,6 @@ mod tests {
             .expect("move step event");
         assert_eq!(next_event.kind, EventKind::MoveStep);
         assert_eq!(next_event.timestamp, 2);
+        assert_eq!(next_event.subject, Some(EventSubject::Driver(driver_entity)));
     }
 }

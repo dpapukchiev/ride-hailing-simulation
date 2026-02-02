@@ -1,55 +1,62 @@
-use bevy_ecs::prelude::{Entity, Query, ResMut};
+use bevy_ecs::prelude::{Query, Res, ResMut};
 
-use crate::clock::{Event, EventKind, SimulationClock};
+use crate::clock::{CurrentEvent, Event, EventKind, EventSubject, SimulationClock};
 use crate::ecs::{Driver, DriverState, Position, Rider, RiderState};
 
 pub fn trip_started_system(
     mut clock: ResMut<SimulationClock>,
-    mut riders: Query<(Entity, &mut Rider, &Position)>,
-    mut drivers: Query<(Entity, &mut Driver, &Position)>,
+    event: Res<CurrentEvent>,
+    mut riders: Query<(&mut Rider, &Position)>,
+    mut drivers: Query<(&mut Driver, &Position)>,
 ) {
-    let event = match clock.pop_next() {
-        Some(event) => event,
-        None => return,
-    };
-
-    if event.kind != EventKind::TripStarted {
+    if event.0.kind != EventKind::TripStarted {
         return;
     }
 
-    let mut ready_pairs: Vec<(Entity, Entity)> = Vec::new();
+    let Some(EventSubject::Driver(driver_entity)) = event.0.subject else {
+        return;
+    };
 
-    for (rider_entity, rider, rider_pos) in riders.iter() {
-        if rider.state != RiderState::Waiting {
-            continue;
-        }
-        let Some(driver_entity) = rider.matched_driver else {
-            continue;
+    let (rider_entity, driver_pos) = {
+        let Ok((driver, driver_pos)) = drivers.get(driver_entity) else {
+            return;
         };
-        let Ok((_driver_entity, driver, driver_pos)) = drivers.get(driver_entity) else {
-            continue;
+        if driver.state != DriverState::EnRoute {
+            return;
+        }
+        let Some(rider_entity) = driver.matched_rider else {
+            return;
         };
-        if driver.state == DriverState::EnRoute && driver_pos.0 == rider_pos.0 {
-            ready_pairs.push((rider_entity, driver_entity));
-        }
+        (rider_entity, driver_pos.0)
+    };
+
+    let (rider_pos, rider_matched_driver_ok, rider_waiting) = {
+        let Ok((rider, rider_pos)) = riders.get(rider_entity) else {
+            return;
+        };
+        (
+            rider_pos.0,
+            rider.matched_driver == Some(driver_entity),
+            rider.state == RiderState::Waiting,
+        )
+    };
+    if !rider_matched_driver_ok || !rider_waiting || rider_pos != driver_pos {
+        return;
     }
 
-    for (rider_entity, driver_entity) in &ready_pairs {
-        if let Ok((_entity, mut rider, _)) = riders.get_mut(*rider_entity) {
-            rider.state = RiderState::InTransit;
-        }
-        if let Ok((_entity, mut driver, _)) = drivers.get_mut(*driver_entity) {
-            driver.state = DriverState::OnTrip;
-        }
+    if let Ok((mut rider, _)) = riders.get_mut(rider_entity) {
+        rider.state = RiderState::InTransit;
+    }
+    if let Ok((mut driver, _)) = drivers.get_mut(driver_entity) {
+        driver.state = DriverState::OnTrip;
     }
 
-    if !ready_pairs.is_empty() {
-        let next_timestamp = clock.now() + 1;
-        clock.schedule(Event {
-            timestamp: next_timestamp,
-            kind: EventKind::TripCompleted,
-        });
-    }
+    let next_timestamp = clock.now() + 1;
+    clock.schedule(Event {
+        timestamp: next_timestamp,
+        kind: EventKind::TripCompleted,
+        subject: Some(EventSubject::Driver(driver_entity)),
+    });
 }
 
 #[cfg(test)]
@@ -92,7 +99,14 @@ mod tests {
             .schedule(Event {
                 timestamp: 3,
                 kind: EventKind::TripStarted,
+                subject: Some(EventSubject::Driver(driver_entity)),
             });
+
+        let event = world
+            .resource_mut::<SimulationClock>()
+            .pop_next()
+            .expect("trip started event");
+        world.insert_resource(CurrentEvent(event));
 
         let mut schedule = Schedule::default();
         schedule.add_systems(trip_started_system);
@@ -116,5 +130,6 @@ mod tests {
             .expect("completion event");
         assert_eq!(next_event.kind, EventKind::TripCompleted);
         assert_eq!(next_event.timestamp, 4);
+        assert_eq!(next_event.subject, Some(EventSubject::Driver(driver_entity)));
     }
 }

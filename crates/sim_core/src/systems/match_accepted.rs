@@ -1,23 +1,24 @@
-use bevy_ecs::prelude::ResMut;
+use bevy_ecs::prelude::{Res, ResMut};
 
-use crate::clock::{Event, EventKind, SimulationClock};
+use crate::clock::{CurrentEvent, Event, EventKind, EventSubject, SimulationClock};
 
 pub fn match_accepted_system(
     mut clock: ResMut<SimulationClock>,
+    event: Res<CurrentEvent>,
 ) {
-    let event = match clock.pop_next() {
-        Some(event) => event,
-        None => return,
-    };
-
-    if event.kind != EventKind::MatchAccepted {
+    if event.0.kind != EventKind::MatchAccepted {
         return;
     }
+
+    let Some(EventSubject::Driver(driver_entity)) = event.0.subject else {
+        return;
+    };
 
     let next_timestamp = clock.now() + 1;
     clock.schedule(Event {
         timestamp: next_timestamp,
         kind: EventKind::DriverDecision,
+        subject: Some(EventSubject::Driver(driver_entity)),
     });
 }
 
@@ -33,17 +34,26 @@ mod tests {
     fn match_accepted_schedules_driver_decision() {
         let mut world = World::new();
         world.insert_resource(SimulationClock::default());
-        world.spawn(Driver {
+        let driver_entity = world
+            .spawn(Driver {
             state: DriverState::Evaluating,
             matched_rider: None,
-        });
+        })
+            .id();
 
         world
             .resource_mut::<SimulationClock>()
             .schedule(Event {
                 timestamp: 2,
                 kind: EventKind::MatchAccepted,
+                subject: Some(EventSubject::Driver(driver_entity)),
             });
+
+        let event = world
+            .resource_mut::<SimulationClock>()
+            .pop_next()
+            .expect("match accepted event");
+        world.insert_resource(CurrentEvent(event));
 
         let mut schedule = Schedule::default();
         schedule.add_systems(match_accepted_system);
@@ -55,5 +65,6 @@ mod tests {
             .expect("driver decision event");
         assert_eq!(next_event.kind, EventKind::DriverDecision);
         assert_eq!(next_event.timestamp, 3);
+        assert_eq!(next_event.subject, Some(EventSubject::Driver(driver_entity)));
     }
 }

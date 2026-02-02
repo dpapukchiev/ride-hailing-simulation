@@ -1,12 +1,13 @@
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
-use bevy_ecs::prelude::Resource;
+use bevy_ecs::prelude::{Entity, Resource};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum EventKind {
     RequestInbound,
     QuoteAccepted,
+    TryMatch,
     MatchAccepted,
     DriverDecision,
     MoveStep,
@@ -15,9 +16,16 @@ pub enum EventKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EventSubject {
+    Rider(Entity),
+    Driver(Entity),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Event {
     pub timestamp: u64,
     pub kind: EventKind,
+    pub subject: Option<EventSubject>,
 }
 
 impl Ord for Event {
@@ -35,6 +43,9 @@ impl PartialOrd for Event {
         Some(self.cmp(other))
     }
 }
+
+#[derive(Debug, Clone, Copy, Resource)]
+pub struct CurrentEvent(pub Event);
 
 #[derive(Debug, Default, Resource)]
 pub struct SimulationClock {
@@ -76,14 +87,17 @@ mod tests {
         clock.schedule(Event {
             timestamp: 10,
             kind: EventKind::RequestInbound,
+            subject: None,
         });
         clock.schedule(Event {
             timestamp: 5,
             kind: EventKind::RequestInbound,
+            subject: None,
         });
         clock.schedule(Event {
             timestamp: 20,
             kind: EventKind::RequestInbound,
+            subject: None,
         });
 
         let first = clock.pop_next().expect("first event");

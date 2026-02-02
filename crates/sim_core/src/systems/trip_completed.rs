@@ -1,34 +1,40 @@
-use bevy_ecs::prelude::{Query, ResMut};
+use bevy_ecs::prelude::{Query, Res};
 
-use crate::clock::{EventKind, SimulationClock};
+use crate::clock::{CurrentEvent, EventKind, EventSubject};
 use crate::ecs::{Driver, DriverState, Rider, RiderState};
 
 pub fn trip_completed_system(
-    mut clock: ResMut<SimulationClock>,
+    event: Res<CurrentEvent>,
     mut riders: Query<&mut Rider>,
     mut drivers: Query<&mut Driver>,
 ) {
-    let event = match clock.pop_next() {
-        Some(event) => event,
-        None => return,
-    };
-
-    if event.kind != EventKind::TripCompleted {
+    if event.0.kind != EventKind::TripCompleted {
         return;
     }
 
-    for mut rider in riders.iter_mut() {
-        if rider.state == RiderState::InTransit {
-            rider.state = RiderState::Completed;
-            rider.matched_driver = None;
-        }
+    let Some(EventSubject::Driver(driver_entity)) = event.0.subject else {
+        return;
+    };
+    let Ok(mut driver) = drivers.get_mut(driver_entity) else {
+        return;
+    };
+    if driver.state != DriverState::OnTrip {
+        return;
     }
 
-    for mut driver in drivers.iter_mut() {
-        if driver.state == DriverState::OnTrip {
-            driver.state = DriverState::Idle;
-            driver.matched_rider = None;
-        }
+    let rider_entity = driver.matched_rider;
+    driver.state = DriverState::Idle;
+    driver.matched_rider = None;
+
+    let Some(rider_entity) = rider_entity else {
+        return;
+    };
+    let Ok(mut rider) = riders.get_mut(rider_entity) else {
+        return;
+    };
+    if rider.state == RiderState::InTransit {
+        rider.state = RiderState::Completed;
+        rider.matched_driver = None;
     }
 }
 
@@ -37,7 +43,7 @@ mod tests {
     use super::*;
     use bevy_ecs::prelude::{Schedule, World};
 
-    use crate::clock::Event;
+    use crate::clock::{Event, SimulationClock};
 
     #[test]
     fn trip_completed_transitions_driver_and_rider() {
@@ -72,7 +78,14 @@ mod tests {
             .schedule(Event {
                 timestamp: 2,
                 kind: EventKind::TripCompleted,
+                subject: Some(EventSubject::Driver(driver_entity)),
             });
+
+        let event = world
+            .resource_mut::<SimulationClock>()
+            .pop_next()
+            .expect("trip completed event");
+        world.insert_resource(CurrentEvent(event));
 
         let mut schedule = Schedule::default();
         schedule.add_systems(trip_completed_system);
