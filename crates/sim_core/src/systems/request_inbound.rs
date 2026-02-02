@@ -71,6 +71,7 @@ mod tests {
 
         let rider = world.query::<&Rider>().single(&world);
         assert_eq!(rider.state, RiderState::Browsing);
+        assert_eq!(rider.requested_at, Some(1), "requested_at set when transitioning to Browsing");
 
         let next_event = world
             .resource_mut::<SimulationClock>()

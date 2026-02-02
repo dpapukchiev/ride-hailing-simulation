@@ -121,13 +121,17 @@ crates/
 Components and state enums:
 
 - `RiderState`: `Requesting`, `Browsing`, `Waiting`, `InTransit`, `Completed`
-- `Rider` component: `{ state: RiderState, matched_driver: Option<Entity>, destination: Option<CellIndex> }`
+- `Rider` component: `{ state, matched_driver, destination: Option<CellIndex>, requested_at: Option<u64> }`
   - `destination`: requested dropoff cell; if `None`, a neighbor of pickup is used when the trip is created.
+  - `requested_at`: simulation time when the rider transitioned to Browsing (set by `request_inbound_system`).
 - `DriverState`: `Idle`, `Evaluating`, `EnRoute`, `OnTrip`, `OffDuty`
 - `Driver` component: `{ state: DriverState, matched_rider: Option<Entity> }`
 - `TripState`: `EnRoute`, `OnTrip`, `Completed`
-- `Trip` component: `{ state: TripState, rider: Entity, driver: Entity, pickup: CellIndex, dropoff: CellIndex }`
+- `Trip` component: `{ state, rider, driver, pickup, dropoff, requested_at: u64, matched_at: u64, pickup_at: Option<u64> }`
   - `pickup` / `dropoff`: trip is completed when the driver reaches `dropoff` (not a fixed +1 tick).
+  - `requested_at`: copied from Rider when the trip is created; used for KPIs.
+  - `matched_at`: simulation time when the driver accepted (Trip created).
+  - `pickup_at`: set by `trip_started_system` when the driver reaches pickup.
 - `Position` component: `{ CellIndex }` H3 cell position for spatial matching
 
 These are minimal placeholders to validate state transitions via systems.
@@ -152,8 +156,8 @@ duplicating the pop → route → run loop.
 ### `sim_core::telemetry`
 
 - **`SimTelemetry`** (ECS `Resource`, default): holds `completed_trips: Vec<CompletedTripRecord>`.
-- **`CompletedTripRecord`**: `{ trip_entity, rider_entity, driver_entity, completed_at: u64 }`.
-- Insert `SimTelemetry::default()` when building the world to record completed trips; `trip_completed_system` pushes one record per completed trip.
+- **`CompletedTripRecord`**: `{ trip_entity, rider_entity, driver_entity, completed_at, requested_at, matched_at, pickup_at }` (all timestamps in simulation ticks). Helper methods: **`time_to_match()`** = matched_at − requested_at, **`time_to_pickup()`** = pickup_at − matched_at, **`trip_duration()`** = completed_at − pickup_at.
+- Insert `SimTelemetry::default()` when building the world to record completed trips; `trip_completed_system` pushes one record per completed trip with timestamps from the Trip and clock.
 
 ### `sim_core::systems::request_inbound`
 
@@ -161,7 +165,7 @@ System: `request_inbound_system`
 
 - Reacts to `CurrentEvent`.
 - On `EventKind::RequestInbound` with subject `Rider(rider_entity)`:
-  - Rider: `Requesting` → `Browsing`
+  - Rider: `Requesting` → `Browsing`; sets `requested_at = Some(clock.now())`.
   - Schedules `QuoteAccepted` at `clock.now() + 1` for the same rider.
 
 ### `sim_core::systems::quote_accepted`
@@ -201,8 +205,9 @@ System: `driver_decision_system`
 - On `EventKind::DriverDecision` with subject `Driver(driver_entity)`:
   - Applies a logit accept rule:
     - Accept: `Evaluating` → `EnRoute`, **spawns a `Trip` entity** with `pickup` =
-      rider’s position and `dropoff` = rider’s `destination` or a neighbor of pickup,
-      and schedules `MoveStep` for that trip (`subject: Trip(trip_entity)`).
+      rider’s position, `dropoff` = rider’s `destination` or a neighbor of pickup,
+      `requested_at` = rider’s `requested_at`, `matched_at` = clock.now(), `pickup_at` = None;
+      schedules `MoveStep` for that trip (`subject: Trip(trip_entity)`).
     - Reject: `Evaluating` → `Idle` and clears `matched_rider`.
 
 ### `sim_core::systems::movement`
@@ -232,7 +237,7 @@ System: `trip_started_system`
     and matched back to this driver), transitions:
     - Rider: `Waiting` → `InTransit`
     - Driver: `EnRoute` → `OnTrip`
-    - Trip: `EnRoute` → `OnTrip`
+    - Trip: `EnRoute` → `OnTrip`; sets `pickup_at = Some(clock.now())`.
   - Schedules `MoveStep` for the same trip so the driver moves toward dropoff;
     completion is scheduled by the movement system when the driver reaches dropoff.
 
@@ -245,7 +250,7 @@ System: `trip_completed_system`
   - Driver: `OnTrip` → `Idle` and clears `matched_rider`
   - Rider: `InTransit` → `Completed` and clears `matched_driver`
   - Trip: `OnTrip` → `Completed`
-  - Pushes a `CompletedTripRecord` to `SimTelemetry` (trip_entity, rider_entity, driver_entity, completed_at).
+  - Pushes a `CompletedTripRecord` to `SimTelemetry` with trip/rider/driver entities and timestamps (requested_at, matched_at, pickup_at, completed_at) for KPIs.
 
 ## Tests
 
@@ -253,7 +258,7 @@ Unit tests exist in each module to confirm behavior:
 
 - `spatial`: grid disk neighbors within K.
 - `clock`: events pop in chronological order.
-- `request_inbound`: rider transitions to `Browsing`.
+- `request_inbound`: rider transitions to `Browsing` and sets `requested_at`.
 - `quote_accepted`: rider transitions to `Waiting` and schedules `TryMatch`.
 - `simple_matching`: targeted match attempt and transition.
 - `match_accepted`: driver decision scheduled.
@@ -265,8 +270,8 @@ Unit tests exist in each module to confirm behavior:
   rider (with `destination: None`) and one driver in the same cell, schedules
   `RequestInbound` (rider). Runs `run_until_empty` with `simulation_schedule()`.
   Asserts: one `Trip` in `Completed` with correct rider/driver and pickup/dropoff;
-  rider `Completed`, driver `Idle`; `SimTelemetry.completed_trips.len() == 1` and
-  record matches rider/driver.
+  rider `Completed`, driver `Idle`; `SimTelemetry.completed_trips.len() == 1`, record
+  matches rider/driver, and KPI timestamps are ordered (requested_at ≤ matched_at ≤ pickup_at ≤ completed_at); `time_to_match()`, `time_to_pickup()`, `trip_duration()` are consistent.
 - **End-to-end (concurrent trips)**: Same setup with two riders and two drivers
   (same cell), `RequestInbound` at t=1 and t=2. Runs until empty. Asserts: two
   `Trip` entities in `Completed`, both riders `Completed`, both drivers `Idle`;
@@ -281,4 +286,3 @@ All per-system unit tests emulate the runner by popping one event, inserting
 - Driver acceptance models and rider conversion.
 - Event scheduling after match beyond fixed delays (e.g. variable trip duration).
 - H3-based movement or routing.
-- Richer KPIs (time-to-match, time-to-pickup, trip duration derived from telemetry).
