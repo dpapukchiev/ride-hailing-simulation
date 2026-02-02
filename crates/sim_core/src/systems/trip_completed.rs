@@ -44,13 +44,18 @@ pub fn trip_completed_system(
         rider.matched_driver = None;
     }
 
+    let completed_at = clock.now();
+    let pickup_at = trip.pickup_at.unwrap_or(completed_at);
     trip.state = TripState::Completed;
 
     telemetry.completed_trips.push(CompletedTripRecord {
         trip_entity,
         rider_entity,
         driver_entity,
-        completed_at: clock.now(),
+        completed_at,
+        requested_at: trip.requested_at,
+        matched_at: trip.matched_at,
+        pickup_at,
     });
 }
 
@@ -71,6 +76,7 @@ mod tests {
                 state: RiderState::InTransit,
                 matched_driver: None,
                 destination: None,
+                requested_at: None,
             })
             .id();
         let driver_entity = world
@@ -86,6 +92,9 @@ mod tests {
                 driver: driver_entity,
                 pickup: h3o::CellIndex::try_from(0x8a1fb46622dffff).expect("cell"),
                 dropoff: h3o::CellIndex::try_from(0x8a1fb46622dffff).expect("cell"),
+                requested_at: 0,
+                matched_at: 1,
+                pickup_at: Some(2),
             })
             .id();
 

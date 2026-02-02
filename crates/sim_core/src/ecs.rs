@@ -16,6 +16,8 @@ pub struct Rider {
     pub matched_driver: Option<Entity>,
     /// Requested dropoff cell; if `None`, a neighbor of pickup is used when the trip is created.
     pub destination: Option<CellIndex>,
+    /// Simulation time when the rider transitioned to Browsing (request received).
+    pub requested_at: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,6 +49,12 @@ pub struct Trip {
     pub driver: Entity,
     pub pickup: CellIndex,
     pub dropoff: CellIndex,
+    /// Simulation time when the rider's request was received (Rider.requested_at).
+    pub requested_at: u64,
+    /// Simulation time when the driver accepted (Trip created).
+    pub matched_at: u64,
+    /// Simulation time when the driver reached pickup and trip started; set in trip_started_system.
+    pub pickup_at: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]

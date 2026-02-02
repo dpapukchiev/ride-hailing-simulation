@@ -69,6 +69,7 @@ mod tests {
                     state: RiderState::Waiting,
                     matched_driver: None,
                     destination: None,
+                    requested_at: None,
                 },
                 Position(cell),
             ))

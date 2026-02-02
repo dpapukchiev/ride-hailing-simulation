@@ -46,6 +46,7 @@ mod tests {
                 state: RiderState::Browsing,
                 matched_driver: None,
                 destination: None,
+                requested_at: None,
             })
             .id();
 

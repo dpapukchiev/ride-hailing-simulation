@@ -30,6 +30,7 @@ mod end_to_end_tests {
                     state: RiderState::Requesting,
                     matched_driver: None,
                     destination: None,
+                    requested_at: None,
                 },
                 Position(cell),
             ))
@@ -90,6 +91,12 @@ mod end_to_end_tests {
         assert_eq!(record.driver_entity, driver_entity);
         assert_eq!(record.trip_entity, trip_entity);
         assert!(record.completed_at >= 1, "completed_at should reflect simulation time");
+        assert!(record.requested_at <= record.matched_at);
+        assert!(record.matched_at <= record.pickup_at);
+        assert!(record.pickup_at <= record.completed_at);
+        assert_eq!(record.time_to_match(), record.matched_at - record.requested_at);
+        assert_eq!(record.time_to_pickup(), record.pickup_at - record.matched_at);
+        assert_eq!(record.trip_duration(), record.completed_at - record.pickup_at);
     }
 
     #[test]
@@ -106,6 +113,7 @@ mod end_to_end_tests {
                     state: RiderState::Requesting,
                     matched_driver: None,
                     destination: None,
+                    requested_at: None,
                 },
                 Position(cell),
             ))
@@ -116,6 +124,7 @@ mod end_to_end_tests {
                     state: RiderState::Requesting,
                     matched_driver: None,
                     destination: None,
+                    requested_at: None,
                 },
                 Position(cell),
             ))

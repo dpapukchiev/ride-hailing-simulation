@@ -120,6 +120,7 @@ mod tests {
                     state: RiderState::Waiting,
                     matched_driver: None,
                     destination: None,
+                    requested_at: None,
                 },
                 Position(neighbor),
             ))
@@ -140,6 +141,9 @@ mod tests {
                 driver: driver_entity,
                 pickup: neighbor,
                 dropoff: neighbor,
+                requested_at: 0,
+                matched_at: 0,
+                pickup_at: None,
             })
             .id();
 

@@ -43,13 +43,14 @@ pub fn driver_decision_system(
             return;
         };
 
-        let (pickup, dropoff) = match riders.get(rider_entity) {
+        let (pickup, dropoff, requested_at) = match riders.get(rider_entity) {
             Ok((rider, pos)) => {
                 let pickup = pos.0;
                 let dropoff = rider
                     .destination
                     .unwrap_or_else(|| default_dropoff(pickup));
-                (pickup, dropoff)
+                let requested_at = rider.requested_at.unwrap_or(clock.now());
+                (pickup, dropoff, requested_at)
             }
             Err(_) => {
                 driver.state = DriverState::Idle;
@@ -57,6 +58,7 @@ pub fn driver_decision_system(
             }
         };
 
+        let matched_at = clock.now();
         driver.state = DriverState::EnRoute;
         let trip_entity = commands
             .spawn(Trip {
@@ -65,6 +67,9 @@ pub fn driver_decision_system(
                 driver: driver_entity,
                 pickup,
                 dropoff,
+                requested_at,
+                matched_at,
+                pickup_at: None,
             })
             .id();
 
@@ -99,6 +104,7 @@ mod tests {
                     state: RiderState::Waiting,
                     matched_driver: None,
                     destination: None,
+                    requested_at: None,
                 },
                 Position(cell),
             ))

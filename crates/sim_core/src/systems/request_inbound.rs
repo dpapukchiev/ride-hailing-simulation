@@ -20,6 +20,7 @@ pub fn request_inbound_system(
     };
     if rider.state == RiderState::Requesting {
         rider.state = RiderState::Browsing;
+        rider.requested_at = Some(clock.now());
     }
 
     let next_timestamp = clock.now() + 1;
@@ -46,6 +47,7 @@ mod tests {
                 state: RiderState::Requesting,
                 matched_driver: None,
                 destination: None,
+                requested_at: None,
             })
             .id();
 

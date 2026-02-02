@@ -60,6 +60,7 @@ pub fn trip_started_system(
     }
     if let Ok(mut trip) = trips.get_mut(trip_entity) {
         trip.state = TripState::OnTrip;
+        trip.pickup_at = Some(clock.now());
     }
 
     // Start moving driver toward dropoff; completion is scheduled by movement when driver arrives.
@@ -87,6 +88,7 @@ mod tests {
                     state: RiderState::Waiting,
                     matched_driver: None,
                     destination: None,
+                    requested_at: None,
                 },
                 Position(cell),
             ))
@@ -107,6 +109,9 @@ mod tests {
                 driver: driver_entity,
                 pickup: cell,
                 dropoff: cell,
+                requested_at: 0,
+                matched_at: 0,
+                pickup_at: None,
             })
             .id();
 
