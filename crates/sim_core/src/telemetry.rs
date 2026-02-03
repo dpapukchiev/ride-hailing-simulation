@@ -51,6 +51,8 @@ pub struct RiderSnapshot {
     pub entity: Entity,
     pub cell: CellIndex,
     pub state: RiderState,
+    /// Driver entity if matched (None = waiting for match, Some = waiting for pickup)
+    pub matched_driver: Option<Entity>,
 }
 
 /// Snapshot of one driver for visualization/export.

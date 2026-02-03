@@ -473,7 +473,7 @@ impl eframe::App for SimUiApp {
                             // Hide riders that are in transit (they're with the driver)
                             if rider.state != sim_core::ecs::RiderState::InTransit {
                                 if let Some(pos) = project_cell(rider.cell, &bounds, map_rect) {
-                                    draw_agent(&painter, pos, "R", rider_color(rider.state));
+                                    draw_agent(&painter, pos, "R", rider_color(rider.state, rider.matched_driver));
                                 }
                             }
                         }
@@ -639,11 +639,12 @@ fn legend_item(ui: &mut egui::Ui, color: Color32, label: &str) {
 fn render_map_legend(ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
         ui.label("Riders:");
-        legend_item(ui, rider_color(RiderState::Browsing), "Browsing");
-        legend_item(ui, rider_color(RiderState::Waiting), "Waiting");
-        legend_item(ui, rider_color(RiderState::InTransit), "In transit");
-        legend_item(ui, rider_color(RiderState::Completed), "Completed");
-        legend_item(ui, rider_color(RiderState::Cancelled), "Cancelled");
+        legend_item(ui, rider_color(RiderState::Browsing, None), "Browsing");
+        legend_item(ui, rider_color(RiderState::Waiting, None), "Waiting for match");
+        legend_item(ui, rider_color_waiting_for_pickup(), "Waiting for pickup");
+        legend_item(ui, rider_color(RiderState::InTransit, None), "In transit");
+        legend_item(ui, rider_color(RiderState::Completed, None), "Completed");
+        legend_item(ui, rider_color(RiderState::Cancelled, None), "Cancelled");
     });
     ui.horizontal(|ui| {
         ui.label("Drivers:");
@@ -667,14 +668,28 @@ fn render_metrics_legend(ui: &mut egui::Ui) {
     });
 }
 
-fn rider_color(state: RiderState) -> Color32 {
+fn rider_color(state: RiderState, matched_driver: Option<bevy_ecs::prelude::Entity>) -> Color32 {
     match state {
         RiderState::Browsing => Color32::from_rgb(120, 180, 255),
-        RiderState::Waiting => Color32::from_rgb(255, 140, 0),
+        RiderState::Waiting => {
+            // Differentiate between waiting for match vs waiting for pickup
+            if matched_driver.is_some() {
+                // Waiting for pickup (driver matched, en route)
+                Color32::from_rgb(255, 100, 0) // Darker orange/red
+            } else {
+                // Waiting for match (no driver yet)
+                Color32::from_rgb(255, 200, 0) // Brighter yellow/orange
+            }
+        }
         RiderState::InTransit => Color32::from_rgb(0, 200, 120),
         RiderState::Completed => Color32::from_gray(140),
         RiderState::Cancelled => Color32::from_rgb(200, 80, 80),
     }
+}
+
+fn rider_color_waiting_for_pickup() -> Color32 {
+    // Helper for legend - represents waiting for pickup color
+    Color32::from_rgb(255, 100, 0)
 }
 
 fn driver_color(state: DriverState) -> Color32 {

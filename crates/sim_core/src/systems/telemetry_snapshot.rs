@@ -35,6 +35,7 @@ pub fn capture_snapshot_system(
             entity,
             cell: position.0,
             state: rider.state,
+            matched_driver: rider.matched_driver,
         });
     }
 

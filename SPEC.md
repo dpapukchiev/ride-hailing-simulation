@@ -218,6 +218,7 @@ Large scenarios (e.g. 500 riders, 100 drivers) are run via the **example** only,
 - **`SimSnapshotConfig`** (ECS `Resource`): `{ interval_ms, max_snapshots }` controls snapshot cadence and buffer size.
 - **`SimSnapshots`** (ECS `Resource`): rolling `VecDeque<SimSnapshot>` plus `last_snapshot_at`; populated by the snapshot system.
 - **`SimSnapshot`**: `{ timestamp_ms, counts, riders, drivers, trips }` with state-aware position snapshots plus trip state snapshots for visualization/export; counts include cumulative rider totals to account for despawns.
+- **`RiderSnapshot`**: `{ entity, cell, state, matched_driver: Option<Entity> }` captures rider state and position; `matched_driver` is `Some(driver_entity)` when a driver is matched (rider is waiting for pickup) and `None` when waiting for match.
 
 ### `sim_core::telemetry_export`
 
@@ -307,6 +308,7 @@ System: `movement_system`
     the rider's position is updated to match the driver's position (rider is in the vehicle).
     If still en route, reschedules `MoveStep` based on the time to traverse the next hop; when
     driver reaches dropoff, schedules `TripCompleted` 1 second from now (`schedule_in_secs(1, ...)`).
+
 ### `sim_core::systems::pickup_eta_updated`
 
 System: `pickup_eta_updated_system`
@@ -413,6 +415,9 @@ All per-system unit tests emulate the runner by popping one event, inserting
   to complete the simulation; a real-time clock speed selector (2x–50x) controls
   simulation playback. Riders in `InTransit` state are hidden from the map (they are with the driver).
   Drivers in `OnTrip` state display "D(R)" instead of "D" to indicate they have a rider on board.
+  The UI differentiates between riders waiting for a match (yellow/orange) and riders waiting for pickup
+  (darker orange/red) based on whether `matched_driver` is set, making it easy to see which riders have
+  a driver assigned and are waiting for pickup versus those still searching for a match.
 
 ## Known Gaps (Not Implemented Yet)
 
