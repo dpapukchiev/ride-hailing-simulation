@@ -316,3 +316,300 @@ fn trip_state_code(state: TripState) -> u8 {
         TripState::Cancelled => 3,
     }
 }
+
+/// Validates that timestamps in a trip snapshot follow the funnel order:
+/// requested_at ≤ matched_at ≤ pickup_at ≤ dropoff_at (for completed trips)
+/// or requested_at ≤ matched_at ≤ cancelled_at (for cancelled trips)
+/// Returns an error message if validation fails, None if valid.
+pub fn validate_trip_timestamp_ordering(trip: &crate::telemetry::TripSnapshot) -> Option<String> {
+    // Always: requested_at ≤ matched_at
+    if trip.requested_at > trip.matched_at {
+        return Some(format!(
+            "Trip {}: requested_at ({}) > matched_at ({})",
+            trip.entity.to_bits(),
+            trip.requested_at,
+            trip.matched_at
+        ));
+    }
+
+    match trip.state {
+        TripState::EnRoute => {
+            // EnRoute: matched_at set, no pickup/dropoff/cancelled yet
+            if trip.pickup_at.is_some() {
+                return Some(format!(
+                    "Trip {} (EnRoute): pickup_at should be None",
+                    trip.entity.to_bits()
+                ));
+            }
+            if trip.dropoff_at.is_some() {
+                return Some(format!(
+                    "Trip {} (EnRoute): dropoff_at should be None",
+                    trip.entity.to_bits()
+                ));
+            }
+            if trip.cancelled_at.is_some() {
+                return Some(format!(
+                    "Trip {} (EnRoute): cancelled_at should be None",
+                    trip.entity.to_bits()
+                ));
+            }
+        }
+        TripState::OnTrip => {
+            // OnTrip: matched_at ≤ pickup_at, no dropoff/cancelled yet
+            if let Some(pickup) = trip.pickup_at {
+                if trip.matched_at > pickup {
+                    return Some(format!(
+                        "Trip {} (OnTrip): matched_at ({}) > pickup_at ({})",
+                        trip.entity.to_bits(),
+                        trip.matched_at,
+                        pickup
+                    ));
+                }
+            } else {
+                return Some(format!(
+                    "Trip {} (OnTrip): pickup_at should be Some",
+                    trip.entity.to_bits()
+                ));
+            }
+            if trip.dropoff_at.is_some() {
+                return Some(format!(
+                    "Trip {} (OnTrip): dropoff_at should be None",
+                    trip.entity.to_bits()
+                ));
+            }
+            if trip.cancelled_at.is_some() {
+                return Some(format!(
+                    "Trip {} (OnTrip): cancelled_at should be None",
+                    trip.entity.to_bits()
+                ));
+            }
+        }
+        TripState::Completed => {
+            // Completed: matched_at ≤ pickup_at ≤ dropoff_at, no cancelled
+            if let Some(pickup) = trip.pickup_at {
+                if trip.matched_at > pickup {
+                    return Some(format!(
+                        "Trip {} (Completed): matched_at ({}) > pickup_at ({})",
+                        trip.entity.to_bits(),
+                        trip.matched_at,
+                        pickup
+                    ));
+                }
+                if let Some(dropoff) = trip.dropoff_at {
+                    if pickup > dropoff {
+                        return Some(format!(
+                            "Trip {} (Completed): pickup_at ({}) > dropoff_at ({})",
+                            trip.entity.to_bits(),
+                            pickup,
+                            dropoff
+                        ));
+                    }
+                } else {
+                    return Some(format!(
+                        "Trip {} (Completed): dropoff_at should be Some",
+                        trip.entity.to_bits()
+                    ));
+                }
+            } else {
+                return Some(format!(
+                    "Trip {} (Completed): pickup_at should be Some",
+                    trip.entity.to_bits()
+                ));
+            }
+            if trip.cancelled_at.is_some() {
+                return Some(format!(
+                    "Trip {} (Completed): cancelled_at should be None",
+                    trip.entity.to_bits()
+                ));
+            }
+        }
+        TripState::Cancelled => {
+            // Cancelled: matched_at ≤ cancelled_at, and if pickup_at exists, it should be ≤ cancelled_at
+            if let Some(cancelled) = trip.cancelled_at {
+                if trip.matched_at > cancelled {
+                    return Some(format!(
+                        "Trip {} (Cancelled): matched_at ({}) > cancelled_at ({})",
+                        trip.entity.to_bits(),
+                        trip.matched_at,
+                        cancelled
+                    ));
+                }
+                if let Some(pickup) = trip.pickup_at {
+                    if pickup > cancelled {
+                        return Some(format!(
+                            "Trip {} (Cancelled): pickup_at ({}) > cancelled_at ({})",
+                            trip.entity.to_bits(),
+                            pickup,
+                            cancelled
+                        ));
+                    }
+                }
+            } else {
+                return Some(format!(
+                    "Trip {} (Cancelled): cancelled_at should be Some",
+                    trip.entity.to_bits()
+                ));
+            }
+            if trip.dropoff_at.is_some() {
+                return Some(format!(
+                    "Trip {} (Cancelled): dropoff_at should be None",
+                    trip.entity.to_bits()
+                ));
+            }
+        }
+    }
+
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::telemetry::TripSnapshot;
+    use crate::ecs::TripState;
+    use bevy_ecs::prelude::World;
+    use h3o::CellIndex;
+
+    fn make_test_trip(
+        state: TripState,
+        requested_at: u64,
+        matched_at: u64,
+        pickup_at: Option<u64>,
+        dropoff_at: Option<u64>,
+        cancelled_at: Option<u64>,
+    ) -> TripSnapshot {
+        // Create a World to spawn valid entities
+        let mut world = World::new();
+        let trip_entity = world.spawn_empty().id();
+        let rider_entity = world.spawn_empty().id();
+        let driver_entity = world.spawn_empty().id();
+        
+        let cell = CellIndex::try_from(0x8928308280fffff).unwrap();
+        TripSnapshot {
+            entity: trip_entity,
+            rider: rider_entity,
+            driver: driver_entity,
+            state,
+            pickup_cell: cell,
+            dropoff_cell: cell,
+            pickup_distance_km_at_accept: 1.0,
+            requested_at,
+            matched_at,
+            pickup_at,
+            dropoff_at,
+            cancelled_at,
+        }
+    }
+
+    #[test]
+    fn validate_enroute_trip_timestamps() {
+        let trip = make_test_trip(TripState::EnRoute, 1000, 2000, None, None, None);
+        assert!(validate_trip_timestamp_ordering(&trip).is_none());
+
+        // Invalid: requested_at > matched_at
+        let trip = make_test_trip(TripState::EnRoute, 2000, 1000, None, None, None);
+        assert!(validate_trip_timestamp_ordering(&trip).is_some());
+
+        // Invalid: EnRoute shouldn't have pickup_at
+        let trip = make_test_trip(TripState::EnRoute, 1000, 2000, Some(3000), None, None);
+        assert!(validate_trip_timestamp_ordering(&trip).is_some());
+    }
+
+    #[test]
+    fn validate_ontrip_trip_timestamps() {
+        let trip = make_test_trip(TripState::OnTrip, 1000, 2000, Some(3000), None, None);
+        assert!(validate_trip_timestamp_ordering(&trip).is_none());
+
+        // Invalid: matched_at > pickup_at
+        let trip = make_test_trip(TripState::OnTrip, 1000, 3000, Some(2000), None, None);
+        assert!(validate_trip_timestamp_ordering(&trip).is_some());
+
+        // Invalid: OnTrip should have pickup_at
+        let trip = make_test_trip(TripState::OnTrip, 1000, 2000, None, None, None);
+        assert!(validate_trip_timestamp_ordering(&trip).is_some());
+    }
+
+    #[test]
+    fn validate_completed_trip_timestamps() {
+        let trip = make_test_trip(TripState::Completed, 1000, 2000, Some(3000), Some(4000), None);
+        assert!(validate_trip_timestamp_ordering(&trip).is_none());
+
+        // Invalid: pickup_at > dropoff_at
+        let trip = make_test_trip(TripState::Completed, 1000, 2000, Some(4000), Some(3000), None);
+        assert!(validate_trip_timestamp_ordering(&trip).is_some());
+
+        // Invalid: Completed should have dropoff_at
+        let trip = make_test_trip(TripState::Completed, 1000, 2000, Some(3000), None, None);
+        assert!(validate_trip_timestamp_ordering(&trip).is_some());
+    }
+
+    #[test]
+    fn validate_cancelled_trip_timestamps() {
+        // Cancelled before pickup
+        let trip = make_test_trip(TripState::Cancelled, 1000, 2000, None, None, Some(3000));
+        assert!(validate_trip_timestamp_ordering(&trip).is_none());
+
+        // Cancelled after pickup
+        let trip = make_test_trip(TripState::Cancelled, 1000, 2000, Some(3000), None, Some(4000));
+        assert!(validate_trip_timestamp_ordering(&trip).is_none());
+
+        // Invalid: matched_at > cancelled_at
+        let trip = make_test_trip(TripState::Cancelled, 1000, 3000, None, None, Some(2000));
+        assert!(validate_trip_timestamp_ordering(&trip).is_some());
+
+        // Invalid: pickup_at > cancelled_at
+        let trip = make_test_trip(TripState::Cancelled, 1000, 2000, Some(4000), None, Some(3000));
+        assert!(validate_trip_timestamp_ordering(&trip).is_some());
+
+        // Invalid: Cancelled should have cancelled_at
+        let trip = make_test_trip(TripState::Cancelled, 1000, 2000, None, None, None);
+        assert!(validate_trip_timestamp_ordering(&trip).is_some());
+    }
+
+    #[test]
+    fn validate_all_trips_in_snapshots() {
+        use bevy_ecs::prelude::World;
+        use crate::runner::{run_until_empty, simulation_schedule};
+        use crate::scenario::{build_scenario, ScenarioParams};
+        use crate::telemetry::SimSnapshots;
+
+        let mut world = World::new();
+        build_scenario(
+            &mut world,
+            ScenarioParams {
+                num_riders: 10,
+                num_drivers: 5,
+                ..Default::default()
+            }
+            .with_seed(42)
+            .with_request_window_hours(1)
+            .with_match_radius(5)
+            .with_trip_duration_cells(5, 20),
+        );
+
+        let mut schedule = simulation_schedule();
+        run_until_empty(&mut world, &mut schedule, 100_000);
+
+        let snapshots = world.resource::<SimSnapshots>();
+        let mut errors = Vec::new();
+
+        for snapshot in &snapshots.snapshots {
+            for trip in &snapshot.trips {
+                if let Some(error) = validate_trip_timestamp_ordering(trip) {
+                    errors.push(format!(
+                        "Snapshot at {}ms: {}",
+                        snapshot.timestamp_ms, error
+                    ));
+                }
+            }
+        }
+
+        if !errors.is_empty() {
+            panic!(
+                "Found {} trip timestamp ordering errors:\n{}",
+                errors.len(),
+                errors.join("\n")
+            );
+        }
+    }
+}

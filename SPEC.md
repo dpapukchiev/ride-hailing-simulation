@@ -232,6 +232,12 @@ Large scenarios (e.g. 500 riders, 100 drivers) are run via the **example** only,
   - `write_trips_parquet(path, snapshots)` - exports all trips (same data as UI trip table), includes all states with full details
   - `write_snapshot_counts_parquet(path, snapshots)` - time-series counts
   - `write_agent_positions_parquet(path, snapshots)` - position snapshots for riders and drivers
+- **`validate_trip_timestamp_ordering(trip)`**: Validates that timestamps in a `TripSnapshot` follow the funnel order:
+  - **EnRoute**: `requested_at ≤ matched_at`, no pickup/dropoff/cancelled timestamps
+  - **OnTrip**: `requested_at ≤ matched_at ≤ pickup_at`, no dropoff/cancelled timestamps
+  - **Completed**: `requested_at ≤ matched_at ≤ pickup_at ≤ dropoff_at`, no cancelled timestamp
+  - **Cancelled**: `requested_at ≤ matched_at ≤ cancelled_at` (and `pickup_at ≤ cancelled_at` if pickup exists), no dropoff timestamp
+  Returns `Option<String>` with error message if validation fails, `None` if valid.
 
 ### `sim_core::systems::request_inbound`
 
@@ -398,6 +404,7 @@ Unit tests exist in each module to confirm behavior:
 - `movement`: driver moves toward rider and schedules trip start; `eta_ms` scales with distance.
 - `trip_started`: trip start transitions and completion scheduling.
 - `trip_completed`: rider/driver transition after completion.
+- `telemetry_export`: timestamp ordering validation for all trip states (EnRoute, OnTrip, Completed, Cancelled); integration test validates all trips in snapshots follow funnel order.
 - **End-to-end (single ride)**: Inserts `SimulationClock`, `SimTelemetry`. Seeds one
   rider (with `destination: None`) and one driver in the same cell, schedules
   `RequestInbound` (rider). Runs `run_until_empty` with `simulation_schedule()`.
