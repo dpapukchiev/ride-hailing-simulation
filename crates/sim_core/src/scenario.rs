@@ -26,6 +26,22 @@ const DEFAULT_REQUEST_WINDOW_MS: u64 = 60 * 60 * 1000;
 #[derive(Debug, Clone, Copy, Default, Resource)]
 pub struct MatchRadius(pub u32);
 
+/// Rider cancel window while waiting for pickup (seconds).
+#[derive(Debug, Clone, Copy, Resource)]
+pub struct RiderCancelConfig {
+    pub min_wait_secs: u64,
+    pub max_wait_secs: u64,
+}
+
+impl Default for RiderCancelConfig {
+    fn default() -> Self {
+        Self {
+            min_wait_secs: 120,
+            max_wait_secs: 2400,
+        }
+    }
+}
+
 /// Parameters for building a scenario.
 #[derive(Debug, Clone)]
 pub struct ScenarioParams {
@@ -133,6 +149,7 @@ pub fn build_scenario(world: &mut World, params: ScenarioParams) {
     world.insert_resource(SimSnapshotConfig::default());
     world.insert_resource(SimSnapshots::default());
     world.insert_resource(MatchRadius(params.match_radius));
+    world.insert_resource(RiderCancelConfig::default());
 
     let mut rng: StdRng = match params.seed {
         Some(seed) => StdRng::seed_from_u64(seed),

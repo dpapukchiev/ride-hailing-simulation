@@ -69,6 +69,7 @@ pub fn write_snapshot_counts_parquet<P: AsRef<Path>>(
     let mut riders_waiting = Vec::with_capacity(snapshots.snapshots.len());
     let mut riders_in_transit = Vec::with_capacity(snapshots.snapshots.len());
     let mut riders_completed = Vec::with_capacity(snapshots.snapshots.len());
+    let mut riders_cancelled = Vec::with_capacity(snapshots.snapshots.len());
     let mut drivers_idle = Vec::with_capacity(snapshots.snapshots.len());
     let mut drivers_evaluating = Vec::with_capacity(snapshots.snapshots.len());
     let mut drivers_en_route = Vec::with_capacity(snapshots.snapshots.len());
@@ -77,6 +78,7 @@ pub fn write_snapshot_counts_parquet<P: AsRef<Path>>(
     let mut trips_en_route = Vec::with_capacity(snapshots.snapshots.len());
     let mut trips_on_trip = Vec::with_capacity(snapshots.snapshots.len());
     let mut trips_completed = Vec::with_capacity(snapshots.snapshots.len());
+    let mut trips_cancelled = Vec::with_capacity(snapshots.snapshots.len());
 
     for snapshot in &snapshots.snapshots {
         timestamp_ms.push(snapshot.timestamp_ms);
@@ -85,6 +87,7 @@ pub fn write_snapshot_counts_parquet<P: AsRef<Path>>(
         riders_waiting.push(snapshot.counts.riders_waiting as u64);
         riders_in_transit.push(snapshot.counts.riders_in_transit as u64);
         riders_completed.push(snapshot.counts.riders_completed as u64);
+        riders_cancelled.push(snapshot.counts.riders_cancelled as u64);
         drivers_idle.push(snapshot.counts.drivers_idle as u64);
         drivers_evaluating.push(snapshot.counts.drivers_evaluating as u64);
         drivers_en_route.push(snapshot.counts.drivers_en_route as u64);
@@ -93,6 +96,7 @@ pub fn write_snapshot_counts_parquet<P: AsRef<Path>>(
         trips_en_route.push(snapshot.counts.trips_en_route as u64);
         trips_on_trip.push(snapshot.counts.trips_on_trip as u64);
         trips_completed.push(snapshot.counts.trips_completed as u64);
+        trips_cancelled.push(snapshot.counts.trips_cancelled as u64);
     }
 
     let schema = Schema::new(vec![
@@ -102,6 +106,7 @@ pub fn write_snapshot_counts_parquet<P: AsRef<Path>>(
         Field::new("riders_waiting", DataType::UInt64, false),
         Field::new("riders_in_transit", DataType::UInt64, false),
         Field::new("riders_completed", DataType::UInt64, false),
+        Field::new("riders_cancelled", DataType::UInt64, false),
         Field::new("drivers_idle", DataType::UInt64, false),
         Field::new("drivers_evaluating", DataType::UInt64, false),
         Field::new("drivers_en_route", DataType::UInt64, false),
@@ -110,6 +115,7 @@ pub fn write_snapshot_counts_parquet<P: AsRef<Path>>(
         Field::new("trips_en_route", DataType::UInt64, false),
         Field::new("trips_on_trip", DataType::UInt64, false),
         Field::new("trips_completed", DataType::UInt64, false),
+        Field::new("trips_cancelled", DataType::UInt64, false),
     ]);
 
     let arrays: Vec<ArrayRef> = vec![
@@ -119,6 +125,7 @@ pub fn write_snapshot_counts_parquet<P: AsRef<Path>>(
         Arc::new(UInt64Array::from(riders_waiting)),
         Arc::new(UInt64Array::from(riders_in_transit)),
         Arc::new(UInt64Array::from(riders_completed)),
+        Arc::new(UInt64Array::from(riders_cancelled)),
         Arc::new(UInt64Array::from(drivers_idle)),
         Arc::new(UInt64Array::from(drivers_evaluating)),
         Arc::new(UInt64Array::from(drivers_en_route)),
@@ -127,6 +134,7 @@ pub fn write_snapshot_counts_parquet<P: AsRef<Path>>(
         Arc::new(UInt64Array::from(trips_en_route)),
         Arc::new(UInt64Array::from(trips_on_trip)),
         Arc::new(UInt64Array::from(trips_completed)),
+        Arc::new(UInt64Array::from(trips_cancelled)),
     ];
 
     write_record_batch(path, schema, arrays)
@@ -203,6 +211,7 @@ fn rider_state_code(state: RiderState) -> u8 {
         RiderState::Waiting => 2,
         RiderState::InTransit => 3,
         RiderState::Completed => 4,
+        RiderState::Cancelled => 5,
     }
 }
 

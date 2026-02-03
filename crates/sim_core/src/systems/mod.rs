@@ -7,6 +7,7 @@ pub mod movement;
 pub mod trip_started;
 pub mod trip_completed;
 pub mod telemetry_snapshot;
+pub mod rider_cancel;
 
 #[cfg(test)]
 mod end_to_end_tests {

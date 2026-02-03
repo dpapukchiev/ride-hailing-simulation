@@ -327,31 +327,47 @@ impl eframe::App for SimUiApp {
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            let (latest_snapshot, active_trips_points, waiting_riders_points, idle_drivers_points) =
-                if let Some(snapshots) = self.world.get_resource::<SimSnapshots>() {
-                    let latest = snapshots.snapshots.back().cloned();
-                    let sim_epoch_ms = self
-                        .world
-                        .get_resource::<sim_core::clock::SimulationClock>()
-                        .map(|clock| clock.epoch_ms())
-                        .unwrap_or(0);
-                    let mut active = Vec::new();
-                    let mut waiting = Vec::new();
-                    let mut idle = Vec::new();
-                    for snapshot in snapshots.snapshots.iter() {
-                        let real_ms = sim_epoch_ms.saturating_add(snapshot.timestamp_ms as i64);
-                        let t = real_ms as f64 / 1000.0;
-                        let active_trips =
-                            (snapshot.counts.trips_en_route + snapshot.counts.trips_on_trip)
-                                as f64;
-                        active.push([t, active_trips]);
-                        waiting.push([t, snapshot.counts.riders_waiting as f64]);
-                        idle.push([t, snapshot.counts.drivers_idle as f64]);
-                    }
-                    (latest, active, waiting, idle)
-                } else {
-                    return;
-                };
+            let (
+                latest_snapshot,
+                active_trips_points,
+                waiting_riders_points,
+                idle_drivers_points,
+                cancelled_riders_points,
+                cancelled_trips_points,
+            ) = if let Some(snapshots) = self.world.get_resource::<SimSnapshots>() {
+                let latest = snapshots.snapshots.back().cloned();
+                let sim_epoch_ms = self
+                    .world
+                    .get_resource::<sim_core::clock::SimulationClock>()
+                    .map(|clock| clock.epoch_ms())
+                    .unwrap_or(0);
+                let mut active = Vec::new();
+                let mut waiting = Vec::new();
+                let mut idle = Vec::new();
+                let mut cancelled_riders = Vec::new();
+                let mut cancelled_trips = Vec::new();
+                for snapshot in snapshots.snapshots.iter() {
+                    let real_ms = sim_epoch_ms.saturating_add(snapshot.timestamp_ms as i64);
+                    let t = real_ms as f64 / 1000.0;
+                    let active_trips =
+                        (snapshot.counts.trips_en_route + snapshot.counts.trips_on_trip) as f64;
+                    active.push([t, active_trips]);
+                    waiting.push([t, snapshot.counts.riders_waiting as f64]);
+                    idle.push([t, snapshot.counts.drivers_idle as f64]);
+                    cancelled_riders.push([t, snapshot.counts.riders_cancelled as f64]);
+                    cancelled_trips.push([t, snapshot.counts.trips_cancelled as f64]);
+                }
+                (
+                    latest,
+                    active,
+                    waiting,
+                    idle,
+                    cancelled_riders,
+                    cancelled_trips,
+                )
+            } else {
+                return;
+            };
 
             ui.group(|ui| {
                 ui.heading("Map Legend");
@@ -420,6 +436,14 @@ impl eframe::App for SimUiApp {
                         plot_ui.line(
                             Line::new("Idle drivers", idle_drivers_points.clone())
                                 .color(chart_color_idle_drivers()),
+                        );
+                        plot_ui.line(
+                            Line::new("Cancelled riders", cancelled_riders_points.clone())
+                                .color(chart_color_cancelled_riders()),
+                        );
+                        plot_ui.line(
+                            Line::new("Cancelled trips", cancelled_trips_points.clone())
+                                .color(chart_color_cancelled_trips()),
                         );
                     });
             });
@@ -536,6 +560,7 @@ fn render_map_legend(ui: &mut egui::Ui) {
         legend_item(ui, rider_color(RiderState::Waiting), "Waiting");
         legend_item(ui, rider_color(RiderState::InTransit), "In transit");
         legend_item(ui, rider_color(RiderState::Completed), "Completed");
+        legend_item(ui, rider_color(RiderState::Cancelled), "Cancelled");
     });
     ui.horizontal(|ui| {
         ui.label("Drivers:");
@@ -553,6 +578,8 @@ fn render_metrics_legend(ui: &mut egui::Ui) {
         legend_item(ui, chart_color_active_trips(), "Active trips");
         legend_item(ui, chart_color_waiting_riders(), "Waiting riders");
         legend_item(ui, chart_color_idle_drivers(), "Idle drivers");
+        legend_item(ui, chart_color_cancelled_riders(), "Cancelled riders");
+        legend_item(ui, chart_color_cancelled_trips(), "Cancelled trips");
     });
 }
 
@@ -563,6 +590,7 @@ fn rider_color(state: RiderState) -> Color32 {
         RiderState::Waiting => Color32::from_rgb(255, 140, 0),
         RiderState::InTransit => Color32::from_rgb(0, 200, 120),
         RiderState::Completed => Color32::from_gray(140),
+        RiderState::Cancelled => Color32::from_rgb(200, 80, 80),
     }
 }
 
@@ -586,6 +614,14 @@ fn chart_color_waiting_riders() -> Color32 {
 
 fn chart_color_idle_drivers() -> Color32 {
     Color32::from_rgb(0, 200, 120)
+}
+
+fn chart_color_cancelled_riders() -> Color32 {
+    Color32::from_rgb(200, 80, 80)
+}
+
+fn chart_color_cancelled_trips() -> Color32 {
+    Color32::from_rgb(160, 80, 200)
 }
 
 fn now_unix_ms() -> u64 {
@@ -733,6 +769,7 @@ fn trip_state_label(state: TripState) -> &'static str {
         TripState::EnRoute => "EnRoute",
         TripState::OnTrip => "OnTrip",
         TripState::Completed => "Completed",
+        TripState::Cancelled => "Cancelled",
     }
 }
 

@@ -12,8 +12,8 @@ minimal ECS-based agent model. It currently supports:
 - A H3-based spatial index wrapper.
 - A binary-heap simulation clock with targeted discrete events.
 - ECS components for riders and drivers, including pairing links.
-- Simple, deterministic systems for request intake, matching, and trip
-  completion.
+- Simple, deterministic systems for request intake, matching, trip completion,
+  and rider pickup cancellations.
 - A **runner API** that advances the clock and routes events (pop → insert
   `CurrentEvent` → run schedule).
 - A **scenario** module that spawns riders and drivers with random positions
@@ -47,13 +47,15 @@ completion).
 
 In the current flow, riders start by requesting a trip, browse a quote, then
 wait for matching. Drivers start idle, evaluate a match offer, drive en route to
-pickup, and then move into an on-trip state. When the trip completes, the rider
-is marked completed and the driver returns to idle. Matching uses a configurable
-**match radius** (H3 grid distance): 0 = same cell only; a larger radius allows
-matching to idle drivers within that many cells. Trip length is configurable via
-min/max H3 cells from pickup to dropoff (movement uses 1 min per cell, so e.g.
-5–60 cells ≈ 5 min–1h). Throughout this flow, riders and drivers store links
-to each other so the pairing is explicit while a trip is in progress.
+pickup, and then move into an on-trip state. If a rider waits past a randomized
+pickup window, the ride is cancelled, the trip is marked cancelled, and the
+driver returns to idle. When the trip completes, the rider is marked completed
+and the driver returns to idle. Matching uses a configurable **match radius**
+(H3 grid distance): 0 = same cell only; a larger radius allows matching to idle
+drivers within that many cells. Trip length is configurable via min/max H3 cells
+from pickup to dropoff (movement uses 1 min per cell, so e.g. 5–60 cells ≈ 5
+min–1h). Throughout this flow, riders and drivers store links to each other so
+the pairing is explicit while a trip is in progress.
 
 ## Workspace Layout
 
@@ -79,6 +81,7 @@ crates/
         match_accepted.rs
         driver_decision.rs
         movement.rs
+        rider_cancel.rs
         trip_started.rs
         trip_completed.rs
     examples/
@@ -138,20 +141,20 @@ All time is in **milliseconds** (simulation ms). Time 0 maps to a real-world dat
 - **Constants**: `ONE_SEC_MS = 1000`, `ONE_MIN_MS = 60_000`.
 - **`Event`**: `timestamp` (u64, ms), `kind`, `subject`.
 - **`CurrentEvent`** (ECS `Resource`): the event currently being handled.
-- **`EventKind`** / **`EventSubject`**: unchanged.
+- **`EventKind`** / **`EventSubject`**: includes `RiderCancel` for pickup timeout events.
 - **`pending_event_count()`**: returns the number of events in the queue (for tests and scenario validation).
 
 ### `sim_core::ecs`
 
 Components and state enums:
 
-- `RiderState`: `Requesting`, `Browsing`, `Waiting`, `InTransit`, `Completed`
+- `RiderState`: `Requesting`, `Browsing`, `Waiting`, `InTransit`, `Completed`, `Cancelled`
 - `Rider` component: `{ state, matched_driver, destination: Option<CellIndex>, requested_at: Option<u64> }`
   - `destination`: requested dropoff cell; if `None`, a neighbor of pickup is used when the trip is created.
   - `requested_at`: simulation time (ms) when the rider transitioned to Browsing (set by `request_inbound_system`).
 - `DriverState`: `Idle`, `Evaluating`, `EnRoute`, `OnTrip`, `OffDuty`
 - `Driver` component: `{ state: DriverState, matched_rider: Option<Entity> }`
-- `TripState`: `EnRoute`, `OnTrip`, `Completed`
+- `TripState`: `EnRoute`, `OnTrip`, `Completed`, `Cancelled`
 - `Trip` component: `{ state, rider, driver, pickup, dropoff, requested_at: u64, matched_at: u64, pickup_at: Option<u64>, dropoff_at: Option<u64> }`
   - `pickup` / `dropoff`: trip is completed when the driver reaches `dropoff` (not a fixed +1 tick).
   - `requested_at` / `matched_at` / `pickup_at` / `dropoff_at`: simulation time in ms; used for KPIs. `dropoff_at` is set in `trip_completed_system`.
@@ -181,6 +184,7 @@ duplicating the pop → route → run loop.
 Scenario setup: spawn riders and drivers with random positions and request times.
 
 - **`MatchRadius`** (ECS `Resource`, default 0): max H3 grid distance for matching rider to driver. 0 = same cell only; larger values allow matching to idle drivers within that many cells. Inserted by `build_scenario` from `ScenarioParams::match_radius`.
+- **`RiderCancelConfig`** (ECS `Resource`): randomized pickup-wait window in seconds. Defaults to 120–600 seconds, inserted by `build_scenario`.
 - **`ScenarioParams`**: configurable scenario parameters:
   - `num_riders`, `num_drivers`: counts.
   - `seed`: optional RNG seed for reproducibility.
@@ -189,7 +193,7 @@ Scenario setup: spawn riders and drivers with random positions and request times
   - `match_radius`: max H3 grid distance for matching (0 = same cell only).
   - `min_trip_cells`, `max_trip_cells`: trip length in H3 cells; rider destinations are chosen at random distance in this range from pickup. Movement uses 1 min per cell (e.g. 5–60 ≈ 5 min–1h).
   - Builders: `with_seed(seed)`, `with_request_window_hours(hours)`, `with_match_radius(radius)`, `with_trip_duration_cells(min, max)`.
-- **`build_scenario(world, params)`**: inserts `SimulationClock`, `SimTelemetry`, `MatchRadius`; spawns riders (with random `Position` and optional `destination` in `[min_trip_cells, max_trip_cells]` from pickup) and drivers (random `Position`); schedules one `RequestInbound` per rider at a random sim time in `[0, request_window_ms]`.
+- **`build_scenario(world, params)`**: inserts `SimulationClock`, `SimTelemetry`, `MatchRadius`, and `RiderCancelConfig`; spawns riders (with random `Position` and optional `destination` in `[min_trip_cells, max_trip_cells]` from pickup) and drivers (random `Position`); schedules one `RequestInbound` per rider at a random sim time in `[0, request_window_ms]`.
 - Also inserts `SimSnapshotConfig` and `SimSnapshots` for periodic snapshot capture (used by the UI/export).
 
 Large scenarios (e.g. 500 riders, 100 drivers) are run via the **example** only, not in automated tests.
@@ -258,8 +262,20 @@ System: `driver_decision_system`
     - Accept: `Evaluating` → `EnRoute`, **spawns a `Trip` entity** with `pickup` =
       rider’s position, `dropoff` = rider’s `destination` or a neighbor of pickup,
       `requested_at` = rider’s `requested_at`, `matched_at` = clock.now(), `pickup_at` = None;
-      schedules `MoveStep` 1 second from now (`schedule_in_secs(1, ...)`) for that trip (`subject: Trip(trip_entity)`).
+      schedules `MoveStep` 1 second from now (`schedule_in_secs(1, ...)`) for that trip (`subject: Trip(trip_entity)`),
+      and schedules `RiderCancel` for the matched rider after a randomized wait window (`RiderCancelConfig`).
     - Reject: `Evaluating` → `Idle` and clears `matched_rider`.
+
+### `sim_core::systems::rider_cancel`
+
+System: `rider_cancel_system`
+
+- Reacts to `CurrentEvent`.
+- On `EventKind::RiderCancel` with subject `Rider(rider_entity)`:
+  - If the rider is still `Waiting` with a matched driver and an `EnRoute` trip:
+    - Rider: `Waiting` → `Cancelled`, clears `matched_driver`, then the rider entity is despawned
+    - Driver: `EnRoute` → `Idle`, clears `matched_rider`
+    - Trip: `EnRoute` → `Cancelled`
 
 ### `sim_core::systems::movement`
 
@@ -273,6 +289,7 @@ System: `movement_system`
   - **OnTrip**: moves the trip’s driver one H3 hop toward `trip.dropoff`. If still en route,
     reschedules `MoveStep` with `schedule_in(eta_ms(remaining), ...)`; when driver reaches dropoff,
     schedules `TripCompleted` 1 second from now (`schedule_in_secs(1, ...)`).
+  - **Cancelled/Completed**: no-op.
 - ETA in ms: `eta_ms(distance)` — at least 1 second (`ONE_SEC_MS`); otherwise distance × 1 min per H3 cell (`ONE_MIN_MS`). Used for `schedule_in(eta_ms(remaining), ...)`.
 
 This is a deterministic, FCFS-style placeholder. No distance or cost logic
@@ -320,6 +337,7 @@ Unit tests exist in each module to confirm behavior:
 - `simple_matching`: targeted match attempt and transition.
 - `match_accepted`: driver decision scheduled.
 - `driver_decision`: driver accept/reject decision.
+- `rider_cancel`: rider cancels when pickup wait expires.
 - `movement`: driver moves toward rider and schedules trip start; `eta_ms` scales with distance.
 - `trip_started`: trip start transitions and completion scheduling.
 - `trip_completed`: rider/driver transition after completion.

@@ -11,6 +11,7 @@ use crate::clock::{CurrentEvent, Event, SimulationClock};
 use crate::systems::{
     driver_decision::driver_decision_system, match_accepted::match_accepted_system,
     movement::movement_system, quote_accepted::quote_accepted_system,
+    rider_cancel::rider_cancel_system,
     request_inbound::request_inbound_system, simple_matching::simple_matching_system,
     telemetry_snapshot::capture_snapshot_system, trip_completed::trip_completed_system,
     trip_started::trip_started_system,
@@ -80,6 +81,7 @@ pub fn simulation_schedule() -> Schedule {
         simple_matching_system,
         match_accepted_system,
         driver_decision_system,
+        rider_cancel_system,
         movement_system,
         trip_started_system,
         trip_completed_system,

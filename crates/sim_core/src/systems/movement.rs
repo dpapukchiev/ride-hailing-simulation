@@ -33,7 +33,7 @@ pub fn movement_system(
         let target = match trip.state {
             TripState::EnRoute => trip.pickup,
             TripState::OnTrip => trip.dropoff,
-            TripState::Completed => return,
+            TripState::Completed | TripState::Cancelled => return,
         };
         (trip.driver, target, trip.state == TripState::EnRoute)
     };

@@ -1,7 +1,9 @@
 use bevy_ecs::prelude::{Commands, Query, Res, ResMut};
+use rand::Rng;
 
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
-use crate::ecs::{Driver, DriverState, Position, Rider, Trip, TripState};
+use crate::ecs::{Driver, DriverState, Position, Rider, RiderState, Trip, TripState};
+use crate::scenario::RiderCancelConfig;
 
 fn logit_accepts(score: f64) -> bool {
     let probability = 1.0 / (1.0 + (-score).exp());
@@ -22,6 +24,7 @@ pub fn driver_decision_system(
     mut commands: Commands,
     mut drivers: Query<&mut Driver>,
     riders: Query<(&Rider, &Position)>,
+    cancel_config: Option<Res<RiderCancelConfig>>,
 ) {
     if event.0.kind != EventKind::DriverDecision {
         return;
@@ -43,20 +46,25 @@ pub fn driver_decision_system(
             return;
         };
 
-        let (pickup, dropoff, requested_at) = match riders.get(rider_entity) {
+        let (pickup, dropoff, requested_at, rider_waiting) = match riders.get(rider_entity) {
             Ok((rider, pos)) => {
                 let pickup = pos.0;
                 let dropoff = rider
                     .destination
                     .unwrap_or_else(|| default_dropoff(pickup));
                 let requested_at = rider.requested_at.unwrap_or(clock.now());
-                (pickup, dropoff, requested_at)
+                (pickup, dropoff, requested_at, rider.state == RiderState::Waiting)
             }
             Err(_) => {
                 driver.state = DriverState::Idle;
                 return;
             }
         };
+        if !rider_waiting {
+            driver.state = DriverState::Idle;
+            driver.matched_rider = None;
+            return;
+        }
 
         let matched_at = clock.now();
         driver.state = DriverState::EnRoute;
@@ -75,6 +83,19 @@ pub fn driver_decision_system(
             .id();
 
         clock.schedule_in_secs(1, EventKind::MoveStep, Some(EventSubject::Trip(trip_entity)));
+        let config = cancel_config
+            .as_deref()
+            .copied()
+            .unwrap_or_default();
+        let min_wait_secs = config.min_wait_secs;
+        let max_wait_secs = config.max_wait_secs.max(min_wait_secs);
+        let mut rng = rand::thread_rng();
+        let wait_secs = rng.gen_range(min_wait_secs..=max_wait_secs);
+        clock.schedule_in_secs(
+            wait_secs,
+            EventKind::RiderCancel,
+            Some(EventSubject::Rider(rider_entity)),
+        );
     } else {
         driver.state = DriverState::Idle;
         driver.matched_rider = None;

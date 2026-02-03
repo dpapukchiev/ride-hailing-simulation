@@ -8,6 +8,7 @@ pub enum RiderState {
     Waiting,
     InTransit,
     Completed,
+    Cancelled,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]
@@ -40,6 +41,7 @@ pub enum TripState {
     EnRoute,
     OnTrip,
     Completed,
+    Cancelled,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]

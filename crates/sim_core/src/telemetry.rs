@@ -80,6 +80,7 @@ pub struct SimCounts {
     pub riders_waiting: usize,
     pub riders_in_transit: usize,
     pub riders_completed: usize,
+    pub riders_cancelled: usize,
     pub drivers_idle: usize,
     pub drivers_evaluating: usize,
     pub drivers_en_route: usize,
@@ -88,6 +89,7 @@ pub struct SimCounts {
     pub trips_en_route: usize,
     pub trips_on_trip: usize,
     pub trips_completed: usize,
+    pub trips_cancelled: usize,
 }
 
 /// Snapshot of simulation state at a specific timestamp (simulation ms).
@@ -131,6 +133,7 @@ impl SimCounts {
             RiderState::Waiting => self.riders_waiting += 1,
             RiderState::InTransit => self.riders_in_transit += 1,
             RiderState::Completed => self.riders_completed += 1,
+            RiderState::Cancelled => self.riders_cancelled += 1,
         }
     }
 
@@ -149,6 +152,7 @@ impl SimCounts {
             TripState::EnRoute => self.trips_en_route += 1,
             TripState::OnTrip => self.trips_on_trip += 1,
             TripState::Completed => self.trips_completed += 1,
+            TripState::Cancelled => self.trips_cancelled += 1,
         }
     }
 }

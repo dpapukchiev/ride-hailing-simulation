@@ -24,6 +24,7 @@ pub enum EventKind {
     MoveStep,
     TripStarted,
     TripCompleted,
+    RiderCancel,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
