@@ -104,6 +104,12 @@ pub fn render_control_panel(ui: &mut egui::Ui, app: &mut SimUiApp) {
         .show(ui, |ui| {
             render_run_outcomes(ui, app);
         });
+
+    egui::CollapsingHeader::new("Fleet")
+        .default_open(true)
+        .show(ui, |ui| {
+            render_fleet(ui, app);
+        });
 }
 
 /// Render run outcome counters and optional completed-trip timing stats from SimTelemetry.
@@ -116,7 +122,7 @@ fn render_run_outcomes(ui: &mut egui::Ui, app: &SimUiApp) {
         }
     };
 
-    // Outcome counters: 3 columns
+    // Outcome counters: 5 columns
     let total_resolved = telemetry.riders_completed_total
         .saturating_add(telemetry.riders_cancelled_total)
         .saturating_add(telemetry.riders_abandoned_quote_total);
@@ -126,20 +132,24 @@ fn render_run_outcomes(ui: &mut egui::Ui, app: &SimUiApp) {
         0.0
     };
 
-    ui.columns(3, |columns| {
+    ui.columns(5, |columns| {
         columns[0].vertical(|ui| {
             ui.label("Riders completed");
             ui.label(telemetry.riders_completed_total.to_string());
-            ui.label("Trips completed");
-            ui.label(telemetry.completed_trips.len().to_string());
         });
         columns[1].vertical(|ui| {
             ui.label("Riders cancelled");
             ui.label(telemetry.riders_cancelled_total.to_string());
+        });
+        columns[2].vertical(|ui| {
             ui.label("Abandoned (quote)");
             ui.label(telemetry.riders_abandoned_quote_total.to_string());
         });
-        columns[2].vertical(|ui| {
+        columns[3].vertical(|ui| {
+            ui.label("Trips completed");
+            ui.label(telemetry.completed_trips.len().to_string());
+        });
+        columns[4].vertical(|ui| {
             ui.label("Total resolved");
             ui.label(total_resolved.to_string());
             ui.label("Conversion %");
@@ -147,34 +157,28 @@ fn render_run_outcomes(ui: &mut egui::Ui, app: &SimUiApp) {
         });
     });
 
-    // Current state (from latest snapshot)
+    // Current state (from latest snapshot): 5 columns
     if let Some(snapshots) = app.world.get_resource::<SimSnapshots>() {
         if let Some(latest) = snapshots.snapshots.back() {
             let c = &latest.counts;
-            ui.columns(3, |columns| {
+            ui.columns(5, |columns| {
                 columns[0].vertical(|ui| {
                     ui.label("Riders now:");
-                    ui.horizontal(|ui| {
-                        ui.label(format!("browsing {} waiting {} in transit {}", c.riders_browsing, c.riders_waiting, c.riders_in_transit));
-                    });
+                    ui.label(format!("browsing {} waiting {} in transit {}", c.riders_browsing, c.riders_waiting, c.riders_in_transit));
                 });
                 columns[1].vertical(|ui| {
                     ui.label("Drivers now:");
-                    ui.horizontal(|ui| {
-                        ui.label(format!("idle {} en route {} on trip {} off duty {}", c.drivers_idle, c.drivers_en_route, c.drivers_on_trip, c.drivers_off_duty));
-                    });
+                    ui.label(format!("idle {} en route {} on trip {} off duty {}", c.drivers_idle, c.drivers_en_route, c.drivers_on_trip, c.drivers_off_duty));
                 });
                 columns[2].vertical(|ui| {
                     ui.label("Trips now:");
-                    ui.horizontal(|ui| {
-                        ui.label(format!("en route {} on trip {}", c.trips_en_route, c.trips_on_trip));
-                    });
+                    ui.label(format!("en route {} on trip {}", c.trips_en_route, c.trips_on_trip));
                 });
             });
         }
     }
 
-    // Timing distribution: 3 columns (time to match | time to pickup | trip duration)
+    // Timing distribution: 5 columns (time to match | time to pickup | trip duration)
     if !telemetry.completed_trips.is_empty() {
         const PERCENTILES: &[(u8, &str)] = &[(50, "p50"), (90, "p90"), (95, "p95"), (99, "p99")];
         let n = telemetry.completed_trips.len();
@@ -183,7 +187,7 @@ fn render_run_outcomes(ui: &mut egui::Ui, app: &SimUiApp) {
         let pickup_dist = timing_distribution(telemetry.completed_trips.as_slice(), CompletedTripRecord::time_to_pickup);
         let trip_dist = timing_distribution(telemetry.completed_trips.as_slice(), CompletedTripRecord::trip_duration);
 
-        ui.columns(3, |columns| {
+        ui.columns(5, |columns| {
             columns[0].vertical(|ui| {
                 ui.label(format!("Time to match (n={})", n));
                 ui.label(format!("min {}  max {}", format_hms_from_ms(match_dist.min), format_hms_from_ms(match_dist.max)));
@@ -216,6 +220,244 @@ fn render_run_outcomes(ui: &mut egui::Ui, app: &SimUiApp) {
             });
         });
     }
+}
+
+/// Render fleet metrics: utilization, state breakdown, daily targets, fatigue.
+fn render_fleet(ui: &mut egui::Ui, app: &SimUiApp) {
+    let snapshots = match app.world.get_resource::<SimSnapshots>() {
+        Some(s) => s,
+        None => {
+            ui.label("—");
+            return;
+        }
+    };
+    let clock = match app.world.get_resource::<sim_core::clock::SimulationClock>() {
+        Some(c) => c,
+        None => {
+            ui.label("—");
+            return;
+        }
+    };
+    let latest = match snapshots.snapshots.back() {
+        Some(s) => s,
+        None => {
+            ui.label("—");
+            return;
+        }
+    };
+
+    let c = &latest.counts;
+    let sim_now_ms = clock.now();
+    let total_drivers = c.drivers_idle
+        + c.drivers_evaluating
+        + c.drivers_en_route
+        + c.drivers_on_trip
+        + c.drivers_off_duty;
+    let active_drivers = total_drivers.saturating_sub(c.drivers_off_duty);
+    let busy = c.drivers_en_route + c.drivers_on_trip;
+    let utilization_pct = if active_drivers > 0 {
+        (busy as f64 / active_drivers as f64) * 100.0
+    } else {
+        0.0
+    };
+
+    let (sum_earnings, sum_target, targets_met) = latest.drivers.iter().fold(
+        (0.0_f64, 0.0_f64, 0_usize),
+        |(sum_e, sum_t, met), d| {
+            let e = d.daily_earnings.unwrap_or(0.0);
+            let t = d.daily_earnings_target.unwrap_or(0.0);
+            let met_inc = if t > 0.0 && e >= t { 1 } else { 0 };
+            (sum_e + e, sum_t + t, met + met_inc)
+        },
+    );
+    let drivers_with_earnings = latest
+        .drivers
+        .iter()
+        .filter(|d| d.daily_earnings.is_some())
+        .count();
+    let avg_earnings = if drivers_with_earnings > 0 {
+        sum_earnings / drivers_with_earnings as f64
+    } else {
+        0.0
+    };
+    let avg_target = if drivers_with_earnings > 0 {
+        sum_target / drivers_with_earnings as f64
+    } else {
+        0.0
+    };
+
+    let mut earnings_values: Vec<f64> = latest
+        .drivers
+        .iter()
+        .filter_map(|d| d.daily_earnings)
+        .collect();
+    earnings_values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let n_earnings = earnings_values.len();
+    let (earnings_min, earnings_mean, earnings_max) = if n_earnings == 0 {
+        (0.0, 0.0, 0.0)
+    } else {
+        let min = earnings_values.first().copied().unwrap_or(0.0);
+        let max = earnings_values.last().copied().unwrap_or(0.0);
+        let mean = earnings_values.iter().sum::<f64>() / n_earnings as f64;
+        (min, mean, max)
+    };
+
+    let mut ratio_values: Vec<f64> = latest
+        .drivers
+        .iter()
+        .filter_map(|d| {
+            let e = d.daily_earnings?;
+            let t = d.daily_earnings_target?;
+            if t > 0.0 {
+                Some(e / t)
+            } else {
+                None
+            }
+        })
+        .collect();
+    ratio_values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let n_ratio = ratio_values.len();
+    let (ratio_min, ratio_mean, ratio_max) = if n_ratio == 0 {
+        (0.0, 0.0, 0.0)
+    } else {
+        let min = ratio_values.first().copied().unwrap_or(0.0);
+        let max = ratio_values.last().copied().unwrap_or(0.0);
+        let mean = ratio_values.iter().sum::<f64>() / n_ratio as f64;
+        (min, mean, max)
+    };
+
+    fn percentile_f64(sorted: &[f64], p: u8) -> Option<f64> {
+        if sorted.is_empty() || p > 100 {
+            return None;
+        }
+        let n = sorted.len();
+        let idx = ((p as usize) * (n - 1)) / 100;
+        Some(sorted[idx])
+    }
+
+    let mut at_fatigue_limit = 0_usize;
+    let mut session_durations: Vec<u64> = Vec::new();
+    let mut fatigue_thresholds: Vec<u64> = Vec::new();
+    for d in &latest.drivers {
+        if let (Some(start), Some(threshold)) = (d.session_start_time_ms, d.fatigue_threshold_ms) {
+            let session_ms = sim_now_ms.saturating_sub(start);
+            if session_ms >= threshold {
+                at_fatigue_limit += 1;
+            }
+            session_durations.push(session_ms);
+            fatigue_thresholds.push(threshold);
+        }
+    }
+    let n_fatigue = session_durations.len();
+    let (session_min, session_mean, session_max) = if n_fatigue == 0 {
+        (0u64, 0u64, 0u64)
+    } else {
+        let min = *session_durations.iter().min().unwrap();
+        let max = *session_durations.iter().max().unwrap();
+        let mean = session_durations.iter().sum::<u64>() / n_fatigue as u64;
+        (min, mean, max)
+    };
+    let (fatigue_min, fatigue_mean, fatigue_max) = if fatigue_thresholds.is_empty() {
+        (0u64, 0u64, 0u64)
+    } else {
+        let min = *fatigue_thresholds.iter().min().unwrap();
+        let max = *fatigue_thresholds.iter().max().unwrap();
+        let mean = fatigue_thresholds.iter().sum::<u64>() / fatigue_thresholds.len() as u64;
+        (min, mean, max)
+    };
+
+    ui.columns(5, |columns| {
+        columns[0].vertical(|ui| {
+            ui.label("Utilization (busy %)");
+            ui.label(format!("{:.1}%", utilization_pct));
+            ui.label("Total drivers");
+            ui.label(total_drivers.to_string());
+            ui.label("Active (not off duty)");
+            ui.label(active_drivers.to_string());
+        });
+        columns[1].vertical(|ui| {
+            ui.label("State breakdown:");
+            ui.label(format!(
+                "idle {} eval {} en_route {} on_trip {} off_duty {}",
+                c.drivers_idle,
+                c.drivers_evaluating,
+                c.drivers_en_route,
+                c.drivers_on_trip,
+                c.drivers_off_duty
+            ));
+            if total_drivers > 0 {
+                ui.label(format!(
+                    "Idle {:.0}% | En route {:.0}% | On trip {:.0}% | Off duty {:.0}%",
+                    (c.drivers_idle as f64 / total_drivers as f64) * 100.0,
+                    (c.drivers_en_route as f64 / total_drivers as f64) * 100.0,
+                    (c.drivers_on_trip as f64 / total_drivers as f64) * 100.0,
+                    (c.drivers_off_duty as f64 / total_drivers as f64) * 100.0
+                ));
+            }
+        });
+        columns[2].vertical(|ui| {
+            ui.label("Sum daily earnings");
+            ui.label(format!("{:.1}", sum_earnings));
+            ui.label("Sum daily targets");
+            ui.label(format!("{:.1}", sum_target));
+            ui.label("Targets met");
+            ui.label(targets_met.to_string());
+            ui.label("Off duty");
+            ui.label(c.drivers_off_duty.to_string());
+            ui.label("Avg earnings / driver");
+            ui.label(format!("{:.1}", avg_earnings));
+            ui.label("Avg target / driver");
+            ui.label(format!("{:.1}", avg_target));
+        });
+        columns[3].vertical(|ui| {
+            if n_earnings > 0 {
+                ui.label(format!("Earnings distribution (n={})", n_earnings));
+                ui.label(format!(
+                    "min {:.1}  max {:.1}  avg {:.1}",
+                    earnings_min, earnings_max, earnings_mean
+                ));
+                for (p, label) in [(50, "p50"), (90, "p90"), (95, "p95"), (99, "p99")] {
+                    if let Some(v) = percentile_f64(&earnings_values, p) {
+                        ui.label(format!("{} {:.1}", label, v));
+                    }
+                }
+            }
+            if n_ratio > 0 {
+                ui.add_space(4.0);
+                ui.label(format!("Earnings/target distribution (n={})", n_ratio));
+                ui.label(format!(
+                    "min {:.2}  max {:.2}  avg {:.2}",
+                    ratio_min, ratio_max, ratio_mean
+                ));
+                for (p, label) in [(50, "p50"), (90, "p90"), (95, "p95"), (99, "p99")] {
+                    if let Some(v) = percentile_f64(&ratio_values, p) {
+                        ui.label(format!("{} {:.2}", label, v));
+                    }
+                }
+            }
+        });
+        columns[4].vertical(|ui| {
+            ui.label("At fatigue limit");
+            ui.label(at_fatigue_limit.to_string());
+            ui.label("Session duration (min / avg / max)");
+            ui.label(format!(
+                "{} / {} / {}",
+                format_hms_from_ms(session_min),
+                format_hms_from_ms(session_mean),
+                format_hms_from_ms(session_max)
+            ));
+            ui.label("Fatigue threshold (min / avg / max)");
+            ui.label(format!(
+                "{} / {} / {}",
+                format_hms_from_ms(fatigue_min),
+                format_hms_from_ms(fatigue_mean),
+                format_hms_from_ms(fatigue_max)
+            ));
+            if n_fatigue > 0 {
+                ui.label(format!("Drivers with fatigue data: {}", n_fatigue));
+            }
+        });
+    });
 }
 
 /// Min, mean, max and sorted values for percentile computation. Durations in ms.
