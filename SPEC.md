@@ -228,9 +228,10 @@ Large scenarios (e.g. 500 riders, 100 drivers) are run via the **example** only,
 ### `sim_core::telemetry_export`
 
 - Parquet export helpers for analytics:
-  - `write_completed_trips_parquet(path, telemetry)`
-  - `write_snapshot_counts_parquet(path, snapshots)`
-  - `write_agent_positions_parquet(path, snapshots)`
+  - `write_completed_trips_parquet(path, telemetry)` - exports only completed trips
+  - `write_trips_parquet(path, snapshots)` - exports all trips (same data as UI trip table), includes all states with full details
+  - `write_snapshot_counts_parquet(path, snapshots)` - time-series counts
+  - `write_agent_positions_parquet(path, snapshots)` - position snapshots for riders and drivers
 
 ### `sim_core::systems::request_inbound`
 
@@ -422,8 +423,7 @@ All per-system unit tests emulate the runner by popping one event, inserting
   is empty (up to 2M steps) and prints steps executed, simulation time, completed
   trip count, and up to 100 sample completed trips (time_to_match, time_to_pickup,
   trip_duration, completed_at in seconds).
-- Set `SIM_EXPORT_DIR=/path` to export `completed_trips.parquet`, `snapshot_counts.parquet`,
-  and `agent_positions.parquet`.
+- Set `SIM_EXPORT_DIR=/path` to export `completed_trips.parquet`, `trips.parquet` (all trips with full details, same as UI table), `snapshot_counts.parquet`, and `agent_positions.parquet`.
 - **`sim_ui`** (`cargo run -p sim_ui`): Native UI that runs the scenario in-process,
   renders riders/drivers on a map with icons and state-based colors, and charts for
   active trips, completed trips, waiting riders, and idle drivers. The UI starts paused, allows

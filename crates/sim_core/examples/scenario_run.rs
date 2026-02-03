@@ -7,6 +7,7 @@ use sim_core::runner::{run_until_empty, simulation_schedule};
 use sim_core::scenario::{build_scenario, ScenarioParams};
 use sim_core::telemetry_export::{
     write_agent_positions_parquet, write_completed_trips_parquet, write_snapshot_counts_parquet,
+    write_trips_parquet,
 };
 use std::env;
 use std::fs;
@@ -78,6 +79,7 @@ fn main() {
         let trips_path = export_path.join("completed_trips.parquet");
         let counts_path = export_path.join("snapshot_counts.parquet");
         let positions_path = export_path.join("agent_positions.parquet");
+        let all_trips_path = export_path.join("trips.parquet");
 
         let snapshots = world.resource::<sim_core::telemetry::SimSnapshots>();
         if let Err(err) = write_completed_trips_parquet(&trips_path, telemetry) {
@@ -88,6 +90,9 @@ fn main() {
         }
         if let Err(err) = write_agent_positions_parquet(&positions_path, snapshots) {
             eprintln!("Failed to export agent positions: {}", err);
+        }
+        if let Err(err) = write_trips_parquet(&all_trips_path, snapshots) {
+            eprintln!("Failed to export trips: {}", err);
         }
 
         println!("Exported Parquet files to {:?}", export_path);
