@@ -57,7 +57,7 @@ to each other so the pairing is explicit while a trip is in progress.
 
 ## Workspace Layout
 
-```
+```text
 README.md
 Cargo.toml
 crates/
@@ -83,6 +83,10 @@ crates/
         trip_completed.rs
     examples/
       scenario_run.rs
+  sim_ui/
+    Cargo.toml
+    src/
+      main.rs
 ```
 
 ## Dependencies
@@ -92,6 +96,12 @@ crates/
 - `h3o = "0.8"` for H3 spatial indexing (stable toolchain compatible).
 - `bevy_ecs = "0.13"` for ECS world, components, and systems.
 - `rand = "0.8"` for scenario randomisation (positions, request times, destinations).
+- `arrow` + `parquet` for Parquet export of completed trips and snapshots.
+
+`crates/sim_ui/Cargo.toml`:
+
+- `eframe` + `egui_plot` for the native visualization UI.
+- `bevy_ecs` + `h3o` for shared types and map projection.
 
 ## Tooling
 
@@ -115,6 +125,7 @@ All time is in **milliseconds** (simulation ms). Time 0 maps to a real-world dat
 - **`SimulationClock`** (ECS `Resource`):
   - `now: u64` — current simulation time in ms (updated when an event is popped).
   - `epoch_ms: i64` — real-world ms corresponding to sim time 0 (e.g. from a datetime). Use `with_epoch(epoch_ms)` to set.
+  - `set_epoch_ms(epoch_ms)` updates the epoch after construction (used by the UI).
   - `events: BinaryHeap<Event>` — min-heap by timestamp; **same-ms events** are ordered by `EventKind` for determinism.
 - **Scheduling** (callers can use ms, seconds, or minutes):
   - **Absolute**: `schedule_at(at_ms, ...)`, `schedule_at_secs(at_secs, ...)`, `schedule_at_mins(at_mins, ...)` — schedule at a simulation timestamp.
@@ -179,6 +190,7 @@ Scenario setup: spawn riders and drivers with random positions and request times
   - `min_trip_cells`, `max_trip_cells`: trip length in H3 cells; rider destinations are chosen at random distance in this range from pickup. Movement uses 1 min per cell (e.g. 5–60 ≈ 5 min–1h).
   - Builders: `with_seed(seed)`, `with_request_window_hours(hours)`, `with_match_radius(radius)`, `with_trip_duration_cells(min, max)`.
 - **`build_scenario(world, params)`**: inserts `SimulationClock`, `SimTelemetry`, `MatchRadius`; spawns riders (with random `Position` and optional `destination` in `[min_trip_cells, max_trip_cells]` from pickup) and drivers (random `Position`); schedules one `RequestInbound` per rider at a random sim time in `[0, request_window_ms]`.
+- Also inserts `SimSnapshotConfig` and `SimSnapshots` for periodic snapshot capture (used by the UI/export).
 
 Large scenarios (e.g. 500 riders, 100 drivers) are run via the **example** only, not in automated tests.
 
@@ -187,6 +199,16 @@ Large scenarios (e.g. 500 riders, 100 drivers) are run via the **example** only,
 - **`SimTelemetry`** (ECS `Resource`, default): holds `completed_trips: Vec<CompletedTripRecord>`.
 - **`CompletedTripRecord`**: `{ trip_entity, rider_entity, driver_entity, completed_at, requested_at, matched_at, pickup_at }` (all timestamps in **simulation ms**). Helper methods: **`time_to_match()`**, **`time_to_pickup()`**, **`trip_duration()`** (all in ms).
 - Insert `SimTelemetry::default()` when building the world to record completed trips; `trip_completed_system` pushes one record per completed trip with timestamps from the Trip and clock.
+- **`SimSnapshotConfig`** (ECS `Resource`): `{ interval_ms, max_snapshots }` controls snapshot cadence and buffer size.
+- **`SimSnapshots`** (ECS `Resource`): rolling `VecDeque<SimSnapshot>` plus `last_snapshot_at`; populated by the snapshot system.
+- **`SimSnapshot`**: `{ timestamp_ms, counts, riders, drivers, trips }` with state-aware position snapshots plus trip state snapshots for visualization/export.
+
+### `sim_core::telemetry_export`
+
+- Parquet export helpers for analytics:
+  - `write_completed_trips_parquet(path, telemetry)`
+  - `write_snapshot_counts_parquet(path, snapshots)`
+  - `write_agent_positions_parquet(path, snapshots)`
 
 ### `sim_core::systems::request_inbound`
 
@@ -276,9 +298,16 @@ System: `trip_completed_system`
 - Reacts to `CurrentEvent`.
 - On `EventKind::TripCompleted` with subject `Trip(trip_entity)`:
   - Driver: `OnTrip` → `Idle` and clears `matched_rider`
-  - Rider: `InTransit` → `Completed` and clears `matched_driver`
+  - Rider: `InTransit` → `Completed` and clears `matched_driver`, then the rider entity is despawned
   - Trip: `OnTrip` → `Completed`
   - Pushes a `CompletedTripRecord` to `SimTelemetry` with trip/rider/driver entities and timestamps (requested_at, matched_at, pickup_at, completed_at) for KPIs.
+
+### `sim_core::systems::telemetry_snapshot`
+
+System: `capture_snapshot_system`
+
+- Runs after each event and captures a snapshot when `interval_ms` has elapsed.
+- Records rider/driver positions and state counts into `SimSnapshots` (rolling buffer).
 
 ## Tests
 
@@ -319,6 +348,15 @@ All per-system unit tests emulate the runner by popping one event, inserting
   is empty (up to 2M steps) and prints steps executed, simulation time, completed
   trip count, and up to 100 sample completed trips (time_to_match, time_to_pickup,
   trip_duration, completed_at in seconds).
+- Set `SIM_EXPORT_DIR=/path` to export `completed_trips.parquet`, `snapshot_counts.parquet`,
+  and `agent_positions.parquet`.
+- **`sim_ui`** (`cargo run -p sim_ui`): Native UI that runs the scenario in-process,
+  renders riders/drivers on a map with icons and state-based colors, and charts for
+  active trips, waiting riders, and idle drivers. The UI starts paused, allows
+  scenario parameter edits before start, shows sim/wall-clock datetimes, overlays
+  a metric grid for scale, and includes a live trip table sorted by completion
+  when the simulation ends. A real-time clock speed selector (2x–50x) controls
+  simulation playback.
 
 ## Known Gaps (Not Implemented Yet)
 

@@ -1,4 +1,4 @@
-use bevy_ecs::prelude::{Query, Res, ResMut};
+use bevy_ecs::prelude::{Commands, Query, Res, ResMut};
 
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
 use crate::ecs::{Driver, DriverState, Rider, RiderState, Trip, TripState};
@@ -8,6 +8,7 @@ pub fn trip_completed_system(
     event: Res<CurrentEvent>,
     clock: Res<SimulationClock>,
     mut telemetry: ResMut<SimTelemetry>,
+    mut commands: Commands,
     mut trips: Query<&mut Trip>,
     mut riders: Query<&mut Rider>,
     mut drivers: Query<&mut Driver>,
@@ -58,12 +59,15 @@ pub fn trip_completed_system(
         matched_at: trip.matched_at,
         pickup_at,
     });
+
+    commands.entity(rider_entity).despawn();
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use bevy_ecs::prelude::{Schedule, World};
+    use bevy_ecs::schedule::apply_deferred;
 
     use crate::clock::SimulationClock;
 
@@ -122,21 +126,17 @@ mod tests {
         world.insert_resource(CurrentEvent(event));
 
         let mut schedule = Schedule::default();
-        schedule.add_systems(trip_completed_system);
+        schedule.add_systems((trip_completed_system, apply_deferred));
         schedule.run(&mut world);
 
-        let (rider_state, matched_driver) = {
-            let rider = world.query::<&Rider>().single(&world);
-            (rider.state, rider.matched_driver)
-        };
+        let rider_state = world.query::<&Rider>().iter(&world).next().map(|r| r.state);
         let (driver_state, matched_rider) = {
             let driver = world.query::<&Driver>().single(&world);
             (driver.state, driver.matched_rider)
         };
 
-        assert_eq!(rider_state, RiderState::Completed);
+        assert_eq!(rider_state, None, "rider should be despawned on completion");
         assert_eq!(driver_state, DriverState::Idle);
-        assert_eq!(matched_driver, None);
         assert_eq!(matched_rider, None);
 
         let trip_state = world.entity(trip_entity).get::<Trip>().expect("trip").state;

@@ -7,12 +7,13 @@
 use bevy_ecs::prelude::{Schedule, World};
 use bevy_ecs::schedule::apply_deferred;
 
-use crate::clock::{CurrentEvent, SimulationClock};
+use crate::clock::{CurrentEvent, Event, SimulationClock};
 use crate::systems::{
     driver_decision::driver_decision_system, match_accepted::match_accepted_system,
     movement::movement_system, quote_accepted::quote_accepted_system,
     request_inbound::request_inbound_system, simple_matching::simple_matching_system,
-    trip_completed::trip_completed_system, trip_started::trip_started_system,
+    telemetry_snapshot::capture_snapshot_system, trip_completed::trip_completed_system,
+    trip_started::trip_started_system,
 };
 
 /// Runs one simulation step: pops the next event, inserts it as [CurrentEvent], then runs the schedule.
@@ -27,11 +28,43 @@ pub fn run_next_event(world: &mut World, schedule: &mut Schedule) -> bool {
     true
 }
 
+/// Runs one simulation step and invokes `hook` after the schedule completes.
+pub fn run_next_event_with_hook<F>(world: &mut World, schedule: &mut Schedule, mut hook: F) -> bool
+where
+    F: FnMut(&World, &Event),
+{
+    let event = match world.resource_mut::<SimulationClock>().pop_next() {
+        Some(e) => e,
+        None => return false,
+    };
+    world.insert_resource(CurrentEvent(event));
+    schedule.run(world);
+    hook(world, &event);
+    true
+}
+
 /// Runs simulation steps until the event queue is empty or `max_steps` is reached.
 /// Returns the number of steps executed.
 pub fn run_until_empty(world: &mut World, schedule: &mut Schedule, max_steps: usize) -> usize {
     let mut steps = 0;
     while steps < max_steps && run_next_event(world, schedule) {
+        steps += 1;
+    }
+    steps
+}
+
+/// Runs simulation steps until empty and invokes `hook` after each step.
+pub fn run_until_empty_with_hook<F>(
+    world: &mut World,
+    schedule: &mut Schedule,
+    max_steps: usize,
+    mut hook: F,
+) -> usize
+where
+    F: FnMut(&World, &Event),
+{
+    let mut steps = 0;
+    while steps < max_steps && run_next_event_with_hook(world, schedule, &mut hook) {
         steps += 1;
     }
     steps
@@ -51,6 +84,7 @@ pub fn simulation_schedule() -> Schedule {
         trip_started_system,
         trip_completed_system,
         apply_deferred,
+        capture_snapshot_system,
     ));
     schedule
 }

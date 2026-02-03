@@ -5,6 +5,12 @@
 use bevy_ecs::prelude::World;
 use sim_core::runner::{run_until_empty, simulation_schedule};
 use sim_core::scenario::{build_scenario, ScenarioParams};
+use sim_core::telemetry_export::{
+    write_agent_positions_parquet, write_completed_trips_parquet, write_snapshot_counts_parquet,
+};
+use std::env;
+use std::fs;
+use std::path::PathBuf;
 
 fn main() {
     const NUM_RIDERS: usize = 500;
@@ -61,5 +67,29 @@ fn main() {
         }
     } else {
         println!("\nNo trips completed. (Riders and drivers are randomly placed; many riders may have no idle driver in the same H3 cell.)");
+    }
+
+    if let Ok(export_dir) = env::var("SIM_EXPORT_DIR") {
+        let export_path = PathBuf::from(export_dir);
+        if let Err(err) = fs::create_dir_all(&export_path) {
+            eprintln!("Failed to create export dir {:?}: {}", export_path, err);
+            return;
+        }
+        let trips_path = export_path.join("completed_trips.parquet");
+        let counts_path = export_path.join("snapshot_counts.parquet");
+        let positions_path = export_path.join("agent_positions.parquet");
+
+        let snapshots = world.resource::<sim_core::telemetry::SimSnapshots>();
+        if let Err(err) = write_completed_trips_parquet(&trips_path, telemetry) {
+            eprintln!("Failed to export completed trips: {}", err);
+        }
+        if let Err(err) = write_snapshot_counts_parquet(&counts_path, snapshots) {
+            eprintln!("Failed to export snapshot counts: {}", err);
+        }
+        if let Err(err) = write_agent_positions_parquet(&positions_path, snapshots) {
+            eprintln!("Failed to export agent positions: {}", err);
+        }
+
+        println!("Exported Parquet files to {:?}", export_path);
     }
 }

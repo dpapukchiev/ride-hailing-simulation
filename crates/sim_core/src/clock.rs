@@ -111,6 +111,11 @@ impl SimulationClock {
         self.epoch_ms
     }
 
+    /// Update the real-world epoch (ms) that maps to simulation time 0.
+    pub fn set_epoch_ms(&mut self, epoch_ms: i64) {
+        self.epoch_ms = epoch_ms;
+    }
+
     /// Convert simulation ms to real-world ms (epoch_ms + sim_ms).
     pub fn sim_to_real_ms(&self, sim_ms: u64) -> i64 {
         self.epoch_ms.saturating_add(sim_ms as i64)
@@ -203,6 +208,11 @@ impl SimulationClock {
         let event = self.events.pop()?;
         self.now = event.timestamp;
         Some(event)
+    }
+
+    /// Timestamp of the next scheduled event without popping it.
+    pub fn next_event_time(&self) -> Option<u64> {
+        self.events.peek().map(|event| event.timestamp)
     }
 
     pub fn is_empty(&self) -> bool {

@@ -6,6 +6,7 @@ pub mod driver_decision;
 pub mod movement;
 pub mod trip_started;
 pub mod trip_completed;
+pub mod telemetry_snapshot;
 
 #[cfg(test)]
 mod end_to_end_tests {
@@ -14,13 +15,15 @@ mod end_to_end_tests {
     use crate::clock::{EventKind, EventSubject, SimulationClock, ONE_SEC_MS};
     use crate::ecs::{Driver, DriverState, Position, Rider, RiderState, Trip, TripState};
     use crate::runner::{run_until_empty, simulation_schedule};
-    use crate::telemetry::SimTelemetry;
+    use crate::telemetry::{SimSnapshotConfig, SimSnapshots, SimTelemetry};
 
     #[test]
     fn simulates_one_ride_end_to_end() {
         let mut world = World::new();
         world.insert_resource(SimulationClock::default());
         world.insert_resource(SimTelemetry::default());
+        world.insert_resource(SimSnapshotConfig::default());
+        world.insert_resource(SimSnapshots::default());
 
         let cell = h3o::CellIndex::try_from(0x8a1fb46622dffff).expect("cell");
 
@@ -60,13 +63,10 @@ mod end_to_end_tests {
             .expect("trip entity");
         let trip = world.entity(trip_entity).get::<Trip>().expect("trip");
 
-        let rider = world
-            .entity(rider_entity)
-            .get::<Rider>()
-            .expect("rider");
+        let rider = world.get_entity(rider_entity).and_then(|e| e.get::<Rider>());
         let driver = world
-            .entity(driver_entity)
-            .get::<Driver>()
+            .get_entity(driver_entity)
+            .and_then(|e| e.get::<Driver>())
             .expect("driver");
 
         assert_eq!(trip.state, TripState::Completed);
@@ -75,8 +75,7 @@ mod end_to_end_tests {
         assert_eq!(trip.pickup, cell);
         // When destination is None, dropoff is a neighbor of pickup
         assert_ne!(trip.dropoff, trip.pickup, "dropoff should differ from pickup when defaulted");
-        assert_eq!(rider.state, RiderState::Completed);
-        assert_eq!(rider.matched_driver, None);
+        assert!(rider.is_none(), "rider should be despawned on completion");
         assert_eq!(driver.state, DriverState::Idle);
         assert_eq!(driver.matched_rider, None);
 
@@ -100,6 +99,8 @@ mod end_to_end_tests {
         let mut world = World::new();
         world.insert_resource(SimulationClock::default());
         world.insert_resource(SimTelemetry::default());
+        world.insert_resource(SimSnapshotConfig::default());
+        world.insert_resource(SimSnapshots::default());
 
         let cell = h3o::CellIndex::try_from(0x8a1fb46622dffff).expect("cell");
 
@@ -164,10 +165,10 @@ mod end_to_end_tests {
             assert_eq!(trip.state, TripState::Completed);
         }
 
-        let rider1_state = world.entity(rider1).get::<Rider>().expect("rider1").state;
-        let rider2_state = world.entity(rider2).get::<Rider>().expect("rider2").state;
-        assert_eq!(rider1_state, RiderState::Completed);
-        assert_eq!(rider2_state, RiderState::Completed);
+        let rider1_state = world.get_entity(rider1).and_then(|e| e.get::<Rider>()).map(|r| r.state);
+        let rider2_state = world.get_entity(rider2).and_then(|e| e.get::<Rider>()).map(|r| r.state);
+        assert_eq!(rider1_state, None);
+        assert_eq!(rider2_state, None);
 
         let driver1_state = world.entity(driver1).get::<Driver>().expect("driver1").state;
         let driver2_state = world.entity(driver2).get::<Driver>().expect("driver2").state;
