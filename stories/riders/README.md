@@ -12,6 +12,10 @@
   willingness to pay.
   Status: Backlog
 
+- Story: As a rider, I can reject a quote and request another, or give up after
+  N rejections (abandoned-quote telemetry).
+  Status: Done
+
 - Story: As a rider, I abandon the request if the ETA is too high even before
   matching.
   Status: Backlog

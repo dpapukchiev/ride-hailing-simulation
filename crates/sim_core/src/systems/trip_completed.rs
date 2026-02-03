@@ -123,6 +123,7 @@ mod tests {
                 matched_driver: None,
                 destination: Some(destination),
                 requested_at: None,
+                quote_rejections: 0,
             })
             .id();
         let driver_entity = world

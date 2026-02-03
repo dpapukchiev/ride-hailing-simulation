@@ -7,9 +7,9 @@ use sim_core::ecs::{DriverState, RiderState, TripState};
 use sim_core::telemetry::TripSnapshot;
 
 use crate::ui::utils::{
-    chart_color_active_trips, chart_color_cancelled_riders, chart_color_cancelled_trips,
-    chart_color_completed_trips, chart_color_idle_drivers, chart_color_waiting_riders,
-    driver_color, format_distance_km, format_optional_sim_datetime,
+    chart_color_abandoned_quote, chart_color_active_trips, chart_color_cancelled_riders,
+    chart_color_cancelled_trips, chart_color_completed_trips, chart_color_idle_drivers,
+    chart_color_waiting_riders, driver_color, format_distance_km, format_optional_sim_datetime,
     format_sim_datetime_from_ms, format_trip_distance_km, rider_color,
 };
 
@@ -135,6 +135,7 @@ pub fn render_metrics_legend(ui: &mut egui::Ui) {
         legend_item(ui, chart_color_waiting_riders(), "Waiting riders");
         legend_item(ui, chart_color_idle_drivers(), "Idle drivers");
         legend_item(ui, chart_color_cancelled_riders(), "Cancelled riders");
+        legend_item(ui, chart_color_abandoned_quote(), "Abandoned (quote)");
         legend_item(ui, chart_color_completed_trips(), "Completed trips");
         legend_item(ui, chart_color_cancelled_trips(), "Cancelled trips");
     });

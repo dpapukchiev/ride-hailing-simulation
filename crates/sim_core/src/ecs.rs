@@ -28,6 +28,17 @@ pub struct Rider {
     pub destination: Option<CellIndex>,
     /// Simulation time when the rider was spawned (set by request_inbound_system).
     pub requested_at: Option<u64>,
+    /// Number of times this rider has rejected a quote (used for give-up after max_quote_rejections).
+    pub quote_rejections: u32,
+}
+
+/// Current quote shown to a rider (fare + ETA). Attached while rider is viewing a quote; used for UI/telemetry.
+#[derive(Debug, Clone, Copy, PartialEq, Component)]
+pub struct RiderQuote {
+    /// Quoted fare for the trip.
+    pub fare: f64,
+    /// Estimated time to pickup in milliseconds.
+    pub eta_ms: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

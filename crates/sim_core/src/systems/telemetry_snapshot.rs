@@ -30,6 +30,7 @@ pub fn capture_snapshot_system(
     let mut counts = SimCounts::default();
     counts.riders_cancelled_total = telemetry.riders_cancelled_total;
     counts.riders_completed_total = telemetry.riders_completed_total;
+    counts.riders_abandoned_quote_total = telemetry.riders_abandoned_quote_total;
     let mut riders = Vec::with_capacity(rider_query.iter().count());
     for (entity, rider, position) in rider_query.iter() {
         counts.add_rider(rider.state);

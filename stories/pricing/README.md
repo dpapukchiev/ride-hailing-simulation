@@ -1,8 +1,9 @@
 ## Pricing
 
 - Story: As a rider, I receive a quote with fare and ETA based on local supply
-  and demand.
-  Status: Backlog
+  and demand. I can accept (proceed to matching), reject and request another
+  quote, or give up after a configurable number of rejections.
+  Status: Done
 
 - Story: As a marketplace operator, I can configure a commission rate so driver
   earnings and platform revenue can be studied.

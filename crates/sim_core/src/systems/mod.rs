@@ -13,7 +13,10 @@
 //! before each schedule execution.
 
 pub mod spawner;
+pub mod show_quote;
+pub mod quote_decision;
 pub mod quote_accepted;
+pub mod quote_rejected;
 pub mod matching;
 pub mod match_accepted;
 pub mod driver_decision;
@@ -33,7 +36,7 @@ mod end_to_end_tests {
     use crate::distributions::UniformInterArrival;
     use crate::ecs::{Driver, DriverState, Trip, TripState};
     use crate::runner::{initialize_simulation, run_until_empty, simulation_schedule};
-    use crate::scenario::{create_simple_matching, MatchRadius, RiderCancelConfig};
+    use crate::scenario::{create_simple_matching, MatchRadius, RiderCancelConfig, RiderQuoteConfig};
     use crate::spawner::{DriverSpawner, DriverSpawnerConfig, RiderSpawner, RiderSpawnerConfig};
     use crate::speed::SpeedModel;
     use crate::telemetry::{SimSnapshotConfig, SimSnapshots, SimTelemetry};
@@ -49,6 +52,10 @@ mod end_to_end_tests {
         world.insert_resource(create_simple_matching());
         world.insert_resource(MatchRadius(0));
         world.insert_resource(RiderCancelConfig::default());
+        world.insert_resource(RiderQuoteConfig {
+            accept_probability: 1.0,
+            ..Default::default()
+        });
 
         let cell = h3o::CellIndex::try_from(0x8a1fb46622dffff).expect("cell");
 
@@ -140,6 +147,10 @@ mod end_to_end_tests {
         world.insert_resource(create_simple_matching());
         world.insert_resource(MatchRadius(0));
         world.insert_resource(RiderCancelConfig::default());
+        world.insert_resource(RiderQuoteConfig {
+            accept_probability: 1.0,
+            ..Default::default()
+        });
 
         let cell = h3o::CellIndex::try_from(0x8a1fb46622dffff).expect("cell");
 

@@ -12,9 +12,9 @@ use crate::app::SimUiApp;
 use crate::ui::controls::render_control_panel;
 use crate::ui::rendering::{draw_agent, draw_grid, MapBounds, project_cell, render_map_legend, render_metrics_legend, render_trip_table_all};
 use crate::ui::utils::{
-    chart_color_active_trips, chart_color_cancelled_riders, chart_color_cancelled_trips,
-    chart_color_completed_trips, chart_color_idle_drivers, chart_color_waiting_riders,
-    driver_color, format_datetime_from_unix_ms, rider_color,
+    chart_color_abandoned_quote, chart_color_active_trips, chart_color_cancelled_riders,
+    chart_color_cancelled_trips, chart_color_completed_trips, chart_color_idle_drivers,
+    chart_color_waiting_riders, driver_color, format_datetime_from_unix_ms, rider_color,
 };
 
 fn main() -> eframe::Result<()> {
@@ -68,6 +68,7 @@ impl eframe::App for SimUiApp {
                 waiting_riders_points,
                 idle_drivers_points,
                 cancelled_riders_points,
+                abandoned_quote_points,
                 completed_trips_points,
                 cancelled_trips_points,
             ) = if let Some(snapshots) = self.world.get_resource::<SimSnapshots>() {
@@ -81,6 +82,7 @@ impl eframe::App for SimUiApp {
                 let mut waiting = Vec::new();
                 let mut idle = Vec::new();
                 let mut cancelled_riders = Vec::new();
+                let mut abandoned_quote = Vec::new();
                 let mut completed_trips = Vec::new();
                 let mut cancelled_trips = Vec::new();
                 for snapshot in snapshots.snapshots.iter() {
@@ -92,6 +94,7 @@ impl eframe::App for SimUiApp {
                     waiting.push([t, snapshot.counts.riders_waiting as f64]);
                     idle.push([t, snapshot.counts.drivers_idle as f64]);
                     cancelled_riders.push([t, snapshot.counts.riders_cancelled_total as f64]);
+                    abandoned_quote.push([t, snapshot.counts.riders_abandoned_quote_total as f64]);
                     completed_trips.push([t, snapshot.counts.trips_completed as f64]);
                     cancelled_trips.push([t, snapshot.counts.trips_cancelled as f64]);
                 }
@@ -101,6 +104,7 @@ impl eframe::App for SimUiApp {
                     waiting,
                     idle,
                     cancelled_riders,
+                    abandoned_quote,
                     completed_trips,
                     cancelled_trips,
                 )
@@ -211,6 +215,10 @@ impl eframe::App for SimUiApp {
                         plot_ui.line(
                             Line::new("Cancelled riders", cancelled_riders_points.clone())
                                 .color(chart_color_cancelled_riders()),
+                        );
+                        plot_ui.line(
+                            Line::new("Abandoned (quote)", abandoned_quote_points.clone())
+                                .color(chart_color_abandoned_quote()),
                         );
                         plot_ui.line(
                             Line::new("Completed trips", completed_trips_points.clone())

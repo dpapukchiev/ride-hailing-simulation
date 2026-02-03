@@ -86,13 +86,14 @@ fn spawn_rider(
                 matched_driver: None,
                 destination: Some(destination),
                 requested_at: Some(current_time_ms),
+                quote_rejections: 0,
             },
             Position(position),
         ))
         .id();
 
-    // Schedule QuoteAccepted event 1 second from now
-    clock.schedule_in_secs(1, EventKind::QuoteAccepted, Some(EventSubject::Rider(rider_entity)));
+    // Schedule ShowQuote event 1 second from now (quote with fare + ETA, then rider accept/reject)
+    clock.schedule_in_secs(1, EventKind::ShowQuote, Some(EventSubject::Rider(rider_entity)));
 
     rider_entity
 }

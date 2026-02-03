@@ -59,6 +59,30 @@ impl Default for RiderCancelConfig {
     }
 }
 
+/// Rider quote behavior: reject/retry and give-up after max rejections.
+#[derive(Debug, Clone, Copy, Resource)]
+pub struct RiderQuoteConfig {
+    /// Maximum number of quote rejections before rider gives up.
+    pub max_quote_rejections: u32,
+    /// Delay in seconds before requesting another quote after rejection.
+    pub re_quote_delay_secs: u64,
+    /// Probability (0.0–1.0) that rider accepts the quote when viewing it.
+    pub accept_probability: f64,
+    /// Seed for RNG (for reproducibility).
+    pub seed: u64,
+}
+
+impl Default for RiderQuoteConfig {
+    fn default() -> Self {
+        Self {
+            max_quote_rejections: 3,
+            re_quote_delay_secs: 10,
+            accept_probability: 0.8,
+            seed: 0,
+        }
+    }
+}
+
 /// Parameters for building a scenario.
 #[derive(Debug, Clone)]
 pub struct ScenarioParams {
@@ -358,6 +382,12 @@ pub fn build_scenario(world: &mut World, params: ScenarioParams) {
         min_wait_secs: 120,
         max_wait_secs: 2400,
         seed: seed.wrapping_add(0xcafe_babe), // Use a different seed offset for cancellation
+    });
+    world.insert_resource(RiderQuoteConfig {
+        max_quote_rejections: 3,
+        re_quote_delay_secs: 10,
+        accept_probability: 0.8,
+        seed: seed.wrapping_add(0x711073_beef), // Use a different seed offset for quote decisions
     });
     world.insert_resource(SpeedModel::new(params.seed.map(|seed| seed ^ 0x5eed_cafe)));
     // Default to cost-based matching with default ETA weight

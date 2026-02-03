@@ -164,6 +164,7 @@ mod tests {
                     matched_driver: None,
                     destination: Some(dropoff),
                     requested_at: None,
+                    quote_rejections: 0,
                 },
                 Position(neighbor),
             ))

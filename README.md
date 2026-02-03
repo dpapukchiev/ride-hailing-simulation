@@ -18,7 +18,7 @@ The simulation supports hundreds of concurrent riders and drivers, realistic tim
 ### Core Simulation
 - **Discrete Event System**: Binary heap-based event queue with deterministic ordering
 - **Dynamic Spawning**: Time-of-day aware spawners for riders and drivers with configurable distributions
-- **State Machine**: Complete lifecycle modeling (browsing → waiting → matched → en route → completed/cancelled)
+- **State Machine**: Complete lifecycle modeling (browsing → quote accept/reject → waiting → matched → en route → completed/cancelled). Riders can reject quotes and request another, or give up after N rejections.
 - **Driver Behavior**: Earnings targets, fatigue thresholds, and off-duty transitions
 - **Pricing System**: Distance-based fare calculation with configurable rates
 
@@ -34,7 +34,7 @@ The simulation supports hundreds of concurrent riders and drivers, realistic tim
 
 ### Visualization & Analytics
 - **Real-time Map**: Live visualization of riders and drivers with state-based coloring
-- **Time-series Charts**: Track active trips, waiting riders, idle drivers, cancellations
+- **Time-series Charts**: Track active trips, waiting riders, idle drivers, cancellations, abandoned (quote), completed and cancelled trips
 - **Trip Table**: Detailed trip information with timestamps and distances
 - **Export**: Parquet export for completed trips, snapshots, and agent positions
 

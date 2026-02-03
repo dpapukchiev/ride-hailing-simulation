@@ -43,6 +43,8 @@ pub struct SimTelemetry {
     pub completed_trips: Vec<CompletedTripRecord>,
     pub riders_cancelled_total: u64,
     pub riders_completed_total: u64,
+    /// Riders who gave up after rejecting too many quotes (distinct from pickup-timeout cancels).
+    pub riders_abandoned_quote_total: u64,
 }
 
 /// Snapshot of one rider for visualization/export.
@@ -98,6 +100,7 @@ pub struct SimCounts {
     pub riders_cancelled: usize,
     pub riders_cancelled_total: u64,
     pub riders_completed_total: u64,
+    pub riders_abandoned_quote_total: u64,
     pub drivers_idle: usize,
     pub drivers_evaluating: usize,
     pub drivers_en_route: usize,

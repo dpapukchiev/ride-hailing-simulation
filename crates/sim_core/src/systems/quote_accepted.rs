@@ -1,14 +1,15 @@
-use bevy_ecs::prelude::{Query, Res, ResMut};
+use bevy_ecs::prelude::{Commands, Query, Res, ResMut};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
-use crate::ecs::{Rider, RiderState};
+use crate::ecs::{Rider, RiderQuote, RiderState};
 use crate::scenario::RiderCancelConfig;
 
 pub fn quote_accepted_system(
     mut clock: ResMut<SimulationClock>,
     event: Res<CurrentEvent>,
+    mut commands: Commands,
     cancel_config: Option<Res<RiderCancelConfig>>,
     mut riders: Query<&mut Rider>,
 ) {
@@ -24,6 +25,7 @@ pub fn quote_accepted_system(
     };
     if rider.state == RiderState::Browsing {
         rider.state = RiderState::Waiting;
+        commands.entity(rider_entity).remove::<RiderQuote>();
     }
 
     clock.schedule_in_secs(1, EventKind::TryMatch, Some(EventSubject::Rider(rider_entity)));
@@ -61,6 +63,7 @@ mod tests {
                 matched_driver: None,
                 destination: Some(destination),
                 requested_at: None,
+                quote_rejections: 0,
             })
             .id();
 

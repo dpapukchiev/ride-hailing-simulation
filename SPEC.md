@@ -26,6 +26,9 @@ minimal ECS-based agent model. It currently supports:
   fatigue threshold. OffDuty drivers are excluded from matching.
 - **Simple pricing system**: Distance-based fare calculation (base fare + per-kilometer rate)
   for trip earnings.
+- **Rider quote flow**: Riders receive an explicit quote (fare + ETA) before committing; they can
+  accept (proceed to matching), reject and request another quote, or give up after a configurable
+  number of rejections (tracked in telemetry as abandoned-quote).
 
 This is a "crawl/walk" foundation aligned with the research plan.
 
@@ -57,7 +60,7 @@ reacting to `SimulationStarted` and spawn events. Spawners use inter-arrival tim
 distributions to control spawn rates, enabling variable supply and demand patterns.
 The default distributions vary rates based on time of day (hour) and day of week,
 creating realistic patterns with rush hours (7-9 AM, 5-7 PM) and lower demand at night.
-Riders spawn in `Browsing` state, browse a quote, then wait for matching. Drivers spawn
+Riders spawn in `Browsing` state. One second after spawn, `ShowQuote` runs: the sim computes a quote (fare from trip distance, ETA from nearest idle driver or a default), attaches a `RiderQuote` component, and schedules `QuoteDecision` 1s later. On `QuoteDecision`, the rider stochastically accepts or rejects (configurable probability). If the rider **accepts** (`QuoteAccepted`), they transition to `Waiting`, `TryMatch` and pickup-timeout cancellation are scheduled, and matching proceeds as before. If the rider **rejects** (`QuoteRejected`), their quote rejection count increments; if under the configured max, `ShowQuote` is rescheduled after a delay (re-quote); otherwise the rider gives up (marked cancelled, despawned, and counted in `riders_abandoned_quote_total`). Drivers spawn
 in `Idle` state continuously over the simulation window with earnings targets ($100-$300)
 and fatigue thresholds (8-12 hours), evaluate a match offer, drive en route to pickup, and then move into
 an on-trip state. If
@@ -102,9 +105,11 @@ crates/
       pricing.rs
       systems/
         mod.rs
-        request_inbound.rs
+        show_quote.rs
+        quote_decision.rs
         quote_accepted.rs
-        simple_matching.rs
+        quote_rejected.rs
+        matching.rs
         match_accepted.rs
         driver_decision.rs
         movement.rs
@@ -180,7 +185,7 @@ All time is in **milliseconds** (simulation ms). Time 0 maps to a real-world dat
 - **Constants**: `ONE_SEC_MS = 1000`, `ONE_MIN_MS = 60_000`, `ONE_HOUR_MS = 3_600_000`.
 - **`Event`**: `timestamp` (u64, ms), `kind`, `subject`.
 - **`CurrentEvent`** (ECS `Resource`): the event currently being handled.
-- **`EventKind`** / **`EventSubject`**: includes `SimulationStarted` (at time 0), `SpawnRider`, `SpawnDriver`, `RiderCancel` for pickup timeout events, and `CheckDriverOffDuty` for periodic earnings/fatigue checks.
+- **`EventKind`** / **`EventSubject`**: includes `SimulationStarted` (at time 0), `SpawnRider`, `SpawnDriver`, `ShowQuote`, `QuoteDecision`, `QuoteAccepted`, `QuoteRejected` for the rider quote flow, `TryMatch`, `MatchAccepted`, `DriverDecision`, `MoveStep`, `PickupEtaUpdated`, `TripStarted`, `TripCompleted`, `RiderCancel` for pickup timeout events, and `CheckDriverOffDuty` for periodic earnings/fatigue checks.
 - **`pending_event_count()`**: returns the number of events in the queue (for tests and scenario validation).
 
 ### `sim_core::ecs`
@@ -188,9 +193,11 @@ All time is in **milliseconds** (simulation ms). Time 0 maps to a real-world dat
 Components and state enums:
 
 - `RiderState`: `Browsing`, `Waiting`, `InTransit`, `Completed`, `Cancelled`
-- `Rider` component: `{ state, matched_driver, destination: Option<CellIndex>, requested_at: Option<u64> }`
+- `Rider` component: `{ state, matched_driver, destination: Option<CellIndex>, requested_at: Option<u64>, quote_rejections: u32 }`
   - `destination`: requested dropoff cell. Must be set; riders without a destination will be rejected by the driver decision system.
-  - `requested_at`: simulation time (ms) when the rider was spawned (set by `request_inbound_system` when spawning).
+  - `requested_at`: simulation time (ms) when the rider was spawned (set by spawner when spawning).
+  - `quote_rejections`: number of times this rider has rejected a quote; used for give-up after `max_quote_rejections`.
+- `RiderQuote` component (optional, attached while viewing a quote): `{ fare: f64, eta_ms: u64 }` — current quote shown to the rider (for UI/telemetry).
 - `DriverState`: `Idle`, `Evaluating`, `EnRoute`, `OnTrip`, `OffDuty`
 - `Driver` component: `{ state: DriverState, matched_rider: Option<Entity> }`
 - `DriverEarnings` component: `{ daily_earnings: f64, daily_earnings_target: f64, session_start_time_ms: u64 }`
@@ -255,6 +262,7 @@ Scenario setup: configure spawners for riders and drivers.
 - **`MatchRadius`** (ECS `Resource`, default 0): max H3 grid distance for matching rider to driver. 0 = same cell only; larger values allow matching to idle drivers within that many cells. Inserted by `build_scenario` from `ScenarioParams::match_radius`.
 - **`MatchingAlgorithm`** (ECS `Resource`, required): boxed trait object implementing the matching algorithm. Defaults to `CostBasedMatching` with ETA weight 0.1. Can be swapped with `SimpleMatching` or custom implementations. Inserted by `build_scenario`. The resource can be updated dynamically during simulation execution (e.g., via UI), and changes take effect immediately for new matching attempts.
 - **`RiderCancelConfig`** (ECS `Resource`): configuration for rider cancellation with uniform distribution sampling. Contains `min_wait_secs` and `max_wait_secs` (bounds for the distribution, defaults to 120–2400 seconds) and `seed` (for reproducible RNG, set from scenario seed). Inserted by `build_scenario`. Cancellation times are sampled uniformly between min and max bounds, with each rider getting a different sample based on their entity ID for variety while maintaining reproducibility.
+- **`RiderQuoteConfig`** (ECS `Resource`): configuration for rider quote accept/reject and give-up. Contains `max_quote_rejections` (default 3), `re_quote_delay_secs` (default 10), `accept_probability` (0.0–1.0, default 0.8), and `seed` for reproducible RNG. Inserted by `build_scenario`. Riders who reject a quote can request another after `re_quote_delay_secs`; after `max_quote_rejections` they give up and are counted in `riders_abandoned_quote_total`.
 - **`SpeedModel`** (ECS `Resource`): stochastic speed sampler (defaults to 20–60 km/h) seeded from `ScenarioParams::seed` to keep runs reproducible.
 - **`ScenarioParams`**: configurable scenario parameters:
   - `num_riders`, `num_drivers`: total counts (includes both initial and scheduled spawns).
@@ -267,7 +275,7 @@ Scenario setup: configure spawners for riders and drivers.
   - `min_trip_cells`, `max_trip_cells`: trip length in H3 cells; rider destinations are chosen at random distance in this range from pickup. Travel time depends on per-trip speeds (20–60 km/h).
   - `epoch_ms`: optional epoch in milliseconds (real-world time corresponding to simulation time 0). Used by time-of-day distributions to convert simulation time to real datetime. If `None`, defaults to 0.
   - Builders: `with_seed(seed)`, `with_request_window_hours(hours)`, `with_driver_spread_hours(hours)`, `with_match_radius(radius)`, `with_trip_duration_cells(min, max)`, `with_epoch_ms(epoch_ms)`.
-- **`build_scenario(world, params)`**: inserts `SimulationClock` (with epoch set from `params.epoch_ms`), `SimTelemetry`, `MatchRadius`, `MatchingAlgorithm` (defaults to `CostBasedMatching`), `RiderCancelConfig` (with seed derived from scenario seed), `RiderSpawner`, and `DriverSpawner`. Rider spawner uses `TimeOfDayDistribution` with realistic demand patterns (rush hours: 7-9 AM and 5-7 PM have 2.5-3.2x multipliers, night: 2-5 AM has 0.3-0.4x multipliers, Friday/Saturday evenings have higher multipliers). Driver spawner uses `TimeOfDayDistribution` with supply patterns (more consistent than demand, higher availability during rush hours with 1.5-2.0x multipliers, lower at night with 0.6-0.8x multipliers). Scheduled riders spawn continuously over `request_window_ms` with time-varying rates; scheduled drivers spawn continuously over `driver_spread_ms` with time-varying rates. Initial entities (specified by `initial_rider_count` and `initial_driver_count`) are spawned immediately when `SimulationStarted` event is processed. The spawner `max_count` is set to `num_riders - initial_rider_count` (and similarly for drivers) so that total spawns match the configured counts.
+- **`build_scenario(world, params)`**: inserts `SimulationClock` (with epoch set from `params.epoch_ms`), `SimTelemetry`, `MatchRadius`, `MatchingAlgorithm` (defaults to `CostBasedMatching`), `RiderCancelConfig` (with seed derived from scenario seed), `RiderQuoteConfig` (max_quote_rejections 3, re_quote_delay_secs 10, accept_probability 0.8), `RiderSpawner`, and `DriverSpawner`. Rider spawner uses `TimeOfDayDistribution` with realistic demand patterns (rush hours: 7-9 AM and 5-7 PM have 2.5-3.2x multipliers, night: 2-5 AM has 0.3-0.4x multipliers, Friday/Saturday evenings have higher multipliers). Driver spawner uses `TimeOfDayDistribution` with supply patterns (more consistent than demand, higher availability during rush hours with 1.5-2.0x multipliers, lower at night with 0.6-0.8x multipliers). Scheduled riders spawn continuously over `request_window_ms` with time-varying rates; scheduled drivers spawn continuously over `driver_spread_ms` with time-varying rates. Initial entities (specified by `initial_rider_count` and `initial_driver_count`) are spawned immediately when `SimulationStarted` event is processed. The spawner `max_count` is set to `num_riders - initial_rider_count` (and similarly for drivers) so that total spawns match the configured counts.
 - **`random_destination()`**: Optimized destination selection function that uses different strategies based on trip distance:
   - **Small radii (≤20 cells)**: Uses `grid_disk()` to generate all candidate cells and filters by distance/bounds (more accurate, efficient for small distances).
   - **Large radii (>20 cells)**: Uses rejection sampling - randomly samples cells within bounds and checks if distance matches the target range. This avoids generating huge grid disks (e.g., ~33k cells for k=105) which dramatically improves reset performance for scenarios with large trip distances (e.g., 600 riders with 25km max trips). Falls back to a smaller `grid_disk()` if rejection sampling fails.
@@ -278,12 +286,12 @@ Large scenarios (e.g. 500 riders, 100 drivers) are run via the **example** only,
 
 ### `sim_core::telemetry`
 
-- **`SimTelemetry`** (ECS `Resource`, default): holds `completed_trips: Vec<CompletedTripRecord>` plus cumulative rider totals (`riders_cancelled_total`, `riders_completed_total`).
+- **`SimTelemetry`** (ECS `Resource`, default): holds `completed_trips: Vec<CompletedTripRecord>` plus cumulative rider totals (`riders_cancelled_total`, `riders_completed_total`, `riders_abandoned_quote_total`). `riders_abandoned_quote_total` counts riders who gave up after rejecting too many quotes (distinct from pickup-timeout cancels).
 - **`CompletedTripRecord`**: `{ trip_entity, rider_entity, driver_entity, completed_at, requested_at, matched_at, pickup_at }` (all timestamps in **simulation ms**). Helper methods: **`time_to_match()`**, **`time_to_pickup()`**, **`trip_duration()`** (all in ms).
 - Insert `SimTelemetry::default()` when building the world to record completed trips; `trip_completed_system` pushes one record per completed trip with timestamps from the Trip and clock.
 - **`SimSnapshotConfig`** (ECS `Resource`): `{ interval_ms, max_snapshots }` controls snapshot cadence and buffer size.
 - **`SimSnapshots`** (ECS `Resource`): rolling `VecDeque<SimSnapshot>` plus `last_snapshot_at`; populated by the snapshot system.
-- **`SimSnapshot`**: `{ timestamp_ms, counts, riders, drivers, trips }` with state-aware position snapshots plus trip state snapshots for visualization/export; counts include cumulative rider totals to account for despawns.
+- **`SimSnapshot`**: `{ timestamp_ms, counts, riders, drivers, trips }` with state-aware position snapshots plus trip state snapshots for visualization/export; counts include cumulative rider totals (including `riders_abandoned_quote_total`) to account for despawns.
 - **`RiderSnapshot`**: `{ entity, cell, state, matched_driver: Option<Entity> }` captures rider state and position; `matched_driver` is `Some(driver_entity)` when a driver is matched (rider is waiting for pickup) and `None` when waiting for match.
 - **`DriverSnapshot`**: `{ entity, cell, state, daily_earnings: Option<f64>, daily_earnings_target: Option<f64>, session_start_time_ms: Option<u64>, fatigue_threshold_ms: Option<u64> }` captures driver state, position, and earnings/fatigue data (if available) for visualization/export.
 
@@ -308,13 +316,31 @@ Spawner systems: react to spawn events and create riders/drivers dynamically.
 - **`simulation_started_system`**: Reacts to `EventKind::SimulationStarted` (scheduled at time 0). Initializes `RiderSpawner` and `DriverSpawner` resources if present. Spawns initial entities immediately (`initial_rider_count` riders and `initial_driver_count` drivers) at time 0, then schedules their first `SpawnRider`/`SpawnDriver` events if scheduled spawning should continue.
 - **`rider_spawner_system`**: Reacts to `EventKind::SpawnRider`. If the spawner should spawn at current time:
   - Generates random position and destination using seeded RNG (deterministic based on current time and spawn count).
-  - Spawns rider entity in `Browsing` state with position, destination, and `requested_at = Some(clock.now())`.
-  - Schedules `QuoteAccepted` 1 second from now for the newly spawned rider.
+  - Spawns rider entity in `Browsing` state with position, destination, `requested_at = Some(clock.now())`, and `quote_rejections = 0`.
+  - Schedules `ShowQuote` 1 second from now for the newly spawned rider.
   - Advances spawner to next spawn time using inter-arrival distribution.
   - Schedules next `SpawnRider` event if spawning should continue.
 - **`driver_spawner_system`**: Reacts to `EventKind::SpawnDriver`. Similar to `rider_spawner_system` but spawns drivers in `Idle` state (no destination needed). Drivers spawn with random positions within configured bounds. Each driver is initialized with:
   - `DriverEarnings` component: `daily_earnings = 0.0`, `daily_earnings_target` sampled from $100-$300 range, `session_start_time_ms = current_time_ms`.
   - `DriverFatigue` component: `fatigue_threshold_ms` sampled from 8-12 hours range.
+
+### `sim_core::systems::show_quote`
+
+System: `show_quote_system`
+
+- Reacts to `CurrentEvent`.
+- On `EventKind::ShowQuote` with subject `Rider(rider_entity)`:
+  - Rider must be in `Browsing`. Computes **fare** via `calculate_trip_fare(pickup, dropoff)` and **ETA** (nearest idle driver distance/speed, or default 300s). Inserts `RiderQuote { fare, eta_ms }` on the rider entity.
+  - Schedules `QuoteDecision` 1 second from now for the same rider.
+
+### `sim_core::systems::quote_decision`
+
+System: `quote_decision_system`
+
+- Reacts to `CurrentEvent`.
+- On `EventKind::QuoteDecision` with subject `Rider(rider_entity)`:
+  - Rider must be in `Browsing` with `RiderQuote`. Samples accept/reject using `RiderQuoteConfig::accept_probability` (seed + rider entity ID for reproducibility).
+  - If accept: schedules `QuoteAccepted` at current time. If reject: schedules `QuoteRejected` at current time.
 
 ### `sim_core::systems::quote_accepted`
 
@@ -322,9 +348,19 @@ System: `quote_accepted_system`
 
 - Reacts to `CurrentEvent`.
 - On `EventKind::QuoteAccepted` with subject `Rider(rider_entity)`:
-  - Rider: `Browsing` → `Waiting`
+  - Rider: `Browsing` → `Waiting`; removes `RiderQuote` component.
   - Schedules `TryMatch` 1 second from now (`schedule_in_secs(1, ...)`) for the same rider.
   - Samples cancellation time from uniform distribution between `min_wait_secs` and `max_wait_secs` in `RiderCancelConfig` (using seed + rider entity ID for reproducibility with variety), then schedules `RiderCancel` at that sampled time.
+
+### `sim_core::systems::quote_rejected`
+
+System: `quote_rejected_system`
+
+- Reacts to `CurrentEvent`.
+- On `EventKind::QuoteRejected` with subject `Rider(rider_entity)`:
+  - Rider must be in `Browsing`. Increments `rider.quote_rejections`.
+  - If `quote_rejections < max_quote_rejections`: schedules `ShowQuote` at `now + re_quote_delay_secs` (rider requests another quote).
+  - Else: rider gives up — state set to `Cancelled`, entity despawned, `SimTelemetry::riders_abandoned_quote_total` incremented.
 
 ### `sim_core::matching`
 
@@ -487,7 +523,10 @@ Unit tests exist in each module to confirm behavior:
 - `spatial`: grid disk neighbors within K.
 - `clock`: events pop in time order; `schedule_in_secs` / `schedule_in_mins` and sim↔real conversion.
 - `request_inbound`: rider transitions to `Browsing` and sets `requested_at`.
+- `show_quote`: rider in Browsing gets quote (fare + ETA) and QuoteDecision scheduled.
+- `quote_decision`: rider accepts or rejects quote (stochastic); QuoteAccepted or QuoteRejected scheduled.
 - `quote_accepted`: rider transitions to `Waiting` and schedules `TryMatch`.
+- `quote_rejected`: rider quote_rejections incremented; re-quote or give-up (despawn, telemetry).
 - `matching`: targeted match attempt and transition using configurable matching algorithm.
 - `match_accepted`: driver decision scheduled.
 - `driver_decision`: driver accept/reject decision.
@@ -523,7 +562,7 @@ All per-system unit tests emulate the runner by popping one event, inserting
 - Set `SIM_EXPORT_DIR=/path` to export `completed_trips.parquet`, `trips.parquet` (all trips with full details, same as UI table), `snapshot_counts.parquet`, and `agent_positions.parquet`.
 - **`sim_ui`** (`cargo run -p sim_ui`): Native UI that runs the scenario in-process,
   renders riders/drivers on a map with icons and state-based colors, and charts for
-  active trips, completed trips, waiting riders, and idle drivers. The UI starts paused, allows
+  active trips, completed trips, waiting riders, idle drivers, cancelled riders, abandoned (quote), and cancelled trips. The UI starts paused, allows
   scenario parameter edits before start, shows sim/wall-clock datetimes, overlays
   a metric grid for scale, and includes a live trip table with pickup distance at
   driver acceptance (km), pickup-to-dropoff distance (km), and cancellation time,
@@ -547,7 +586,7 @@ All per-system unit tests emulate the runner by popping one event, inserting
   drivers show only "D" or "D(R)" without the earnings and fatigue brackets. The font size is 8.5pt monospace
   for compact display. **Matching algorithm** can be changed at any time (even while simulation is running) via a dropdown
   selector; changes take effect immediately for new matching attempts (riders already waiting continue with their current
-  matching attempts, but new `TryMatch` events will use the updated algorithm).
+  matching attempts, but new `TryMatch` events will use the updated algorithm). The metrics chart includes an **Abandoned (quote)** series for riders who gave up after rejecting too many quotes.
 
 ## Known Gaps (Not Implemented Yet)
 

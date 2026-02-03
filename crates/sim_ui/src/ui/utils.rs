@@ -197,6 +197,10 @@ pub fn chart_color_cancelled_trips() -> Color32 {
     Color32::from_rgb(160, 80, 200)
 }
 
+pub fn chart_color_abandoned_quote() -> Color32 {
+    Color32::from_rgb(200, 120, 180)
+}
+
 /// Apply snapshot interval configuration to the world.
 pub fn apply_snapshot_interval(world: &mut World, interval_ms: u64) {
     if let Some(mut config) = world.get_resource_mut::<SimSnapshotConfig>() {
