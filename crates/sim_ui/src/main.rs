@@ -84,24 +84,27 @@ impl MatchingAlgorithmType {
 impl SimUiApp {
     fn new() -> Self {
         let num_riders = 80;
-        let num_drivers = 40;
+        let num_drivers = 50;
         let initial_rider_count = 0;
         let initial_driver_count = 10;
-        let request_window_hours = 6;
-        let driver_spread_hours = 6;
-        let match_radius_km = 8.0;
+        let request_window_hours = 21;
+        let driver_spread_hours = 21;
+        let match_radius_km = 11.0;
         let min_trip_km = 1.0;
         let max_trip_km = 25.0;
         let map_size_km = 25.0;
-        let rider_cancel_min_mins = 2;
-        let rider_cancel_max_mins = 25;
+        let rider_cancel_min_mins = 10;
+        let rider_cancel_max_mins = 40;
         let seed_enabled = true;
         let seed_value = 123;
         let matching_algorithm = MatchingAlgorithmType::CostBased;
         
-        // Default start time: current time
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_else(|_| Duration::from_secs(0)).as_secs();
-        let (year, month, day, hour, minute) = datetime_from_unix_secs(now as i64);
+        // Default start time: 2026-02-03 20:12:00 UTC
+        let year = 2026;
+        let month = 2;
+        let day = 3;
+        let hour = 20;
+        let minute = 12;
         let start_epoch_ms = datetime_to_unix_ms(year, month, day, hour, minute);
 
         let mut params = ScenarioParams {
@@ -516,6 +519,14 @@ impl eframe::App for SimUiApp {
                             can_edit,
                             egui::DragValue::new(&mut self.start_minute).range(0..=59).suffix(" m"),
                         );
+                        if ui.add_enabled(can_edit, egui::Button::new("Now")).clicked() {
+                            let (year, month, day, hour, minute) = datetime_from_unix_ms(now_unix_ms());
+                            self.start_year = year;
+                            self.start_month = month;
+                            self.start_day = day;
+                            self.start_hour = hour;
+                            self.start_minute = minute;
+                        }
                     });
                     ui.horizontal(|ui| {
                         ui.label("Matching algorithm");
@@ -944,7 +955,8 @@ fn civil_from_days(days_since_unix_epoch: i64) -> (i32, u32, u32) {
     (year as i32, m as u32, d as u32)
 }
 
-fn datetime_from_unix_secs(total_secs: i64) -> (i32, u32, u32, u32, u32) {
+fn datetime_from_unix_ms(ms: u64) -> (i32, u32, u32, u32, u32) {
+    let total_secs = (ms / 1000) as i64;
     let days = total_secs / 86_400;
     let day_secs = total_secs % 86_400;
     let (year, month, day) = civil_from_days(days);
