@@ -58,6 +58,7 @@ to each other so the pairing is explicit while a trip is in progress.
 ## Workspace Layout
 
 ```
+README.md
 Cargo.toml
 crates/
   sim_core/
@@ -91,6 +92,12 @@ crates/
 - `h3o = "0.8"` for H3 spatial indexing (stable toolchain compatible).
 - `bevy_ecs = "0.13"` for ECS world, components, and systems.
 - `rand = "0.8"` for scenario randomisation (positions, request times, destinations).
+
+## Tooling
+
+- `mise` is used for toolchain management via `.mise.toml`.
+- Rust toolchain: `stable`.
+- `README.md` includes setup and run commands.
 
 ## Core Modules
 
