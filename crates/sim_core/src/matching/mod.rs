@@ -1,3 +1,22 @@
+//! Matching algorithms: pluggable strategies for driver-rider pairing.
+//!
+//! This module provides a trait-based system for implementing different matching
+//! algorithms. Algorithms can optimize for different objectives:
+//!
+//! - **Distance**: Minimize pickup distance
+//! - **ETA**: Minimize estimated time to pickup
+//! - **Global optimization**: Batch matching for better overall efficiency
+//!
+//! ## Implementations
+//!
+//! - `SimpleMatching`: First available driver within radius
+//! - `CostBasedMatching`: Scores drivers by distance and ETA
+//!
+//! ## Usage
+//!
+//! Algorithms are stored as a `MatchingAlgorithmResource` in the ECS world and can
+//! be swapped dynamically during simulation execution.
+
 pub mod algorithm;
 pub mod types;
 pub mod simple;

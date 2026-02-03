@@ -1,3 +1,15 @@
+//! Parquet export: write simulation data to Parquet files for analysis.
+//!
+//! Provides functions to export:
+//!
+//! - Completed trips with full trip details
+//! - All trips (including in-progress and cancelled)
+//! - Time-series snapshot counts
+//! - Agent position snapshots over time
+//!
+//! All exports use Arrow/Parquet format for efficient storage and compatibility
+//! with data analysis tools (Pandas, Polars, etc.).
+
 use std::error::Error;
 use std::fs::File;
 use std::path::Path;

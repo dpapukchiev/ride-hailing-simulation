@@ -2,3 +2,5 @@
 
 pub mod constants;
 pub mod utils;
+pub mod rendering;
+pub mod controls;

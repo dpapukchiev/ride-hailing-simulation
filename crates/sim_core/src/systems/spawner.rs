@@ -9,6 +9,42 @@ use crate::ecs::{Driver, DriverFatigue, DriverEarnings, DriverState, Position, R
 use crate::scenario::random_destination;
 use crate::spatial::GeoIndex;
 use crate::spawner::{random_cell_in_bounds, DriverSpawner, RiderSpawner};
+use h3o::CellIndex;
+
+/// Create a seeded RNG for spawn operations.
+/// Uses config seed + spawn count for deterministic but varied randomness.
+fn create_spawn_rng(seed: u64, spawn_count: usize) -> StdRng {
+    let combined_seed = seed.wrapping_add(spawn_count as u64);
+    StdRng::seed_from_u64(combined_seed)
+}
+
+/// Generate a spawn position within the given bounds.
+/// Falls back to center of bounds if coordinate generation fails.
+///
+/// # Safety
+///
+/// The `expect` call for fallback coordinates is safe because:
+/// - We compute the center of valid geographic bounds (lat/lng in valid ranges)
+/// - The bounds are validated when spawners are created (San Francisco Bay Area defaults)
+/// - Center coordinates of valid bounds are always valid lat/lng values
+fn generate_spawn_position<R: Rng>(
+    rng: &mut R,
+    lat_min: f64,
+    lat_max: f64,
+    lng_min: f64,
+    lng_max: f64,
+) -> CellIndex {
+    random_cell_in_bounds(rng, lat_min, lat_max, lng_min, lng_max).unwrap_or_else(|_| {
+        // Fallback to center of bounds if coordinate generation fails
+        // This should not happen with valid bounds, but provides safety
+        let lat = (lat_min + lat_max) / 2.0;
+        let lng = (lng_min + lng_max) / 2.0;
+        // Safe: center of valid geographic bounds is always valid
+        let coord = h3o::LatLng::new(lat, lng)
+            .expect("fallback coordinates should be valid (center of valid bounds)");
+        coord.to_cell(h3o::Resolution::Nine)
+    })
+}
 
 /// Helper function to spawn a single rider.
 fn spawn_rider(
@@ -17,26 +53,17 @@ fn spawn_rider(
     spawner: &mut RiderSpawner,
     current_time_ms: u64,
 ) -> bevy_ecs::prelude::Entity {
-    // Create RNG for position/destination generation (seed from config seed + spawn count for determinism)
-    let seed = spawner.config.seed.wrapping_add(spawner.spawned_count() as u64);
-    let mut rng = StdRng::seed_from_u64(seed);
+    // Create RNG for position/destination generation
+    let mut rng = create_spawn_rng(spawner.config.seed, spawner.spawned_count());
 
-    // Generate position and destination
-    let position = random_cell_in_bounds(
+    // Generate position
+    let position = generate_spawn_position(
         &mut rng,
         spawner.config.lat_min,
         spawner.config.lat_max,
         spawner.config.lng_min,
         spawner.config.lng_max,
-    ).unwrap_or_else(|_| {
-        // Fallback to center of bounds if coordinate generation fails
-        // This should not happen with valid bounds, but provides safety
-        let lat = (spawner.config.lat_min + spawner.config.lat_max) / 2.0;
-        let lng = (spawner.config.lng_min + spawner.config.lng_max) / 2.0;
-        let coord = h3o::LatLng::new(lat, lng)
-            .expect("fallback coordinates should be valid");
-        coord.to_cell(h3o::Resolution::Nine)
-    });
+    );
 
     let geo = GeoIndex::default();
     let destination = random_destination(
@@ -76,26 +103,17 @@ fn spawn_driver(
     spawner: &mut DriverSpawner,
     current_time_ms: u64,
 ) {
-    // Create RNG for position generation (seed from config seed + spawn count for determinism)
-    let seed = spawner.config.seed.wrapping_add(spawner.spawned_count() as u64);
-    let mut rng = StdRng::seed_from_u64(seed);
+    // Create RNG for position generation
+    let mut rng = create_spawn_rng(spawner.config.seed, spawner.spawned_count());
 
     // Generate position
-    let position = random_cell_in_bounds(
+    let position = generate_spawn_position(
         &mut rng,
         spawner.config.lat_min,
         spawner.config.lat_max,
         spawner.config.lng_min,
         spawner.config.lng_max,
-    ).unwrap_or_else(|_| {
-        // Fallback to center of bounds if coordinate generation fails
-        // This should not happen with valid bounds, but provides safety
-        let lat = (spawner.config.lat_min + spawner.config.lat_max) / 2.0;
-        let lng = (spawner.config.lng_min + spawner.config.lng_max) / 2.0;
-        let coord = h3o::LatLng::new(lat, lng)
-            .expect("fallback coordinates should be valid");
-        coord.to_cell(h3o::Resolution::Nine)
-    });
+    );
 
     // Sample earnings target: $100-$300 range
     let daily_earnings_target = rng.gen_range(100.0..=300.0);

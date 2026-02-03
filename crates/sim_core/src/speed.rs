@@ -1,3 +1,9 @@
+//! Speed model: stochastic speed sampling for realistic vehicle movement.
+//!
+//! Provides configurable speed ranges (default 20-60 km/h for city driving) with
+//! seeded RNG for reproducible results. Used by the movement system to calculate
+//! travel times between H3 cells.
+
 use bevy_ecs::prelude::Resource;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};

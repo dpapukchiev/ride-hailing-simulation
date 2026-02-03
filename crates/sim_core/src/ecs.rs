@@ -1,3 +1,13 @@
+//! Entity Component System: components and state enums for riders, drivers, and trips.
+//!
+//! This module defines the core data structures used in the simulation:
+//!
+//! - **Components**: `Rider`, `Driver`, `Trip`, `Position`, `DriverEarnings`, `DriverFatigue`
+//! - **State Enums**: `RiderState`, `DriverState`, `TripState`
+//!
+//! Components are attached to entities in the ECS world, and systems query/modify them
+//! based on events. States represent the lifecycle stage of each entity.
+
 use bevy_ecs::prelude::{Component, Entity};
 use h3o::CellIndex;
 

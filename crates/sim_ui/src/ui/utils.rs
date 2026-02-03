@@ -6,7 +6,9 @@ use sim_core::ecs::{DriverState, RiderState};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::ui::constants::{H3_RES9_CELL_WIDTH_KM, METERS_PER_DEG_LAT};
-use sim_core::scenario::ScenarioParams;
+use bevy_ecs::prelude::World;
+use sim_core::scenario::{RiderCancelConfig, ScenarioParams};
+use sim_core::telemetry::SimSnapshotConfig;
 
 pub fn now_unix_ms() -> u64 {
     SystemTime::now()
@@ -193,4 +195,24 @@ pub fn chart_color_completed_trips() -> Color32 {
 
 pub fn chart_color_cancelled_trips() -> Color32 {
     Color32::from_rgb(160, 80, 200)
+}
+
+/// Apply snapshot interval configuration to the world.
+pub fn apply_snapshot_interval(world: &mut World, interval_ms: u64) {
+    if let Some(mut config) = world.get_resource_mut::<SimSnapshotConfig>() {
+        config.interval_ms = interval_ms;
+    }
+}
+
+/// Apply rider cancellation configuration to the world.
+pub fn apply_cancel_config(world: &mut World, min_mins: u64, max_mins: u64) {
+    if let Some(mut config) = world.get_resource_mut::<RiderCancelConfig>() {
+        let min_secs = min_mins.saturating_mul(60);
+        let max_secs = max_mins.saturating_mul(60);
+        // Preserve the seed when updating bounds
+        let seed = config.seed;
+        config.min_wait_secs = min_secs;
+        config.max_wait_secs = max_secs.max(min_secs);
+        config.seed = seed;
+    }
 }

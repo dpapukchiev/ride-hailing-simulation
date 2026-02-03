@@ -1,3 +1,13 @@
+//! Spatial operations: H3-based geographic indexing and distance calculations.
+//!
+//! This module provides:
+//!
+//! - **GeoIndex**: Wrapper for H3 resolution configuration
+//! - **Grid disk queries**: Find cells within K grid distance
+//! - **Distance calculations**: Haversine distance between H3 cells
+//!
+//! Default resolution is 9 (~240m cell size), suitable for city-scale simulations.
+
 use h3o::{CellIndex, Resolution};
 
 #[derive(Debug, Clone, Copy)]
