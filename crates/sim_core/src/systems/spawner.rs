@@ -11,6 +11,79 @@ use crate::spatial::GeoIndex;
 use crate::spawner::{random_cell_in_bounds, DriverSpawner, RiderSpawner};
 use h3o::CellIndex;
 
+/// Trait to abstract over spawner operations for common logic.
+trait SpawnerOps {
+    fn should_spawn(&self, current_time_ms: u64) -> bool;
+    fn advance(&mut self, current_time_ms: u64);
+    fn next_spawn_time_ms(&self) -> u64;
+    fn initialized(&self) -> bool;
+    fn set_initialized(&mut self, initialized: bool);
+    fn increment_spawned_count(&mut self);
+    fn set_next_spawn_time_ms(&mut self, time_ms: u64);
+    fn start_time_ms(&self) -> Option<u64>;
+    fn initial_count(&self) -> usize;
+}
+
+impl SpawnerOps for RiderSpawner {
+    fn should_spawn(&self, current_time_ms: u64) -> bool {
+        self.should_spawn(current_time_ms)
+    }
+    fn advance(&mut self, current_time_ms: u64) {
+        self.advance(current_time_ms);
+    }
+    fn next_spawn_time_ms(&self) -> u64 {
+        self.next_spawn_time_ms()
+    }
+    fn initialized(&self) -> bool {
+        self.initialized()
+    }
+    fn set_initialized(&mut self, initialized: bool) {
+        self.set_initialized(initialized);
+    }
+    fn increment_spawned_count(&mut self) {
+        self.increment_spawned_count();
+    }
+    fn set_next_spawn_time_ms(&mut self, time_ms: u64) {
+        self.set_next_spawn_time_ms(time_ms);
+    }
+    fn start_time_ms(&self) -> Option<u64> {
+        self.config.start_time_ms
+    }
+    fn initial_count(&self) -> usize {
+        self.config.initial_count
+    }
+}
+
+impl SpawnerOps for DriverSpawner {
+    fn should_spawn(&self, current_time_ms: u64) -> bool {
+        self.should_spawn(current_time_ms)
+    }
+    fn advance(&mut self, current_time_ms: u64) {
+        self.advance(current_time_ms);
+    }
+    fn next_spawn_time_ms(&self) -> u64 {
+        self.next_spawn_time_ms()
+    }
+    fn initialized(&self) -> bool {
+        self.initialized()
+    }
+    fn set_initialized(&mut self, initialized: bool) {
+        self.set_initialized(initialized);
+    }
+    fn increment_spawned_count(&mut self) {
+        self.increment_spawned_count();
+    }
+    fn set_next_spawn_time_ms(&mut self, time_ms: u64) {
+        self.set_next_spawn_time_ms(time_ms);
+    }
+    fn start_time_ms(&self) -> Option<u64> {
+        self.config.start_time_ms
+    }
+    fn initial_count(&self) -> usize {
+        self.config.initial_count
+    }
+}
+
 /// Create a seeded RNG for spawn operations.
 /// Uses config seed + spawn count for deterministic but varied randomness.
 fn create_spawn_rng(seed: u64, spawn_count: usize) -> StdRng {
@@ -140,6 +213,64 @@ fn spawn_driver(
     ));
 }
 
+/// Common initialization logic for a spawner.
+fn initialize_spawner<S: SpawnerOps>(
+    spawner: &mut S,
+    commands: &mut Commands,
+    clock: &mut SimulationClock,
+    current_time_ms: u64,
+    mut spawn_fn: impl FnMut(&mut Commands, &mut SimulationClock, &mut S, u64),
+    event_kind: EventKind,
+) {
+    if !spawner.initialized() {
+        spawner.set_initialized(true);
+        
+        // Spawn initial entities immediately
+        for _ in 0..spawner.initial_count() {
+            spawn_fn(commands, clock, spawner, current_time_ms);
+            // Manually increment count since we're not calling advance() for initial spawns
+            spawner.increment_spawned_count();
+        }
+        
+        // Schedule first spawn event at next_spawn_time_ms (even if it's in the future)
+        if spawner.should_spawn(spawner.next_spawn_time_ms()) {
+            clock.schedule_at(spawner.next_spawn_time_ms(), event_kind, None);
+        }
+    }
+}
+
+/// Common spawner system logic that handles event processing and scheduling.
+fn process_spawner_event<S: SpawnerOps>(
+    spawner: &mut S,
+    commands: &mut Commands,
+    clock: &mut SimulationClock,
+    current_time_ms: u64,
+    mut spawn_fn: impl FnMut(&mut Commands, &mut SimulationClock, &mut S, u64),
+    event_kind: EventKind,
+) {
+    // Check if we're before start time (shouldn't happen, but be safe)
+    if let Some(start_time) = spawner.start_time_ms() {
+        if current_time_ms < start_time {
+            spawner.set_next_spawn_time_ms(start_time);
+            clock.schedule_at(start_time, event_kind, None);
+            return;
+        }
+    }
+
+    // Check if we should spawn
+    if spawner.should_spawn(current_time_ms) {
+        spawn_fn(commands, clock, spawner, current_time_ms);
+
+        // Advance spawner to next spawn time (uses seeded distribution internally)
+        spawner.advance(current_time_ms);
+        
+        // Schedule next spawn event if we should continue spawning
+        if spawner.should_spawn(spawner.next_spawn_time_ms()) {
+            clock.schedule_at(spawner.next_spawn_time_ms(), event_kind, None);
+        }
+    }
+}
+
 /// System that reacts to SimulationStarted event and initializes spawners.
 pub fn simulation_started_system(
     mut commands: Commands,
@@ -156,48 +287,30 @@ pub fn simulation_started_system(
 
     // Initialize rider spawner and spawn initial riders
     if let Some(mut spawner) = rider_spawner {
-        if !spawner.initialized() {
-            spawner.set_initialized(true);
-            
-            // Spawn initial riders immediately
-            for _ in 0..spawner.config.initial_count {
-                spawn_rider(&mut commands, &mut clock, &mut spawner, current_time_ms);
-                // Manually increment count since we're not calling advance() for initial spawns
-                spawner.increment_spawned_count();
-            }
-            
-            // Schedule first spawn event at next_spawn_time_ms (even if it's in the future)
-            if spawner.should_spawn(spawner.next_spawn_time_ms()) {
-                clock.schedule_at(
-                    spawner.next_spawn_time_ms(),
-                    EventKind::SpawnRider,
-                    None,
-                );
-            }
-        }
+        initialize_spawner(
+            &mut *spawner,
+            &mut commands,
+            &mut clock,
+            current_time_ms,
+            |commands, clock, spawner, time_ms| {
+                spawn_rider(commands, clock, spawner, time_ms);
+            },
+            EventKind::SpawnRider,
+        );
     }
 
     // Initialize driver spawner and spawn initial drivers
     if let Some(mut spawner) = driver_spawner {
-        if !spawner.initialized() {
-            spawner.set_initialized(true);
-            
-            // Spawn initial drivers immediately
-            for _ in 0..spawner.config.initial_count {
-                spawn_driver(&mut commands, &mut spawner, current_time_ms);
-                // Manually increment count since we're not calling advance() for initial spawns
-                spawner.increment_spawned_count();
-            }
-            
-            // Schedule first spawn event at next_spawn_time_ms (even if it's in the future)
-            if spawner.should_spawn(spawner.next_spawn_time_ms()) {
-                clock.schedule_at(
-                    spawner.next_spawn_time_ms(),
-                    EventKind::SpawnDriver,
-                    None,
-                );
-            }
-        }
+        initialize_spawner(
+            &mut *spawner,
+            &mut commands,
+            &mut clock,
+            current_time_ms,
+            |commands, _clock, spawner, time_ms| {
+                spawn_driver(commands, spawner, time_ms);
+            },
+            EventKind::SpawnDriver,
+        );
     }
 }
 
@@ -213,32 +326,16 @@ pub fn rider_spawner_system(
     }
 
     let current_time_ms = clock.now();
-
-    // Check if we're before start time (shouldn't happen, but be safe)
-    if let Some(start_time) = spawner.config.start_time_ms {
-        if current_time_ms < start_time {
-            spawner.set_next_spawn_time_ms(start_time);
-            clock.schedule_at(start_time, EventKind::SpawnRider, None);
-            return;
-        }
-    }
-
-    // Check if we should spawn
-    if spawner.should_spawn(current_time_ms) {
-        spawn_rider(&mut commands, &mut clock, &mut spawner, current_time_ms);
-
-        // Advance spawner to next spawn time (uses seeded distribution internally)
-        spawner.advance(current_time_ms);
-        
-        // Schedule next spawn event if we should continue spawning
-        if spawner.should_spawn(spawner.next_spawn_time_ms()) {
-            clock.schedule_at(
-                spawner.next_spawn_time_ms(),
-                EventKind::SpawnRider,
-                None,
-            );
-        }
-    }
+    process_spawner_event(
+        &mut *spawner,
+        &mut commands,
+        &mut clock,
+        current_time_ms,
+        |commands, clock, spawner, time_ms| {
+            spawn_rider(commands, clock, spawner, time_ms);
+        },
+        EventKind::SpawnRider,
+    );
 }
 
 /// System that processes driver spawner and creates drivers.
@@ -253,30 +350,14 @@ pub fn driver_spawner_system(
     }
 
     let current_time_ms = clock.now();
-
-    // Check if we're before start time (shouldn't happen, but be safe)
-    if let Some(start_time) = spawner.config.start_time_ms {
-        if current_time_ms < start_time {
-            spawner.set_next_spawn_time_ms(start_time);
-            clock.schedule_at(start_time, EventKind::SpawnDriver, None);
-            return;
-        }
-    }
-
-    // Check if we should spawn
-    if spawner.should_spawn(current_time_ms) {
-        spawn_driver(&mut commands, &mut spawner, current_time_ms);
-
-        // Advance spawner to next spawn time (uses seeded distribution internally)
-        spawner.advance(current_time_ms);
-        
-        // Schedule next spawn event if we should continue spawning
-        if spawner.should_spawn(spawner.next_spawn_time_ms()) {
-            clock.schedule_at(
-                spawner.next_spawn_time_ms(),
-                EventKind::SpawnDriver,
-                None,
-            );
-        }
-    }
+    process_spawner_event(
+        &mut *spawner,
+        &mut commands,
+        &mut clock,
+        current_time_ms,
+        |commands, _clock, spawner, time_ms| {
+            spawn_driver(commands, spawner, time_ms);
+        },
+        EventKind::SpawnDriver,
+    );
 }
