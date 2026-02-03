@@ -303,10 +303,10 @@ System: `movement_system`
     (default 20–60 km/h), and emits `PickupEtaUpdated` for the trip. If still en route, reschedules
     `MoveStep` based on the time to traverse the next hop; when driver reaches pickup, schedules
     `TripStarted` 1 second from now (`schedule_in_secs(1, ...)`).
-  - **OnTrip**: moves the trip’s driver one H3 hop toward `trip.dropoff`. If still en route,
-    reschedules `MoveStep` based on the time to traverse the next hop; when driver reaches dropoff,
-    schedules `TripCompleted` 1 second from now (`schedule_in_secs(1, ...)`).
-
+  - **OnTrip**: moves the trip's driver one H3 hop toward `trip.dropoff`. On each movement step,
+    the rider's position is updated to match the driver's position (rider is in the vehicle).
+    If still en route, reschedules `MoveStep` based on the time to traverse the next hop; when
+    driver reaches dropoff, schedules `TripCompleted` 1 second from now (`schedule_in_secs(1, ...)`).
 ### `sim_core::systems::pickup_eta_updated`
 
 System: `pickup_eta_updated_system`
@@ -332,7 +332,8 @@ System: `trip_started_system`
 - On `EventKind::TripStarted` with subject `Trip(trip_entity)`:
   - If trip is `EnRoute` and the driver is co-located with the rider (who is `Waiting`
     and matched back to this driver), transitions:
-    - Rider: `Waiting` → `InTransit`
+    - Rider: `Waiting` → `InTransit`; rider's position is updated to match the driver's position
+      (rider is now in the vehicle).
     - Driver: `EnRoute` → `OnTrip`
     - Trip: `EnRoute` → `OnTrip`; sets `pickup_at = Some(clock.now())`.
   - Schedules `MoveStep` 1 second from now (`schedule_in_secs(1, ...)`) for the same trip so the driver moves toward dropoff; completion is scheduled by the movement system when the driver reaches dropoff.
@@ -410,7 +411,8 @@ All per-system unit tests emulate the runner by popping one event, inserting
   only editable before the simulation starts, and the grid overlay adapts to the map size. Rider
   cancellation wait windows (min/max minutes) are configurable before start.
   to complete the simulation; a real-time clock speed selector (2x–50x) controls
-  simulation playback.
+  simulation playback. Riders in `InTransit` state are hidden from the map (they are with the driver).
+  Drivers in `OnTrip` state display "D(R)" instead of "D" to indicate they have a rider on board.
 
 ## Known Gaps (Not Implemented Yet)
 

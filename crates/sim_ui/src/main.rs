@@ -470,15 +470,24 @@ impl eframe::App for SimUiApp {
                     }
                     if self.show_riders {
                         for rider in &snapshot.riders {
-                            if let Some(pos) = project_cell(rider.cell, &bounds, map_rect) {
-                                draw_agent(&painter, pos, "R", rider_color(rider.state));
+                            // Hide riders that are in transit (they're with the driver)
+                            if rider.state != sim_core::ecs::RiderState::InTransit {
+                                if let Some(pos) = project_cell(rider.cell, &bounds, map_rect) {
+                                    draw_agent(&painter, pos, "R", rider_color(rider.state));
+                                }
                             }
                         }
                     }
                     if self.show_drivers {
                         for driver in &snapshot.drivers {
                             if let Some(pos) = project_cell(driver.cell, &bounds, map_rect) {
-                                draw_agent(&painter, pos, "D", driver_color(driver.state));
+                                // Show "D(R)" for drivers on trip (with rider)
+                                let label = if driver.state == sim_core::ecs::DriverState::OnTrip {
+                                    "D(R)"
+                                } else {
+                                    "D"
+                                };
+                                draw_agent(&painter, pos, label, driver_color(driver.state));
                             }
                         }
                     }

@@ -1,7 +1,7 @@
-use bevy_ecs::prelude::{Query, Res, ResMut};
+use bevy_ecs::prelude::{ParamSet, Query, Res, ResMut, With};
 
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock, ONE_SEC_MS};
-use crate::ecs::{Driver, DriverState, Position, Trip, TripState};
+use crate::ecs::{Driver, DriverState, Position, Rider, Trip, TripState};
 use crate::spatial::distance_km_between_cells;
 use crate::speed::{SpeedFactors, SpeedModel};
 
@@ -20,7 +20,10 @@ pub fn movement_system(
     event: Res<CurrentEvent>,
     mut speed: ResMut<SpeedModel>,
     mut trips: Query<&mut Trip>,
-    mut drivers: Query<(&mut Driver, &mut Position)>,
+    mut queries: ParamSet<(
+        Query<(&mut Driver, &mut Position)>,
+        Query<&mut Position, With<Rider>>,
+    )>,
 ) {
     if event.0.kind != EventKind::MoveStep {
         return;
@@ -30,7 +33,7 @@ pub fn movement_system(
         return;
     };
 
-    let (driver_entity, target_cell, is_en_route) = {
+    let (driver_entity, target_cell, is_en_route, rider_entity) = {
         let Ok(trip) = trips.get(trip_entity) else {
             return;
         };
@@ -39,23 +42,28 @@ pub fn movement_system(
             TripState::OnTrip => trip.dropoff,
             TripState::Completed | TripState::Cancelled => return,
         };
-        (trip.driver, target, trip.state == TripState::EnRoute)
+        (trip.driver, target, trip.state == TripState::EnRoute, trip.rider)
     };
 
-    let Ok((driver, mut driver_pos)) = drivers.get_mut(driver_entity) else {
-        return;
-    };
     let expected_state = if is_en_route {
         DriverState::EnRoute
     } else {
         DriverState::OnTrip
     };
-    if driver.state != expected_state {
-        return;
-    }
+    
+    let driver_pos_cell = {
+        let driver_query = queries.p0();
+        let Ok((driver, driver_pos)) = driver_query.get(driver_entity) else {
+            return;
+        };
+        if driver.state != expected_state {
+            return;
+        }
+        driver_pos.0
+    };
 
     let speed_kmh = speed.sample_kmh(SpeedFactors::default());
-    let remaining_km = distance_km_between_cells(driver_pos.0, target_cell);
+    let remaining_km = distance_km_between_cells(driver_pos_cell, target_cell);
     if remaining_km <= 0.0 {
         if is_en_route {
             if let Ok(mut trip) = trips.get_mut(trip_entity) {
@@ -72,16 +80,34 @@ pub fn movement_system(
     }
 
     let mut step_distance_km = remaining_km;
-    if let Ok(path) = driver_pos.0.grid_path_cells(target_cell) {
+    let mut next_driver_cell = driver_pos_cell;
+    if let Ok(path) = driver_pos_cell.grid_path_cells(target_cell) {
         let mut iter = path.filter_map(|cell| cell.ok());
         let _current = iter.next();
         if let Some(next_cell) = iter.next() {
-            step_distance_km = distance_km_between_cells(driver_pos.0, next_cell);
-            driver_pos.0 = next_cell;
+            step_distance_km = distance_km_between_cells(driver_pos_cell, next_cell);
+            next_driver_cell = next_cell;
         }
     }
 
-    let remaining = distance_km_between_cells(driver_pos.0, target_cell);
+    // Update driver position
+    {
+        let mut driver_query = queries.p0();
+        let Ok((_, mut driver_pos)) = driver_query.get_mut(driver_entity) else {
+            return;
+        };
+        driver_pos.0 = next_driver_cell;
+    }
+    
+    // If trip is OnTrip, update rider position to match driver (rider is in the vehicle)
+    if !is_en_route {
+        let mut rider_query = queries.p1();
+        if let Ok(mut rider_pos) = rider_query.get_mut(rider_entity) {
+            rider_pos.0 = next_driver_cell;
+        }
+    }
+
+    let remaining = distance_km_between_cells(next_driver_cell, target_cell);
     if is_en_route {
         if let Ok(mut trip) = trips.get_mut(trip_entity) {
             trip.pickup_eta_ms = if remaining <= 0.0 {

@@ -1,4 +1,4 @@
-use bevy_ecs::prelude::{Query, Res, ResMut};
+use bevy_ecs::prelude::{ParamSet, Query, Res, ResMut};
 
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
 use crate::ecs::{Driver, DriverState, Position, Rider, RiderState, Trip, TripState};
@@ -7,8 +7,10 @@ pub fn trip_started_system(
     mut clock: ResMut<SimulationClock>,
     event: Res<CurrentEvent>,
     mut trips: Query<&mut Trip>,
-    mut riders: Query<(&mut Rider, &Position)>,
-    mut drivers: Query<(&mut Driver, &Position)>,
+    mut queries: ParamSet<(
+        Query<(&mut Driver, &Position)>,
+        Query<(&mut Rider, &mut Position)>,
+    )>,
 ) {
     if event.0.kind != EventKind::TripStarted {
         return;
@@ -29,7 +31,8 @@ pub fn trip_started_system(
     };
 
     let driver_pos = {
-        let Ok((driver, driver_pos)) = drivers.get(driver_entity) else {
+        let driver_query = queries.p0();
+        let Ok((driver, driver_pos)) = driver_query.get(driver_entity) else {
             return;
         };
         if driver.state != DriverState::EnRoute {
@@ -39,7 +42,8 @@ pub fn trip_started_system(
     };
 
     let (rider_pos, rider_matched_driver_ok, rider_waiting) = {
-        let Ok((rider, rider_pos)) = riders.get(rider_entity) else {
+        let rider_query = queries.p1();
+        let Ok((rider, rider_pos)) = rider_query.get(rider_entity) else {
             return;
         };
         (
@@ -52,10 +56,23 @@ pub fn trip_started_system(
         return;
     }
 
-    if let Ok((mut rider, _)) = riders.get_mut(rider_entity) {
+    // Update rider state and position
+    {
+        let mut rider_query = queries.p1();
+        let Ok((mut rider, mut rider_pos)) = rider_query.get_mut(rider_entity) else {
+            return;
+        };
         rider.state = RiderState::InTransit;
+        // Update rider position to match driver position (rider is now in the vehicle)
+        rider_pos.0 = driver_pos;
     }
-    if let Ok((mut driver, _)) = drivers.get_mut(driver_entity) {
+    
+    // Update driver state
+    {
+        let mut driver_query = queries.p0();
+        let Ok((mut driver, _)) = driver_query.get_mut(driver_entity) else {
+            return;
+        };
         driver.state = DriverState::OnTrip;
     }
     if let Ok(mut trip) = trips.get_mut(trip_entity) {
