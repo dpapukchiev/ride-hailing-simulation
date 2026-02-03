@@ -8,7 +8,7 @@ use bevy_ecs::prelude::Resource;
 pub use algorithm::MatchingAlgorithm;
 pub use types::{MatchCandidate, MatchResult};
 pub use simple::SimpleMatching;
-pub use cost_based::CostBasedMatching;
+pub use cost_based::{CostBasedMatching, DEFAULT_ETA_WEIGHT};
 
 /// Resource wrapper for the matching algorithm trait object.
 #[derive(Resource)]

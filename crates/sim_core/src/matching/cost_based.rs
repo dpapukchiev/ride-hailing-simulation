@@ -8,16 +8,77 @@ use super::algorithm::MatchingAlgorithm;
 /// Average speed for ETA estimation (km/h).
 const AVG_SPEED_KMH: f64 = 40.0;
 
+/// Default ETA weight for cost-based matching.
+/// This controls the relative importance of estimated pickup time vs distance in the matching score.
+/// Higher values prioritize faster pickup times over shorter distances.
+pub const DEFAULT_ETA_WEIGHT: f64 = 0.1;
+
 /// Cost-based matching algorithm that scores driver-rider pairings by distance and ETA.
-/// Selects the driver with the best (lowest cost) score.
+///
+/// This algorithm optimizes for both pickup distance and estimated pickup time (ETA).
+/// It selects the driver with the highest score (lowest combined cost).
+///
+/// # Scoring Formula
+///
+/// The score for a driver-rider pairing is calculated as:
+/// ```text
+/// score = -pickup_distance_km - (pickup_eta_ms / 1000.0) * eta_weight
+/// ```
+///
+/// Where:
+/// - `pickup_distance_km`: Haversine distance from driver to rider (km)
+/// - `pickup_eta_ms`: Estimated time to pickup in milliseconds
+/// - `eta_weight`: Configurable weight controlling ETA importance vs distance
+///
+/// Higher scores indicate better matches (lower combined cost). The algorithm selects
+/// the driver with the highest score among all candidates within the match radius.
+///
+/// # ETA Estimation
+///
+/// ETA is estimated using a constant average speed (40 km/h) based on pickup distance:
+/// ```text
+/// eta_ms = max(1000, (distance_km / 40.0) * 3600 * 1000)
+/// ```
+///
+/// # ETA Weight Tuning
+///
+/// - `eta_weight = 0.0`: Pure distance-based matching (ignores ETA)
+/// - `eta_weight = 0.1`: Default balance (distance slightly more important than ETA)
+/// - `eta_weight = 1.0`: Equal weight for distance and ETA
+/// - `eta_weight > 1.0`: ETA prioritized over distance
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// use sim_core::matching::{cost_based::CostBasedMatching, DEFAULT_ETA_WEIGHT};
+///
+/// // Create with default ETA weight
+/// let matcher = CostBasedMatching::new(DEFAULT_ETA_WEIGHT);
+///
+/// // Create with custom ETA weight (prioritize ETA more)
+/// let matcher_eta_focused = CostBasedMatching::new(0.5);
+/// ```
 #[derive(Debug)]
 pub struct CostBasedMatching {
-    /// Weight for ETA in the scoring function. Higher values prioritize lower ETA more.
+    /// Weight for ETA in the scoring function.
+    ///
+    /// Higher values prioritize lower ETA more relative to distance.
+    /// See the struct documentation for tuning guidance.
     pub eta_weight: f64,
 }
 
 impl CostBasedMatching {
     /// Create a new cost-based matching algorithm with the given ETA weight.
+    ///
+    /// # Arguments
+    ///
+    /// * `eta_weight` - Weight for ETA in the scoring function. Use `DEFAULT_ETA_WEIGHT` (0.1)
+    ///   for a balanced default, or adjust based on simulation requirements.
+    ///
+    /// # Panics
+    ///
+    /// This function does not panic, but negative `eta_weight` values may produce
+    /// counterintuitive results (penalizing faster ETAs).
     pub fn new(eta_weight: f64) -> Self {
         Self { eta_weight }
     }
@@ -40,7 +101,7 @@ impl CostBasedMatching {
 
 impl Default for CostBasedMatching {
     fn default() -> Self {
-        Self::new(0.1)
+        Self::new(DEFAULT_ETA_WEIGHT)
     }
 }
 
@@ -89,7 +150,7 @@ mod tests {
 
     #[test]
     fn selects_closer_driver() {
-        let matcher = CostBasedMatching::new(0.1);
+        let matcher = CostBasedMatching::new(DEFAULT_ETA_WEIGHT);
         let cell = h3o::CellIndex::try_from(0x8a1fb46622dffff).expect("cell");
         
         // Find a nearby cell (grid distance 1)

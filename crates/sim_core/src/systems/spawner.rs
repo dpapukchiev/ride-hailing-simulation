@@ -18,7 +18,7 @@ fn spawn_rider(
     current_time_ms: u64,
 ) -> bevy_ecs::prelude::Entity {
     // Create RNG for position/destination generation (seed from config seed + spawn count for determinism)
-    let seed = spawner.config.seed.wrapping_add(spawner.spawned_count as u64);
+    let seed = spawner.config.seed.wrapping_add(spawner.spawned_count() as u64);
     let mut rng = StdRng::seed_from_u64(seed);
 
     // Generate position and destination
@@ -28,7 +28,15 @@ fn spawn_rider(
         spawner.config.lat_max,
         spawner.config.lng_min,
         spawner.config.lng_max,
-    );
+    ).unwrap_or_else(|_| {
+        // Fallback to center of bounds if coordinate generation fails
+        // This should not happen with valid bounds, but provides safety
+        let lat = (spawner.config.lat_min + spawner.config.lat_max) / 2.0;
+        let lng = (spawner.config.lng_min + spawner.config.lng_max) / 2.0;
+        let coord = h3o::LatLng::new(lat, lng)
+            .expect("fallback coordinates should be valid");
+        coord.to_cell(h3o::Resolution::Nine)
+    });
 
     let geo = GeoIndex::default();
     let destination = random_destination(
@@ -69,7 +77,7 @@ fn spawn_driver(
     current_time_ms: u64,
 ) {
     // Create RNG for position generation (seed from config seed + spawn count for determinism)
-    let seed = spawner.config.seed.wrapping_add(spawner.spawned_count as u64);
+    let seed = spawner.config.seed.wrapping_add(spawner.spawned_count() as u64);
     let mut rng = StdRng::seed_from_u64(seed);
 
     // Generate position
@@ -79,7 +87,15 @@ fn spawn_driver(
         spawner.config.lat_max,
         spawner.config.lng_min,
         spawner.config.lng_max,
-    );
+    ).unwrap_or_else(|_| {
+        // Fallback to center of bounds if coordinate generation fails
+        // This should not happen with valid bounds, but provides safety
+        let lat = (spawner.config.lat_min + spawner.config.lat_max) / 2.0;
+        let lng = (spawner.config.lng_min + spawner.config.lng_max) / 2.0;
+        let coord = h3o::LatLng::new(lat, lng)
+            .expect("fallback coordinates should be valid");
+        coord.to_cell(h3o::Resolution::Nine)
+    });
 
     // Sample earnings target: $100-$300 range
     let daily_earnings_target = rng.gen_range(100.0..=300.0);
@@ -122,20 +138,20 @@ pub fn simulation_started_system(
 
     // Initialize rider spawner and spawn initial riders
     if let Some(mut spawner) = rider_spawner {
-        if !spawner.initialized {
-            spawner.initialized = true;
+        if !spawner.initialized() {
+            spawner.set_initialized(true);
             
             // Spawn initial riders immediately
             for _ in 0..spawner.config.initial_count {
                 spawn_rider(&mut commands, &mut clock, &mut spawner, current_time_ms);
                 // Manually increment count since we're not calling advance() for initial spawns
-                spawner.spawned_count += 1;
+                spawner.increment_spawned_count();
             }
             
             // Schedule first spawn event at next_spawn_time_ms (even if it's in the future)
-            if spawner.should_spawn(spawner.next_spawn_time_ms) {
+            if spawner.should_spawn(spawner.next_spawn_time_ms()) {
                 clock.schedule_at(
-                    spawner.next_spawn_time_ms,
+                    spawner.next_spawn_time_ms(),
                     EventKind::SpawnRider,
                     None,
                 );
@@ -145,20 +161,20 @@ pub fn simulation_started_system(
 
     // Initialize driver spawner and spawn initial drivers
     if let Some(mut spawner) = driver_spawner {
-        if !spawner.initialized {
-            spawner.initialized = true;
+        if !spawner.initialized() {
+            spawner.set_initialized(true);
             
             // Spawn initial drivers immediately
             for _ in 0..spawner.config.initial_count {
                 spawn_driver(&mut commands, &mut spawner, current_time_ms);
                 // Manually increment count since we're not calling advance() for initial spawns
-                spawner.spawned_count += 1;
+                spawner.increment_spawned_count();
             }
             
             // Schedule first spawn event at next_spawn_time_ms (even if it's in the future)
-            if spawner.should_spawn(spawner.next_spawn_time_ms) {
+            if spawner.should_spawn(spawner.next_spawn_time_ms()) {
                 clock.schedule_at(
-                    spawner.next_spawn_time_ms,
+                    spawner.next_spawn_time_ms(),
                     EventKind::SpawnDriver,
                     None,
                 );
@@ -183,7 +199,7 @@ pub fn rider_spawner_system(
     // Check if we're before start time (shouldn't happen, but be safe)
     if let Some(start_time) = spawner.config.start_time_ms {
         if current_time_ms < start_time {
-            spawner.next_spawn_time_ms = start_time;
+            spawner.set_next_spawn_time_ms(start_time);
             clock.schedule_at(start_time, EventKind::SpawnRider, None);
             return;
         }
@@ -197,9 +213,9 @@ pub fn rider_spawner_system(
         spawner.advance(current_time_ms);
         
         // Schedule next spawn event if we should continue spawning
-        if spawner.should_spawn(spawner.next_spawn_time_ms) {
+        if spawner.should_spawn(spawner.next_spawn_time_ms()) {
             clock.schedule_at(
-                spawner.next_spawn_time_ms,
+                spawner.next_spawn_time_ms(),
                 EventKind::SpawnRider,
                 None,
             );
@@ -223,7 +239,7 @@ pub fn driver_spawner_system(
     // Check if we're before start time (shouldn't happen, but be safe)
     if let Some(start_time) = spawner.config.start_time_ms {
         if current_time_ms < start_time {
-            spawner.next_spawn_time_ms = start_time;
+            spawner.set_next_spawn_time_ms(start_time);
             clock.schedule_at(start_time, EventKind::SpawnDriver, None);
             return;
         }
@@ -237,9 +253,9 @@ pub fn driver_spawner_system(
         spawner.advance(current_time_ms);
         
         // Schedule next spawn event if we should continue spawning
-        if spawner.should_spawn(spawner.next_spawn_time_ms) {
+        if spawner.should_spawn(spawner.next_spawn_time_ms()) {
             clock.schedule_at(
-                spawner.next_spawn_time_ms,
+                spawner.next_spawn_time_ms(),
                 EventKind::SpawnDriver,
                 None,
             );

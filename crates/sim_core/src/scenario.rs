@@ -22,6 +22,19 @@ const DEFAULT_LNG_MAX: f64 = -122.35;
 /// Default time window for rider requests: 1 hour (simulation ms).
 const DEFAULT_REQUEST_WINDOW_MS: u64 = 60 * 60 * 1000;
 
+/// Average multiplier for rider demand patterns.
+/// Used to adjust base spawn rate to account for time-of-day variations.
+/// The actual multipliers vary by hour (rush hours ~2.5-3.2x, night ~0.3-0.4x),
+/// but the average across all hours is approximately 1.3.
+const RIDER_DEMAND_AVERAGE_MULTIPLIER: f64 = 1.3;
+
+/// Average multiplier for driver supply patterns.
+/// Used to adjust base spawn rate to account for time-of-day variations.
+/// Driver supply is more consistent than demand, with an average multiplier of approximately 1.2.
+const DRIVER_SUPPLY_AVERAGE_MULTIPLIER: f64 = 1.2;
+
+// Note: DEFAULT_ETA_WEIGHT is defined in matching/cost_based.rs to keep it with the algorithm
+
 /// Max H3 grid distance (cells) for matching rider to driver. 0 = same cell only.
 #[derive(Debug, Clone, Copy, Default, Resource)]
 pub struct MatchRadius(pub u32);
@@ -136,6 +149,129 @@ impl ScenarioParams {
     }
 }
 
+/// Threshold for choosing between grid_disk and rejection sampling strategies.
+/// For distances <= this threshold, grid_disk is more efficient.
+/// For larger distances, rejection sampling avoids generating huge grid disks.
+const GRID_DISK_THRESHOLD: u32 = 20;
+
+/// Maximum attempts for rejection sampling before falling back to grid_disk.
+const MAX_REJECTION_SAMPLING_ATTEMPTS: usize = 2000;
+
+/// Helper function to check if a cell is within geographic bounds.
+fn cell_in_bounds(cell: h3o::CellIndex, lat_min: f64, lat_max: f64, lng_min: f64, lng_max: f64) -> bool {
+    let coord: h3o::LatLng = cell.into();
+    let lat = coord.lat();
+    let lng = coord.lng();
+    lat >= lat_min && lat <= lat_max && lng >= lng_min && lng <= lng_max
+}
+
+/// Helper function to check if a cell is within the desired distance range from pickup.
+fn is_valid_destination(cell: h3o::CellIndex, pickup: h3o::CellIndex, min_cells: u32, max_cells: u32) -> bool {
+    pickup
+        .grid_distance(cell)
+        .map(|d| d >= min_cells as i32 && d <= max_cells as i32)
+        .unwrap_or(false)
+}
+
+/// Strategy for small distances: generate grid disk and filter candidates.
+/// More efficient for small radii where the disk size is manageable.
+fn grid_disk_strategy<R: rand::Rng>(
+    rng: &mut R,
+    pickup: h3o::CellIndex,
+    geo: &crate::spatial::GeoIndex,
+    min_cells: u32,
+    max_cells: u32,
+    lat_min: f64,
+    lat_max: f64,
+    lng_min: f64,
+    lng_max: f64,
+) -> Option<h3o::CellIndex> {
+    let disk = geo.grid_disk(pickup, max_cells);
+    let candidates: Vec<h3o::CellIndex> = disk
+        .into_iter()
+        .filter(|c| {
+            is_valid_destination(*c, pickup, min_cells, max_cells)
+                && cell_in_bounds(*c, lat_min, lat_max, lng_min, lng_max)
+        })
+        .collect();
+    
+    if candidates.is_empty() {
+        None
+    } else {
+        let i = rng.gen_range(0..candidates.len());
+        Some(candidates[i])
+    }
+}
+
+/// Strategy for large distances: rejection sampling.
+/// Randomly samples cells within bounds and checks if they match the distance requirement.
+/// This avoids generating huge grid disks (e.g., 33k+ cells for k=105).
+fn rejection_sampling_strategy<R: rand::Rng>(
+    rng: &mut R,
+    pickup: h3o::CellIndex,
+    min_cells: u32,
+    max_cells: u32,
+    lat_min: f64,
+    lat_max: f64,
+    lng_min: f64,
+    lng_max: f64,
+) -> Option<h3o::CellIndex> {
+    use crate::spawner::random_cell_in_bounds;
+    
+    for _ in 0..MAX_REJECTION_SAMPLING_ATTEMPTS {
+        let cell = match random_cell_in_bounds(rng, lat_min, lat_max, lng_min, lng_max) {
+            Ok(cell) => cell,
+            Err(_) => {
+                // If coordinate generation fails, fallback to center of bounds
+                let lat = (lat_min + lat_max) / 2.0;
+                let lng = (lng_min + lng_max) / 2.0;
+                h3o::LatLng::new(lat, lng)
+                    .ok()
+                    .map(|c| c.to_cell(h3o::Resolution::Nine))
+                    .unwrap_or(pickup)
+            }
+        };
+        
+        if is_valid_destination(cell, pickup, min_cells, max_cells) {
+            return Some(cell);
+        }
+    }
+    
+    None
+}
+
+/// Fallback strategy: use a smaller grid_disk with radius between min and max.
+/// Used when rejection sampling fails to find a valid destination.
+fn fallback_grid_disk_strategy<R: rand::Rng>(
+    rng: &mut R,
+    pickup: h3o::CellIndex,
+    geo: &crate::spatial::GeoIndex,
+    min_cells: u32,
+    max_cells: u32,
+    lat_min: f64,
+    lat_max: f64,
+    lng_min: f64,
+    lng_max: f64,
+) -> Option<h3o::CellIndex> {
+    // Use a radius closer to min_cells to reduce the number of cells generated
+    let fallback_radius = (min_cells + max_cells) / 2;
+    let disk = geo.grid_disk(pickup, fallback_radius);
+    let candidates: Vec<h3o::CellIndex> = disk
+        .into_iter()
+        .filter(|c| {
+            is_valid_destination(*c, pickup, min_cells, max_cells)
+                && cell_in_bounds(*c, lat_min, lat_max, lng_min, lng_max)
+        })
+        .collect();
+    
+    if candidates.is_empty() {
+        None
+    } else {
+        let i = rng.gen_range(0..candidates.len());
+        Some(candidates[i])
+    }
+}
+
 /// Pick a random destination within [min_cells, max_cells] H3 distance from pickup.
 /// Uses rejection sampling for efficiency when max_cells is large (avoids generating huge grid disks).
 /// This function is exported for use by spawner systems.
@@ -150,81 +286,30 @@ pub fn random_destination<R: rand::Rng>(
     lng_min: f64,
     lng_max: f64,
 ) -> h3o::CellIndex {
-    use h3o::{CellIndex, LatLng, Resolution};
-    use rand::Rng;
-    
     let max_cells = max_cells.max(min_cells);
     
-    fn random_cell_in_bounds<R: Rng>(rng: &mut R, lat_min: f64, lat_max: f64, lng_min: f64, lng_max: f64) -> CellIndex {
-        let lat = rng.gen_range(lat_min..=lat_max);
-        let lng = rng.gen_range(lng_min..=lng_max);
-        let coord = LatLng::new(lat, lng).expect("valid lat/lng");
-        coord.to_cell(Resolution::Nine)
-    }
-    
-    fn cell_in_bounds(cell: CellIndex, lat_min: f64, lat_max: f64, lng_min: f64, lng_max: f64) -> bool {
-        let coord: LatLng = cell.into();
-        let lat = coord.lat();
-        let lng = coord.lng();
-        lat >= lat_min && lat <= lat_max && lng >= lng_min && lng <= lng_max
-    }
-    
-    // For small radii, use the original grid_disk approach (more efficient)
-    // For large radii, use rejection sampling (much faster)
-    const GRID_DISK_THRESHOLD: u32 = 20;
-    
+    // For small radii, use grid_disk approach (more efficient)
     if max_cells <= GRID_DISK_THRESHOLD {
-        // Original approach: generate disk and filter
-        let disk = geo.grid_disk(pickup, max_cells);
-        let candidates: Vec<CellIndex> = disk
-            .into_iter()
-            .filter(|c| {
-                pickup
-                    .grid_distance(*c)
-                    .map(|d| d >= min_cells as i32 && d <= max_cells as i32)
-                    .unwrap_or(false)
-                    && cell_in_bounds(*c, lat_min, lat_max, lng_min, lng_max)
-            })
-            .collect();
-        if candidates.is_empty() {
-            return pickup;
+        if let Some(destination) = grid_disk_strategy(
+            rng, pickup, geo, min_cells, max_cells, lat_min, lat_max, lng_min, lng_max,
+        ) {
+            return destination;
         }
-        let i = rng.gen_range(0..candidates.len());
-        return candidates[i];
+        // If grid_disk fails, fall through to rejection sampling
     }
     
-    // Rejection sampling: randomly sample cells within bounds and check distance
-    // This avoids generating huge grid disks (e.g., 33k+ cells for k=105)
-    // For a 25km city with max_trip_km=25, we need ~105 cells distance
-    // The probability of hitting the right distance range is reasonable with enough attempts
-    const MAX_ATTEMPTS: usize = 2000;
-    for _ in 0..MAX_ATTEMPTS {
-        let cell = random_cell_in_bounds(rng, lat_min, lat_max, lng_min, lng_max);
-        if let Ok(distance) = pickup.grid_distance(cell) {
-            let distance_u32 = distance as u32;
-            if distance_u32 >= min_cells && distance_u32 <= max_cells {
-                return cell;
-            }
-        }
+    // For large radii, use rejection sampling (much faster)
+    if let Some(destination) = rejection_sampling_strategy(
+        rng, pickup, min_cells, max_cells, lat_min, lat_max, lng_min, lng_max,
+    ) {
+        return destination;
     }
     
-    // Fallback: if rejection sampling fails (unlikely), try a smaller grid_disk
-    // Use a radius closer to min_cells to reduce the number of cells generated
-    let fallback_radius = (min_cells + max_cells) / 2;
-    let disk = geo.grid_disk(pickup, fallback_radius);
-    let candidates: Vec<CellIndex> = disk
-        .into_iter()
-        .filter(|c| {
-            pickup
-                .grid_distance(*c)
-                .map(|d| d >= min_cells as i32 && d <= max_cells as i32)
-                .unwrap_or(false)
-                && cell_in_bounds(*c, lat_min, lat_max, lng_min, lng_max)
-        })
-        .collect();
-    if !candidates.is_empty() {
-        let i = rng.gen_range(0..candidates.len());
-        return candidates[i];
+    // Fallback: try a smaller grid_disk
+    if let Some(destination) = fallback_grid_disk_strategy(
+        rng, pickup, geo, min_cells, max_cells, lat_min, lat_max, lng_min, lng_max,
+    ) {
+        return destination;
     }
     
     // Last resort: return pickup
@@ -275,8 +360,8 @@ pub fn build_scenario(world: &mut World, params: ScenarioParams) {
         seed: seed.wrapping_add(0xcafe_babe), // Use a different seed offset for cancellation
     });
     world.insert_resource(SpeedModel::new(params.seed.map(|seed| seed ^ 0x5eed_cafe)));
-    // Default to cost-based matching with weight 0.1
-    world.insert_resource(create_cost_based_matching(0.1));
+    // Default to cost-based matching with default ETA weight
+    world.insert_resource(create_cost_based_matching(crate::matching::DEFAULT_ETA_WEIGHT));
 
     let seed = params.seed.unwrap_or(0);
     let request_window_ms = params.request_window_ms;
@@ -298,7 +383,7 @@ pub fn build_scenario(world: &mut World, params: ScenarioParams) {
         0.0
     };
     // Adjust base rate to account for multipliers (average multiplier is ~1.3)
-    let base_rate_per_sec = avg_rate_per_sec / 1.3;
+    let base_rate_per_sec = avg_rate_per_sec / RIDER_DEMAND_AVERAGE_MULTIPLIER;
     
     let rider_spawner_config = RiderSpawnerConfig {
         inter_arrival_dist: Box::new(create_rider_time_of_day_pattern(base_rate_per_sec, epoch_ms, seed)),
@@ -322,7 +407,7 @@ pub fn build_scenario(world: &mut World, params: ScenarioParams) {
     let driver_seed = seed.wrapping_add(0xdead_beef);
     let scheduled_driver_count = params.num_drivers.saturating_sub(params.initial_driver_count);
     let driver_base_rate_per_sec = if driver_spread_ms > 0 && scheduled_driver_count > 0 {
-        (scheduled_driver_count as f64) / (driver_spread_ms as f64 / 1000.0) / 1.2
+        (scheduled_driver_count as f64) / (driver_spread_ms as f64 / 1000.0) / DRIVER_SUPPLY_AVERAGE_MULTIPLIER
     } else {
         0.0
     };
@@ -361,10 +446,10 @@ mod tests {
 
         let rider_spawner = world.resource::<RiderSpawner>();
         assert_eq!(rider_spawner.config.max_count, Some(10));
-        assert_eq!(rider_spawner.spawned_count, 0);
+        assert_eq!(rider_spawner.spawned_count(), 0);
 
         let driver_spawner = world.resource::<DriverSpawner>();
         assert_eq!(driver_spawner.config.max_count, Some(3));
-        assert_eq!(driver_spawner.spawned_count, 0);
+        assert_eq!(driver_spawner.spawned_count(), 0);
     }
 }
