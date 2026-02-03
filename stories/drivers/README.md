@@ -10,7 +10,7 @@
 
 - Story: As a driver, I go OffDuty after hitting a daily earnings target or
   fatigue threshold.
-  Status: Backlog
+  Status: Done
 
 - Story: As a driver, I can switch between ride-hailing and food delivery based
   on relative earnings.

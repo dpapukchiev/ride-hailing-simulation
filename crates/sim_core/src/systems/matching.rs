@@ -35,7 +35,7 @@ pub fn matching_system(
 
     let radius = match_radius.as_deref().map(|r| r.0).unwrap_or(0);
 
-    // Collect available drivers (idle drivers with positions)
+    // Collect available drivers (idle drivers only; exclude OffDuty drivers)
     let available_drivers: Vec<(Entity, h3o::CellIndex)> = drivers
         .iter()
         .filter_map(|(entity, driver, position)| {

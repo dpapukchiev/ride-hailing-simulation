@@ -35,6 +35,24 @@ pub struct Driver {
     pub matched_rider: Option<Entity>,
 }
 
+/// Tracks driver earnings and daily targets.
+#[derive(Debug, Clone, Copy, PartialEq, Component)]
+pub struct DriverEarnings {
+    /// Accumulated earnings for the current day.
+    pub daily_earnings: f64,
+    /// Earnings target at which driver goes OffDuty.
+    pub daily_earnings_target: f64,
+    /// Simulation time when driver started their current session (for fatigue calculation).
+    pub session_start_time_ms: u64,
+}
+
+/// Tracks driver fatigue thresholds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]
+pub struct DriverFatigue {
+    /// Maximum time on duty before going OffDuty (in milliseconds).
+    pub fatigue_threshold_ms: u64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TripState {
     EnRoute,

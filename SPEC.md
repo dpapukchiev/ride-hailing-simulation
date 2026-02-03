@@ -21,6 +21,11 @@ minimal ECS-based agent model. It currently supports:
   Configurable match radius, trip duration (min/max H3 cells), and simulation start time.
   Spawners use time-of-day and day-of-week distributions to create realistic demand
   and supply patterns (rush hours, day/night variations).
+- **Driver earnings and fatigue tracking**: Drivers accumulate earnings from completed trips
+  and transition to `OffDuty` when they reach their daily earnings target or exceed their
+  fatigue threshold. OffDuty drivers are excluded from matching.
+- **Simple pricing system**: Distance-based fare calculation (base fare + per-kilometer rate)
+  for trip earnings.
 
 This is a "crawl/walk" foundation aligned with the research plan.
 
@@ -53,11 +58,14 @@ distributions to control spawn rates, enabling variable supply and demand patter
 The default distributions vary rates based on time of day (hour) and day of week,
 creating realistic patterns with rush hours (7-9 AM, 5-7 PM) and lower demand at night.
 Riders spawn in `Browsing` state, browse a quote, then wait for matching. Drivers spawn
-in `Idle` state continuously over the simulation window, evaluate a match offer, drive en route to pickup, and then move into
+in `Idle` state continuously over the simulation window with earnings targets ($100-$300)
+and fatigue thresholds (8-12 hours), evaluate a match offer, drive en route to pickup, and then move into
 an on-trip state. If
 a rider waits past a randomized pickup window, the ride is cancelled, the trip
 is marked cancelled, and the driver returns to idle. When the trip completes,
-the rider is despawned and the driver returns to idle. Matching uses a
+the rider is despawned, the driver earns fare based on trip distance, and the driver returns to idle
+(or transitions to `OffDuty` if earnings target or fatigue threshold is exceeded). OffDuty drivers
+are excluded from matching and remain in that state for the remainder of the simulation. Matching uses a
 configurable **match radius** (H3 grid distance): 0 = same cell only; a larger
 radius allows matching to idle drivers within that many cells. Trip length is
 configurable via min/max H3 cells from pickup to dropoff (movement uses 20–60
@@ -91,6 +99,7 @@ crates/
       scenario.rs
       spatial.rs
       telemetry.rs
+      pricing.rs
       systems/
         mod.rs
         request_inbound.rs
@@ -102,6 +111,7 @@ crates/
         rider_cancel.rs
         trip_started.rs
         trip_completed.rs
+        driver_offduty.rs
     examples/
       scenario_run.rs
   sim_ui/
@@ -138,6 +148,17 @@ crates/
 - `grid_disk(origin, k)` wraps `h3o::CellIndex::grid_disk` and asserts the
   resolution matches the index resolution.
 - Default resolution is `Resolution::Nine`.
+- `distance_km_between_cells(a, b)` calculates haversine distance between two H3 cells in kilometers.
+
+### `sim_core::pricing`
+
+Simple distance-based fare calculation for trip earnings.
+
+- **`BASE_FARE`**: Base fare constant (default $2.50).
+- **`PER_KM_RATE`**: Per-kilometer rate (default $1.50/km).
+- **`calculate_trip_fare(pickup, dropoff)`**: Calculates fare for a trip based on distance.
+  Formula: `fare = BASE_FARE + (distance_km * PER_KM_RATE)`.
+  Returns driver earnings (fare amount; commission can be deducted later if needed).
 
 ### `sim_core::clock`
 
@@ -156,10 +177,10 @@ All time is in **milliseconds** (simulation ms). Time 0 maps to a real-world dat
 - **Conversion**:
   - `sim_to_real_ms(sim_ms) -> i64` = epoch_ms + sim_ms.
   - `real_to_sim_ms(real_ms) -> Option<u64>`; `None` if real_ms is before the epoch.
-- **Constants**: `ONE_SEC_MS = 1000`, `ONE_MIN_MS = 60_000`.
+- **Constants**: `ONE_SEC_MS = 1000`, `ONE_MIN_MS = 60_000`, `ONE_HOUR_MS = 3_600_000`.
 - **`Event`**: `timestamp` (u64, ms), `kind`, `subject`.
 - **`CurrentEvent`** (ECS `Resource`): the event currently being handled.
-- **`EventKind`** / **`EventSubject`**: includes `SimulationStarted` (at time 0), `SpawnRider`, `SpawnDriver`, and `RiderCancel` for pickup timeout events.
+- **`EventKind`** / **`EventSubject`**: includes `SimulationStarted` (at time 0), `SpawnRider`, `SpawnDriver`, `RiderCancel` for pickup timeout events, and `CheckDriverOffDuty` for periodic earnings/fatigue checks.
 - **`pending_event_count()`**: returns the number of events in the queue (for tests and scenario validation).
 
 ### `sim_core::ecs`
@@ -172,6 +193,10 @@ Components and state enums:
   - `requested_at`: simulation time (ms) when the rider was spawned (set by `request_inbound_system` when spawning).
 - `DriverState`: `Idle`, `Evaluating`, `EnRoute`, `OnTrip`, `OffDuty`
 - `Driver` component: `{ state: DriverState, matched_rider: Option<Entity> }`
+- `DriverEarnings` component: `{ daily_earnings: f64, daily_earnings_target: f64, session_start_time_ms: u64 }`
+  - Tracks accumulated earnings for the current day, earnings target at which driver goes OffDuty, and session start time for fatigue calculation.
+- `DriverFatigue` component: `{ fatigue_threshold_ms: u64 }`
+  - Maximum time on duty (in milliseconds) before driver goes OffDuty.
 - `TripState`: `EnRoute`, `OnTrip`, `Completed`, `Cancelled`
 - `Trip` component: `{ state, rider, driver, pickup, dropoff, requested_at: u64, matched_at: u64, pickup_at: Option<u64>, dropoff_at: Option<u64> }`
   - `pickup` / `dropoff`: trip is completed when the driver reaches `dropoff` (not a fixed +1 tick).
@@ -283,7 +308,9 @@ Spawner systems: react to spawn events and create riders/drivers dynamically.
   - Schedules `QuoteAccepted` 1 second from now for the newly spawned rider.
   - Advances spawner to next spawn time using inter-arrival distribution.
   - Schedules next `SpawnRider` event if spawning should continue.
-- **`driver_spawner_system`**: Reacts to `EventKind::SpawnDriver`. Similar to `rider_spawner_system` but spawns drivers in `Idle` state (no destination needed). Drivers spawn with random positions within configured bounds.
+- **`driver_spawner_system`**: Reacts to `EventKind::SpawnDriver`. Similar to `rider_spawner_system` but spawns drivers in `Idle` state (no destination needed). Drivers spawn with random positions within configured bounds. Each driver is initialized with:
+  - `DriverEarnings` component: `daily_earnings = 0.0`, `daily_earnings_target` sampled from $100-$300 range, `session_start_time_ms = current_time_ms`.
+  - `DriverFatigue` component: `fatigue_threshold_ms` sampled from 8-12 hours range.
 
 ### `sim_core::systems::quote_accepted`
 
@@ -319,7 +346,7 @@ System: `matching_system`
 - Reacts to `CurrentEvent`.
 - On `EventKind::TryMatch` with subject `Rider(rider_entity)`:
   - If that rider is `Waiting`, queries the `MatchingAlgorithm` resource (required) to find a match.
-  - Collects all `Idle` drivers with their positions as candidates.
+  - Collects all `Idle` drivers with their positions as candidates (excludes `OffDuty` drivers).
   - Calls `find_match()` on the algorithm with the rider and available drivers.
   - If a match is found:
     - Rider stores `matched_driver = Some(driver_entity)`
@@ -413,10 +440,31 @@ System: `trip_completed_system`
 
 - Reacts to `CurrentEvent`.
 - On `EventKind::TripCompleted` with subject `Trip(trip_entity)`:
-  - Driver: `OnTrip` → `Idle` and clears `matched_rider`
+  - Calculates trip fare using `calculate_trip_fare(trip.pickup, trip.dropoff)` and adds earnings to driver's `daily_earnings`.
+  - Checks if driver should go OffDuty:
+    - Earnings target: if `daily_earnings >= daily_earnings_target`, driver goes OffDuty.
+    - Fatigue threshold: if `session_duration_ms >= fatigue_threshold_ms`, driver goes OffDuty.
+  - Driver: `OnTrip` → `Idle` (or `OffDuty` if thresholds exceeded) and clears `matched_rider`
   - Rider: `InTransit` → `Completed` and clears `matched_driver`, then the rider entity is despawned
   - Trip: `OnTrip` → `Completed`
   - Pushes a `CompletedTripRecord` to `SimTelemetry` with trip/rider/driver entities and timestamps (requested_at, matched_at, pickup_at, completed_at) for KPIs.
+
+### `sim_core::systems::driver_offduty`
+
+System: `driver_offduty_check_system`
+
+- Reacts to `CurrentEvent`.
+- On `EventKind::CheckDriverOffDuty`:
+  - Periodically checks all active drivers (not already OffDuty) for earnings targets and fatigue thresholds.
+  - Skips drivers currently on a trip (`EnRoute` or `OnTrip`); they are checked after trip completion.
+  - For each eligible driver:
+    - Checks if `daily_earnings >= daily_earnings_target` (earnings target reached).
+    - Checks if `session_duration_ms >= fatigue_threshold_ms` (fatigue threshold exceeded).
+  - Transitions drivers to `OffDuty` if either threshold is exceeded.
+  - Schedules next check in 5 minutes (`CHECK_INTERVAL_MS`) if there are active drivers remaining.
+  - Stops scheduling periodic checks when no active drivers remain (prevents infinite event queue).
+- On `EventKind::SimulationStarted`:
+  - Initializes periodic checks by scheduling the first `CheckDriverOffDuty` event 5 minutes from simulation start.
 
 ### `sim_core::systems::telemetry_snapshot`
 
@@ -439,15 +487,16 @@ Unit tests exist in each module to confirm behavior:
 - `rider_cancel`: rider cancels when pickup wait expires.
 - `movement`: driver moves toward rider and schedules trip start; `eta_ms` scales with distance.
 - `trip_started`: trip start transitions and completion scheduling.
-- `trip_completed`: rider/driver transition after completion.
+- `trip_completed`: rider/driver transition after completion; earnings calculation and OffDuty threshold checks.
+- `driver_offduty`: periodic earnings/fatigue threshold checks and OffDuty transitions.
 - `telemetry_export`: timestamp ordering validation for all trip states (EnRoute, OnTrip, Completed, Cancelled); integration test validates all trips in snapshots follow funnel order.
 - **End-to-end (single ride)**: Inserts `SimulationClock`, `SimTelemetry`, spawners configured to spawn one rider and one driver in the same cell. Calls `initialize_simulation()` to schedule `SimulationStarted` at time 0. Runs `run_until_empty` with `simulation_schedule()`.
   Asserts: one `Trip` in `Completed` with correct rider/driver and pickup/dropoff;
-  rider `Completed`, driver `Idle`; `SimTelemetry.completed_trips.len() == 1`, record
+  rider `Completed`, driver `Idle` or `OffDuty` (if thresholds exceeded); `SimTelemetry.completed_trips.len() == 1`, record
   matches rider/driver, and KPI timestamps are ordered (requested_at ≤ matched_at ≤ pickup_at ≤ completed_at); `time_to_match()`, `time_to_pickup()`, `trip_duration()` are consistent.
 - **End-to-end (concurrent trips)**: Same setup with spawners configured for two riders and two drivers
   (same cell), riders spawning at t=1s and t=2s. Calls `initialize_simulation()` and runs until empty. Asserts: two
-  `Trip` entities in `Completed`, both riders `Completed`, both drivers `Idle`;
+  `Trip` entities in `Completed`, both riders `Completed`, both drivers `Idle` or `OffDuty` (if thresholds exceeded);
   `SimTelemetry.completed_trips.len() == 2`.
 - **Scenario**: `build_scenario` with 10 riders, 3 drivers, seed 42; asserts
   spawner configurations are correct (max_count matches params). Large scenarios (e.g.

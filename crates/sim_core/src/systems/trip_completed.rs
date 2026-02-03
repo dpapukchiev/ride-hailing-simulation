@@ -1,7 +1,8 @@
 use bevy_ecs::prelude::{Commands, Query, Res, ResMut};
 
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
-use crate::ecs::{Driver, DriverState, Rider, RiderState, Trip, TripState};
+use crate::ecs::{Driver, DriverEarnings, DriverFatigue, DriverState, Rider, RiderState, Trip, TripState};
+use crate::pricing::calculate_trip_fare;
 use crate::telemetry::{CompletedTripRecord, SimTelemetry};
 
 pub fn trip_completed_system(
@@ -12,6 +13,8 @@ pub fn trip_completed_system(
     mut trips: Query<&mut Trip>,
     mut riders: Query<&mut Rider>,
     mut drivers: Query<&mut Driver>,
+    mut driver_earnings: Query<&mut DriverEarnings>,
+    driver_fatigue: Query<&DriverFatigue>,
 ) {
     if event.0.kind != EventKind::TripCompleted {
         return;
@@ -31,11 +34,41 @@ pub fn trip_completed_system(
     let driver_entity = trip.driver;
     let rider_entity = trip.rider;
 
+    // Calculate fare and update driver earnings
+    let fare = calculate_trip_fare(trip.pickup, trip.dropoff);
+    let mut should_go_offduty = false;
+    
+    // Update driver state
     if let Ok(mut driver) = drivers.get_mut(driver_entity) {
         if driver.state == DriverState::OnTrip {
             driver.state = DriverState::Idle;
         }
         driver.matched_rider = None;
+    }
+    
+    // Update earnings and check thresholds
+    if let Ok(mut earnings) = driver_earnings.get_mut(driver_entity) {
+        earnings.daily_earnings += fare;
+        
+        // Check if earnings target reached
+        if earnings.daily_earnings >= earnings.daily_earnings_target {
+            should_go_offduty = true;
+        }
+        
+        // Check fatigue threshold
+        if let Ok(fatigue) = driver_fatigue.get(driver_entity) {
+            let session_duration_ms = clock.now().saturating_sub(earnings.session_start_time_ms);
+            if session_duration_ms >= fatigue.fatigue_threshold_ms {
+                should_go_offduty = true;
+            }
+        }
+    }
+    
+    // Transition to OffDuty if thresholds exceeded
+    if should_go_offduty {
+        if let Ok(mut driver) = drivers.get_mut(driver_entity) {
+            driver.state = DriverState::OffDuty;
+        }
     }
 
     if let Ok(mut rider) = riders.get_mut(rider_entity) {

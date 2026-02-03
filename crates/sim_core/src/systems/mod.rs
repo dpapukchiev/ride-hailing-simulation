@@ -9,6 +9,7 @@ pub mod trip_started;
 pub mod trip_completed;
 pub mod telemetry_snapshot;
 pub mod rider_cancel;
+pub mod driver_offduty;
 
 #[cfg(test)]
 mod end_to_end_tests {
@@ -90,7 +91,12 @@ mod end_to_end_tests {
         assert_eq!(trip.driver, driver_entity);
         // Note: pickup cell may differ from expected due to spawner randomness within bounds
         assert_ne!(trip.dropoff, trip.pickup, "dropoff should differ from pickup");
-        assert_eq!(driver.state, DriverState::Idle);
+        // Driver should be Idle or OffDuty (if earnings/fatigue thresholds were met)
+        assert!(
+            driver.state == DriverState::Idle || driver.state == DriverState::OffDuty,
+            "driver should be Idle or OffDuty after trip completion, got {:?}",
+            driver.state
+        );
         assert_eq!(driver.matched_rider, None);
 
         let telemetry = world.resource::<SimTelemetry>();
@@ -171,7 +177,12 @@ mod end_to_end_tests {
         let drivers: Vec<_> = world.query::<&Driver>().iter(&world).collect();
         assert_eq!(drivers.len(), 2);
         for driver in drivers {
-            assert_eq!(driver.state, DriverState::Idle);
+            // Drivers should be Idle or OffDuty (if earnings/fatigue thresholds were met)
+            assert!(
+                driver.state == DriverState::Idle || driver.state == DriverState::OffDuty,
+                "driver should be Idle or OffDuty after trip completion, got {:?}",
+                driver.state
+            );
         }
 
         let telemetry = world.resource::<SimTelemetry>();

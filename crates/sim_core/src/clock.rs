@@ -13,6 +13,8 @@ use bevy_ecs::prelude::{Entity, Resource};
 pub const ONE_SEC_MS: u64 = 1000;
 /// One minute in simulation milliseconds.
 pub const ONE_MIN_MS: u64 = 60 * ONE_SEC_MS;
+/// One hour in simulation milliseconds.
+pub const ONE_HOUR_MS: u64 = 60 * ONE_MIN_MS;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum EventKind {
@@ -28,6 +30,7 @@ pub enum EventKind {
     TripStarted,
     TripCompleted,
     RiderCancel,
+    CheckDriverOffDuty,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -2,10 +2,10 @@
 
 use bevy_ecs::prelude::{Commands, Res, ResMut};
 use rand::rngs::StdRng;
-use rand::SeedableRng;
+use rand::{Rng, SeedableRng};
 
-use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
-use crate::ecs::{Driver, DriverState, Position, Rider, RiderState};
+use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock, ONE_HOUR_MS};
+use crate::ecs::{Driver, DriverFatigue, DriverEarnings, DriverState, Position, Rider, RiderState};
 use crate::scenario::random_destination;
 use crate::spatial::GeoIndex;
 use crate::spawner::{random_cell_in_bounds, DriverSpawner, RiderSpawner};
@@ -165,13 +165,28 @@ pub fn driver_spawner_system(
             spawner.config.lng_max,
         );
 
-        // Spawn the driver
+        // Sample earnings target: $100-$300 range
+        let daily_earnings_target = rng.gen_range(100.0..=300.0);
+        
+        // Sample fatigue threshold: 8-12 hours
+        let fatigue_hours = rng.gen_range(8.0..=12.0);
+        let fatigue_threshold_ms = (fatigue_hours * ONE_HOUR_MS as f64) as u64;
+
+        // Spawn the driver with earnings and fatigue components
         commands.spawn((
             Driver {
                 state: DriverState::Idle,
                 matched_rider: None,
             },
             Position(position),
+            DriverEarnings {
+                daily_earnings: 0.0,
+                daily_earnings_target,
+                session_start_time_ms: current_time_ms,
+            },
+            DriverFatigue {
+                fatigue_threshold_ms,
+            },
         ));
 
         // Advance spawner to next spawn time (uses seeded distribution internally)
