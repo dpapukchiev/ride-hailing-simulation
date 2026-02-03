@@ -1,6 +1,7 @@
 use bevy_ecs::prelude::{Commands, Query, Res, ResMut};
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
 use crate::ecs::{Driver, DriverState, Position, Rider, RiderState, Trip, TripState};
+use crate::spatial::distance_km_between_cells;
 
 fn logit_accepts(score: f64) -> bool {
     let probability = 1.0 / (1.0 + (-score).exp());
@@ -87,20 +88,6 @@ pub fn driver_decision_system(
         driver.state = DriverState::Idle;
         driver.matched_rider = None;
     }
-}
-
-fn distance_km_between_cells(a: h3o::CellIndex, b: h3o::CellIndex) -> f64 {
-    let a: h3o::LatLng = a.into();
-    let b: h3o::LatLng = b.into();
-    let (lat1, lon1) = (a.lat().to_radians(), a.lng().to_radians());
-    let (lat2, lon2) = (b.lat().to_radians(), b.lng().to_radians());
-    let dlat = lat2 - lat1;
-    let dlon = lon2 - lon1;
-    let sin_dlat = (dlat * 0.5).sin();
-    let sin_dlon = (dlon * 0.5).sin();
-    let h = sin_dlat * sin_dlat + lat1.cos() * lat2.cos() * sin_dlon * sin_dlon;
-    let c = 2.0 * h.sqrt().atan2((1.0 - h).sqrt());
-    6371.0 * c
 }
 
 #[cfg(test)]

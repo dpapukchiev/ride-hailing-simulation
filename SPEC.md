@@ -53,8 +53,8 @@ driver returns to idle. When the trip completes, the rider is marked completed
 and the driver returns to idle. Matching uses a configurable **match radius**
 (H3 grid distance): 0 = same cell only; a larger radius allows matching to idle
 drivers within that many cells. Trip length is configurable via min/max H3 cells
-from pickup to dropoff (movement uses 1 min per cell, so e.g. 5–60 cells ≈ 5
-min–1h). Throughout this flow, riders and drivers store links to each other so
+from pickup to dropoff (movement uses 20–60 km/h city-driving speeds). Throughout
+this flow, riders and drivers store links to each other so
 the pairing is explicit while a trip is in progress.
 
 ## Workspace Layout
@@ -191,7 +191,7 @@ Scenario setup: spawn riders and drivers with random positions and request times
   - `lat_min`, `lat_max`, `lng_min`, `lng_max`: bounding box (degrees) for random positions; default San Francisco Bay Area.
   - `request_window_ms`: rider `RequestInbound` times are uniform in `[0, request_window_ms]`.
   - `match_radius`: max H3 grid distance for matching (0 = same cell only).
-  - `min_trip_cells`, `max_trip_cells`: trip length in H3 cells; rider destinations are chosen at random distance in this range from pickup. Movement uses 1 min per cell (e.g. 5–60 ≈ 5 min–1h).
+  - `min_trip_cells`, `max_trip_cells`: trip length in H3 cells; rider destinations are chosen at random distance in this range from pickup. Travel time depends on per-trip speeds (20–60 km/h).
   - Builders: `with_seed(seed)`, `with_request_window_hours(hours)`, `with_match_radius(radius)`, `with_trip_duration_cells(min, max)`.
 - **`build_scenario(world, params)`**: inserts `SimulationClock`, `SimTelemetry`, `MatchRadius`, and `RiderCancelConfig`; spawns riders (with random `Position` and optional `destination` in `[min_trip_cells, max_trip_cells]` from pickup) and drivers (random `Position`); schedules one `RequestInbound` per rider at a random sim time in `[0, request_window_ms]`.
 - Also inserts `SimSnapshotConfig` and `SimSnapshots` for periodic snapshot capture (used by the UI/export).
@@ -283,11 +283,12 @@ System: `movement_system`
 - Reacts to `CurrentEvent`.
 - On `EventKind::MoveStep` with subject `Trip(trip_entity)`:
   - **EnRoute**: moves the trip’s driver one H3 hop toward `trip.pickup` (rider cell), updates
-    `trip.pickup_eta_ms` based on remaining distance, and emits `PickupEtaUpdated` for the trip.
-    If still en route, reschedules `MoveStep` with `schedule_in(eta_ms(remaining), ...)`; when
-    driver reaches pickup, schedules `TripStarted` 1 second from now (`schedule_in_secs(1, ...)`).
+    `trip.pickup_eta_ms` using remaining haversine distance and a per-trip speed in the
+    20–60 km/h range, and emits `PickupEtaUpdated` for the trip. If still en route, reschedules
+    `MoveStep` based on the time to traverse the next hop; when driver reaches pickup, schedules
+    `TripStarted` 1 second from now (`schedule_in_secs(1, ...)`).
   - **OnTrip**: moves the trip’s driver one H3 hop toward `trip.dropoff`. If still en route,
-    reschedules `MoveStep` with `schedule_in(eta_ms(remaining), ...)`; when driver reaches dropoff,
+    reschedules `MoveStep` based on the time to traverse the next hop; when driver reaches dropoff,
     schedules `TripCompleted` 1 second from now (`schedule_in_secs(1, ...)`).
 
 ### `sim_core::systems::pickup_eta_updated`
@@ -301,10 +302,11 @@ System: `pickup_eta_updated_system`
   - If the projected pickup exceeds the wait deadline (after min wait), cancels the trip, marks
     the rider cancelled, despawns the rider, and returns the driver to `Idle`.
   - **Cancelled/Completed**: no-op.
-- ETA in ms: `eta_ms(distance)` — at least 1 second (`ONE_SEC_MS`); otherwise distance × 1 min per H3 cell (`ONE_MIN_MS`). Used for `schedule_in(eta_ms(remaining), ...)`.
+- ETA in ms: derived from haversine distance and a per-trip speed in the
+  20–60 km/h range, with a 1 second minimum (`ONE_SEC_MS`).
 
 This is a deterministic, FCFS-style placeholder. No distance or cost logic
-is implemented yet beyond H3 grid distance.
+is implemented yet beyond H3 grid distance and simple per-trip speeds.
 
 ### `sim_core::systems::trip_started`
 

@@ -58,7 +58,7 @@ pub struct ScenarioParams {
     pub request_window_ms: u64,
     /// Max H3 grid distance for matching (0 = same cell only).
     pub match_radius: u32,
-    /// Min/max trip length in H3 cells (movement uses 1 min per cell; e.g. 5..60 = 5 min to 1h).
+    /// Min/max trip length in H3 cells (travel time depends on movement speed).
     pub min_trip_cells: u32,
     pub max_trip_cells: u32,
 }
@@ -99,7 +99,7 @@ impl ScenarioParams {
         self
     }
 
-    /// Trip length in H3 cells: min..=max (movement uses 1 min per cell; 60 cells ≈ 1h).
+    /// Trip length in H3 cells: min..=max (travel time depends on movement speed).
     pub fn with_trip_duration_cells(mut self, min_cells: u32, max_cells: u32) -> Self {
         self.min_trip_cells = min_cells;
         self.max_trip_cells = max_cells;

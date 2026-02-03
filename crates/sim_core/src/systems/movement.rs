@@ -1,14 +1,26 @@
-use bevy_ecs::prelude::{Query, Res, ResMut};
+use bevy_ecs::prelude::{Entity, Query, Res, ResMut};
 
-use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock, ONE_MIN_MS, ONE_SEC_MS};
+use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock, ONE_SEC_MS};
 use crate::ecs::{Driver, DriverState, Position, Trip, TripState};
+use crate::spatial::distance_km_between_cells;
 
-/// ETA in ms: at least 1 second; otherwise distance × 1 min per H3 cell.
-fn eta_ms(distance: i32) -> u64 {
-    if distance <= 0 {
+const MIN_SPEED_KMH: f64 = 20.0;
+const MAX_SPEED_KMH: f64 = 60.0;
+
+fn speed_kmh_for_trip(trip_entity: Entity) -> f64 {
+    let raw = trip_entity.to_bits();
+    let spread = (MAX_SPEED_KMH - MIN_SPEED_KMH).max(0.0);
+    let bucket = (raw % (spread as u64 + 1)) as f64;
+    MIN_SPEED_KMH + bucket
+}
+
+fn travel_time_ms(distance_km: f64, speed_kmh: f64) -> u64 {
+    if distance_km <= 0.0 {
         ONE_SEC_MS
     } else {
-        (distance as u64).saturating_mul(ONE_MIN_MS)
+        let hours = distance_km / speed_kmh.max(1.0);
+        let ms = (hours * 60.0 * 60.0 * 1000.0).round() as u64;
+        ms.max(ONE_SEC_MS)
     }
 }
 
@@ -50,8 +62,9 @@ pub fn movement_system(
         return;
     }
 
-    let distance = driver_pos.0.grid_distance(target_cell).unwrap_or(0);
-    if distance <= 0 {
+    let speed_kmh = speed_kmh_for_trip(trip_entity);
+    let remaining_km = distance_km_between_cells(driver_pos.0, target_cell);
+    if remaining_km <= 0.0 {
         if is_en_route {
             if let Ok(mut trip) = trips.get_mut(trip_entity) {
                 trip.pickup_eta_ms = 0;
@@ -66,22 +79,28 @@ pub fn movement_system(
         return;
     }
 
+    let mut step_distance_km = remaining_km;
     if let Ok(path) = driver_pos.0.grid_path_cells(target_cell) {
         let mut iter = path.filter_map(|cell| cell.ok());
         let _current = iter.next();
         if let Some(next_cell) = iter.next() {
+            step_distance_km = distance_km_between_cells(driver_pos.0, next_cell);
             driver_pos.0 = next_cell;
         }
     }
 
-    let remaining = driver_pos.0.grid_distance(target_cell).unwrap_or(0);
+    let remaining = distance_km_between_cells(driver_pos.0, target_cell);
     if is_en_route {
         if let Ok(mut trip) = trips.get_mut(trip_entity) {
-            trip.pickup_eta_ms = eta_ms(remaining);
+            trip.pickup_eta_ms = if remaining <= 0.0 {
+                0
+            } else {
+                travel_time_ms(remaining, speed_kmh)
+            };
         }
         clock.schedule_in(0, EventKind::PickupEtaUpdated, Some(EventSubject::Trip(trip_entity)));
     }
-    if remaining == 0 {
+    if remaining <= 0.0 {
         let kind = if is_en_route {
             EventKind::TripStarted
         } else {
@@ -89,7 +108,8 @@ pub fn movement_system(
         };
         clock.schedule_in_secs(1, kind, Some(EventSubject::Trip(trip_entity)));
     } else {
-        clock.schedule_in(eta_ms(remaining), EventKind::MoveStep, Some(EventSubject::Trip(trip_entity)));
+        let step_ms = travel_time_ms(step_distance_km, speed_kmh);
+        clock.schedule_in(step_ms, EventKind::MoveStep, Some(EventSubject::Trip(trip_entity)));
     }
 }
 
@@ -187,8 +207,9 @@ mod tests {
 
     #[test]
     fn eta_ms_scales_with_distance() {
-        assert_eq!(eta_ms(0), ONE_SEC_MS);
-        assert_eq!(eta_ms(1), ONE_MIN_MS);
-        assert_eq!(eta_ms(3), 3 * ONE_MIN_MS);
+        let speed = 40.0;
+        assert_eq!(travel_time_ms(0.0, speed), ONE_SEC_MS);
+        assert_eq!(travel_time_ms(1.0, speed), 90_000);
+        assert_eq!(travel_time_ms(2.5, speed), 225_000);
     }
 }
