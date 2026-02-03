@@ -53,6 +53,7 @@ struct SimUiApp {
     rider_cancel_max_mins: u64,
     show_riders: bool,
     show_drivers: bool,
+    show_driver_stats: bool,
     matching_algorithm: MatchingAlgorithmType,
     start_year: i32,
     start_month: u32,
@@ -141,6 +142,7 @@ impl SimUiApp {
             rider_cancel_max_mins,
             show_riders: true,
             show_drivers: true,
+            show_driver_stats: true,
             matching_algorithm,
             start_year: year,
             start_month: month,
@@ -347,6 +349,7 @@ impl eframe::App for SimUiApp {
             ui.horizontal(|ui| {
                 ui.checkbox(&mut self.show_riders, "Riders");
                 ui.checkbox(&mut self.show_drivers, "Drivers");
+                ui.checkbox(&mut self.show_driver_stats, "Driver stats (earnings/fatigue)");
                 ui.checkbox(&mut self.grid_enabled, "Grid");
                 ui.label(format!("Steps executed: {}", self.steps_executed));
             });
@@ -581,15 +584,37 @@ impl eframe::App for SimUiApp {
                         }
                     }
                     if self.show_drivers {
+                        let current_time = snapshot.timestamp_ms;
                         for driver in &snapshot.drivers {
                             if let Some(pos) = project_cell(driver.cell, &bounds, map_rect) {
-                                // Show "D(R)" for drivers on trip (with rider)
-                                let label = if driver.state == sim_core::ecs::DriverState::OnTrip {
-                                    "D(R)"
-                                } else {
-                                    "D"
-                                };
-                                draw_agent(&painter, pos, label, driver_color(driver.state));
+                                // Build label with state, earnings, and fatigue info (compact format)
+                                let mut label = String::from("D");
+                                
+                                // Show "(R)" for drivers on trip (with rider)
+                                if driver.state == sim_core::ecs::DriverState::OnTrip {
+                                    label.push_str("(R)");
+                                }
+                                
+                                // Add earnings and fatigue info only if toggle is enabled
+                                if self.show_driver_stats {
+                                    // Add earnings info: [earned/target] without dollar signs
+                                    if let (Some(earnings), Some(target)) = (driver.daily_earnings, driver.daily_earnings_target) {
+                                        label.push_str(&format!("[{:.0}/{:.0}]", earnings, target));
+                                    }
+                                    
+                                    // Add fatigue info: [current/max]h (integers for compactness)
+                                    if let (Some(session_start), Some(fatigue_threshold)) = (
+                                        driver.session_start_time_ms,
+                                        driver.fatigue_threshold_ms
+                                    ) {
+                                        let session_duration_ms = current_time.saturating_sub(session_start);
+                                        let current_hours = (session_duration_ms as f64 / (60.0 * 60.0 * 1000.0)).round() as u32;
+                                        let max_hours = (fatigue_threshold as f64 / (60.0 * 60.0 * 1000.0)).round() as u32;
+                                        label.push_str(&format!("[{}/{}h]", current_hours, max_hours));
+                                    }
+                                }
+                                
+                                draw_agent(&painter, pos, &label, driver_color(driver.state));
                             }
                         }
                     }
@@ -694,7 +719,7 @@ fn draw_agent(painter: &egui::Painter, pos: egui::Pos2, label: &str, color: Colo
         pos + Vec2::new(6.0, -6.0),
         Align2::LEFT_TOP,
         label,
-        FontId::monospace(10.0),
+        FontId::monospace(8.5),
         color,
     );
 }

@@ -1,7 +1,7 @@
 use bevy_ecs::prelude::{Entity, Query, Res, ResMut};
 
 use crate::clock::SimulationClock;
-use crate::ecs::{Driver, Position, Rider, Trip};
+use crate::ecs::{Driver, DriverEarnings, DriverFatigue, Position, Rider, Trip};
 use crate::telemetry::{
     DriverSnapshot, RiderSnapshot, SimCounts, SimSnapshot, SimSnapshotConfig, SimSnapshots,
     SimTelemetry, TripSnapshot,
@@ -14,6 +14,8 @@ pub fn capture_snapshot_system(
     telemetry: Res<SimTelemetry>,
     rider_query: Query<(Entity, &Rider, &Position)>,
     driver_query: Query<(Entity, &Driver, &Position)>,
+    driver_earnings_query: Query<&DriverEarnings>,
+    driver_fatigue_query: Query<&DriverFatigue>,
     trip_query: Query<(Entity, &Trip)>,
 ) {
     let now = clock.now();
@@ -42,10 +44,16 @@ pub fn capture_snapshot_system(
     let mut drivers = Vec::with_capacity(driver_query.iter().count());
     for (entity, driver, position) in driver_query.iter() {
         counts.add_driver(driver.state);
+        let earnings = driver_earnings_query.get(entity).ok().copied();
+        let fatigue = driver_fatigue_query.get(entity).ok().copied();
         drivers.push(DriverSnapshot {
             entity,
             cell: position.0,
             state: driver.state,
+            daily_earnings: earnings.map(|e| e.daily_earnings),
+            daily_earnings_target: earnings.map(|e| e.daily_earnings_target),
+            session_start_time_ms: earnings.map(|e| e.session_start_time_ms),
+            fatigue_threshold_ms: fatigue.map(|f| f.fatigue_threshold_ms),
         });
     }
 

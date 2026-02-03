@@ -282,6 +282,7 @@ Large scenarios (e.g. 500 riders, 100 drivers) are run via the **example** only,
 - **`SimSnapshots`** (ECS `Resource`): rolling `VecDeque<SimSnapshot>` plus `last_snapshot_at`; populated by the snapshot system.
 - **`SimSnapshot`**: `{ timestamp_ms, counts, riders, drivers, trips }` with state-aware position snapshots plus trip state snapshots for visualization/export; counts include cumulative rider totals to account for despawns.
 - **`RiderSnapshot`**: `{ entity, cell, state, matched_driver: Option<Entity> }` captures rider state and position; `matched_driver` is `Some(driver_entity)` when a driver is matched (rider is waiting for pickup) and `None` when waiting for match.
+- **`DriverSnapshot`**: `{ entity, cell, state, daily_earnings: Option<f64>, daily_earnings_target: Option<f64>, session_start_time_ms: Option<u64>, fatigue_threshold_ms: Option<u64> }` captures driver state, position, and earnings/fatigue data (if available) for visualization/export.
 
 ### `sim_core::telemetry_export`
 
@@ -472,6 +473,9 @@ System: `capture_snapshot_system`
 
 - Runs after each event and captures a snapshot when `interval_ms` has elapsed.
 - Records rider/driver positions and state counts into `SimSnapshots` (rolling buffer).
+- For drivers, includes earnings and fatigue data if available:
+  - `daily_earnings`, `daily_earnings_target`, `session_start_time_ms` from `DriverEarnings` component
+  - `fatigue_threshold_ms` from `DriverFatigue` component
 
 ## Tests
 
@@ -534,7 +538,11 @@ All per-system unit tests emulate the runner by popping one event, inserting
   of "D" to indicate they have a rider on board. The UI differentiates between riders waiting for a
   match (yellow/orange) and riders waiting for pickup (darker orange/red) based on whether `matched_driver`
   is set, making it easy to see which riders have a driver assigned and are waiting for pickup versus
-  those still searching for a match.
+  those still searching for a match. **Driver earnings and fatigue information** can be displayed on driver
+  labels in compact format: `D[50/200][3/8h]` shows earnings (current/target) and fatigue (current hours/max hours).
+  A toggle checkbox "Driver stats (earnings/fatigue)" controls whether this information is displayed; when disabled,
+  drivers show only "D" or "D(R)" without the earnings and fatigue brackets. The font size is 8.5pt monospace
+  for compact display.
 
 ## Known Gaps (Not Implemented Yet)
 
