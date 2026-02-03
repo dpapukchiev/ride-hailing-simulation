@@ -2,14 +2,16 @@ use bevy_ecs::prelude::{Entity, Query, Res, ResMut};
 
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
 use crate::ecs::{Driver, DriverState, Position, Rider, RiderState};
+use crate::matching::MatchingAlgorithmResource;
 use crate::scenario::MatchRadius;
 
 const MATCH_RETRY_SECS: u64 = 30;
 
-pub fn simple_matching_system(
+pub fn matching_system(
     mut clock: ResMut<SimulationClock>,
     event: Res<CurrentEvent>,
     match_radius: Option<Res<MatchRadius>>,
+    matching_algorithm: Res<MatchingAlgorithmResource>,
     mut riders: Query<(Entity, &mut Rider, &Position)>,
     mut drivers: Query<(Entity, &mut Driver, &Position)>,
 ) {
@@ -21,28 +23,40 @@ pub fn simple_matching_system(
         return;
     };
 
-    let rider_position = {
+    let (rider_pos, rider_destination) = {
         let Ok((_entity, rider, position)) = riders.get(rider_entity) else {
             return;
         };
         if rider.state != RiderState::Waiting {
             return;
         }
-        position.0
+        (position.0, rider.destination)
     };
 
     let radius = match_radius.as_deref().map(|r| r.0).unwrap_or(0);
 
-    let driver_entity = drivers
+    // Collect available drivers (idle drivers with positions)
+    let available_drivers: Vec<(Entity, h3o::CellIndex)> = drivers
         .iter()
-        .find(|(_, driver, position)| {
-            if driver.state != DriverState::Idle {
-                return false;
+        .filter_map(|(entity, driver, position)| {
+            if driver.state == DriverState::Idle {
+                Some((entity, position.0))
+            } else {
+                None
             }
-            let dist = rider_position.grid_distance(position.0).unwrap_or(i32::MAX);
-            dist >= 0 && dist <= radius as i32
         })
-        .map(|(entity, _, _)| entity);
+        .collect();
+
+    // Use the matching algorithm to find a match
+    let driver_entity = matching_algorithm.find_match(
+        rider_entity,
+        rider_pos,
+        rider_destination,
+        &available_drivers,
+        radius,
+        clock.now(),
+    );
+
     let Some(driver_entity) = driver_entity else {
         clock.schedule_in_secs(
             MATCH_RETRY_SECS,
@@ -52,6 +66,7 @@ pub fn simple_matching_system(
         return;
     };
 
+    // Apply the match
     if let Ok((_entity, mut rider, _)) = riders.get_mut(rider_entity) {
         rider.matched_driver = Some(driver_entity);
     }
@@ -67,11 +82,13 @@ pub fn simple_matching_system(
 mod tests {
     use super::*;
     use bevy_ecs::prelude::{Schedule, World};
+    use crate::matching::{MatchingAlgorithmResource, SimpleMatching};
 
     #[test]
     fn matches_waiting_rider_to_idle_driver() {
         let mut world = World::new();
         world.insert_resource(SimulationClock::default());
+        world.insert_resource(MatchingAlgorithmResource::new(Box::new(SimpleMatching::default())));
         let cell = h3o::CellIndex::try_from(0x8a1fb46622dffff).expect("cell");
         let destination = cell
             .grid_disk::<Vec<_>>(1)
@@ -110,7 +127,7 @@ mod tests {
         world.insert_resource(CurrentEvent(event));
 
         let mut schedule = Schedule::default();
-        schedule.add_systems(simple_matching_system);
+        schedule.add_systems(matching_system);
         schedule.run(&mut world);
 
         let (rider_state, matched_driver) = {

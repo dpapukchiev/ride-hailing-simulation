@@ -195,6 +195,7 @@ Scenario setup: schedule rider requests and spawn entities just-in-time.
 - **`PendingRider`**: data for a rider to be spawned when their request event fires: `{ position, destination, request_time_ms }`.
 - **`PendingRiders`** (ECS `Resource`): FIFO queue (`VecDeque<PendingRider>`) of riders waiting to be spawned when their `RequestInbound` event fires. Consumed by `request_inbound_system`.
 - **`MatchRadius`** (ECS `Resource`, default 0): max H3 grid distance for matching rider to driver. 0 = same cell only; larger values allow matching to idle drivers within that many cells. Inserted by `build_scenario` from `ScenarioParams::match_radius`.
+- **`MatchingAlgorithm`** (ECS `Resource`, required): boxed trait object implementing the matching algorithm. Defaults to `CostBasedMatching` with ETA weight 0.1. Can be swapped with `SimpleMatching` or custom implementations. Inserted by `build_scenario`.
 - **`RiderCancelConfig`** (ECS `Resource`): randomized pickup-wait window in seconds. Defaults to 120–2400 seconds, inserted by `build_scenario`.
 - **`SpeedModel`** (ECS `Resource`): stochastic speed sampler (defaults to 20–60 km/h) seeded from `ScenarioParams::seed` to keep runs reproducible.
 - **`ScenarioParams`**: configurable scenario parameters:
@@ -205,7 +206,8 @@ Scenario setup: schedule rider requests and spawn entities just-in-time.
   - `match_radius`: max H3 grid distance for matching (0 = same cell only).
   - `min_trip_cells`, `max_trip_cells`: trip length in H3 cells; rider destinations are chosen at random distance in this range from pickup. Travel time depends on per-trip speeds (20–60 km/h).
   - Builders: `with_seed(seed)`, `with_request_window_hours(hours)`, `with_match_radius(radius)`, `with_trip_duration_cells(min, max)`.
-- **`build_scenario(world, params)`**: inserts `SimulationClock`, `SimTelemetry`, `MatchRadius`, `RiderCancelConfig`, and `PendingRiders`; generates pending rider data (random `position` and `destination` in `[min_trip_cells, max_trip_cells]` from pickup) and schedules one `RequestInbound` event per rider at a random sim time in `[0, request_window_ms]`; spawns all drivers upfront with random `Position`. Riders are spawned just-in-time when their `RequestInbound` event fires.
+- **`build_scenario(world, params)`**: inserts `SimulationClock`, `SimTelemetry`, `MatchRadius`, `MatchingAlgorithm` (defaults to `CostBasedMatching`), `RiderCancelConfig`, and `PendingRiders`; generates pending rider data (random `position` and `destination` in `[min_trip_cells, max_trip_cells]` from pickup) and schedules one `RequestInbound` event per rider at a random sim time in `[0, request_window_ms]`; spawns all drivers upfront with random `Position`. Riders are spawned just-in-time when their `RequestInbound` event fires.
+- Helper functions: `create_simple_matching()` returns a `SimpleMatching` algorithm, `create_cost_based_matching(eta_weight)` returns a `CostBasedMatching` algorithm with the given ETA weight.
 - Also inserts `SimSnapshotConfig` and `SimSnapshots` for periodic snapshot capture (used by the UI/export).
 
 Large scenarios (e.g. 500 riders, 100 drivers) are run via the **example** only, not in automated tests.
@@ -247,14 +249,33 @@ System: `quote_accepted_system`
   - Schedules `TryMatch` 1 second from now (`schedule_in_secs(1, ...)`) for the same rider.
   - Schedules `RiderCancel` at the max wait deadline from `RiderCancelConfig` to cancel unmatched riders.
 
-### `sim_core::systems::simple_matching`
+### `sim_core::matching`
 
-System: `simple_matching_system`
+Matching algorithm trait and implementations for driver-rider pairing.
+
+- **`MatchingAlgorithm` trait**: Interface for matching algorithms with two methods:
+  - `find_match(rider_entity, rider_pos, rider_destination, available_drivers, match_radius, clock_now_ms) -> Option<Entity>`: Finds a match for a single rider, returns the best driver entity or `None`.
+  - `find_batch_matches(riders, available_drivers, match_radius, clock_now_ms) -> Vec<MatchResult>`: Finds matches for multiple riders (batch optimization). Default implementation calls `find_match` sequentially; algorithms can override for global optimization.
+- **`SimpleMatching`**: First-match-within-radius algorithm. Finds the first available driver within `MatchRadius` H3 grid distance. Preserves original "first match wins" behavior.
+- **`CostBasedMatching`**: Cost-based algorithm that scores driver-rider pairings by:
+  - Pickup distance (km) - lower is better
+  - Estimated pickup time (ms) - lower is better
+  - Score formula: `-pickup_distance_km - (pickup_eta_ms / 1000.0) * eta_weight`
+  - Selects the driver with the highest score (lowest cost)
+  - Configurable `eta_weight` parameter (default 0.1) controls ETA importance vs distance
+- **`MatchResult`**: Represents a successful match with `rider_entity` and `driver_entity`.
+- **`MatchCandidate`**: Represents a potential pairing with scoring information (used internally by algorithms).
+
+### `sim_core::systems::matching`
+
+System: `matching_system`
 
 - Reacts to `CurrentEvent`.
 - On `EventKind::TryMatch` with subject `Rider(rider_entity)`:
-  - If that rider is `Waiting`, finds an `Idle` driver within H3 grid distance ≤ `MatchRadius` (optional resource; if absent, 0 = same cell only).
-  - If both exist:
+  - If that rider is `Waiting`, queries the `MatchingAlgorithm` resource (required) to find a match.
+  - Collects all `Idle` drivers with their positions as candidates.
+  - Calls `find_match()` on the algorithm with the rider and available drivers.
+  - If a match is found:
     - Rider stores `matched_driver = Some(driver_entity)`
     - Driver: `Idle` → `Evaluating` and stores `matched_rider = Some(rider_entity)`
     - Schedules `MatchAccepted` 1 second from now (`schedule_in_secs(1, ...)`) with subject `Driver(driver_entity)`.
@@ -366,7 +387,7 @@ Unit tests exist in each module to confirm behavior:
 - `clock`: events pop in time order; `schedule_in_secs` / `schedule_in_mins` and sim↔real conversion.
 - `request_inbound`: rider transitions to `Browsing` and sets `requested_at`.
 - `quote_accepted`: rider transitions to `Waiting` and schedules `TryMatch`.
-- `simple_matching`: targeted match attempt and transition.
+- `matching`: targeted match attempt and transition using configurable matching algorithm.
 - `match_accepted`: driver decision scheduled.
 - `driver_decision`: driver accept/reject decision.
 - `rider_cancel`: rider cancels when pickup wait expires.
@@ -421,7 +442,8 @@ All per-system unit tests emulate the runner by popping one event, inserting
 
 ## Known Gaps (Not Implemented Yet)
 
-- Real matching algorithms (bipartite matching / cost matrices).
+- Batch matching system: periodic event that collects all waiting riders and calls `find_batch_matches()` for global optimization.
+- Advanced matching algorithms: bipartite matching (Hungarian algorithm) for batch optimization, opportunity cost factoring, driver value weighting.
 - Driver acceptance models and rider conversion.
 - Event scheduling after match beyond fixed delays (e.g. variable trip duration).
 - H3-based movement or routing.

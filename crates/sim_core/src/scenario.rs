@@ -11,6 +11,7 @@ use std::collections::VecDeque;
 
 use crate::clock::{EventKind, SimulationClock};
 use crate::ecs::{Driver, DriverState, Position};
+use crate::matching::{CostBasedMatching, MatchingAlgorithmResource, SimpleMatching};
 use crate::spatial::GeoIndex;
 use crate::speed::SpeedModel;
 use crate::telemetry::{SimSnapshotConfig, SimSnapshots, SimTelemetry};
@@ -167,6 +168,16 @@ fn cell_in_bounds(cell: CellIndex, lat_min: f64, lat_max: f64, lng_min: f64, lng
     lat >= lat_min && lat <= lat_max && lng >= lng_min && lng <= lng_max
 }
 
+/// Create a simple matching algorithm (first match within radius).
+pub fn create_simple_matching() -> MatchingAlgorithmResource {
+    MatchingAlgorithmResource::new(Box::new(SimpleMatching::default()))
+}
+
+/// Create a cost-based matching algorithm with the given ETA weight.
+pub fn create_cost_based_matching(eta_weight: f64) -> MatchingAlgorithmResource {
+    MatchingAlgorithmResource::new(Box::new(CostBasedMatching::new(eta_weight)))
+}
+
 /// Populates `world` with clock, telemetry, drivers, and scheduled RequestInbound events.
 /// Riders are spawned just-in-time when their RequestInbound event fires.
 /// Caller must have already created `world`; this inserts resources and spawns entities.
@@ -178,6 +189,8 @@ pub fn build_scenario(world: &mut World, params: ScenarioParams) {
     world.insert_resource(MatchRadius(params.match_radius));
     world.insert_resource(RiderCancelConfig::default());
     world.insert_resource(SpeedModel::new(params.seed.map(|seed| seed ^ 0x5eed_cafe)));
+    // Default to cost-based matching with weight 0.1
+    world.insert_resource(create_cost_based_matching(0.1));
 
     let mut rng: StdRng = match params.seed {
         Some(seed) => StdRng::seed_from_u64(seed),

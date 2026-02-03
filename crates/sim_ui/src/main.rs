@@ -5,8 +5,9 @@ use h3o::{CellIndex, LatLng};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use sim_core::ecs::{DriverState, RiderState, TripState};
+use sim_core::matching::MatchingAlgorithmResource;
 use sim_core::runner::{run_next_event, simulation_schedule};
-use sim_core::scenario::{build_scenario, RiderCancelConfig, ScenarioParams};
+use sim_core::scenario::{build_scenario, create_cost_based_matching, create_simple_matching, RiderCancelConfig, ScenarioParams};
 use sim_core::telemetry::{SimSnapshotConfig, SimSnapshots, TripSnapshot};
 
 const H3_RES9_CELL_WIDTH_KM: f64 = 0.24;
@@ -20,7 +21,11 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "Ride-Hailing Simulation",
         options,
-        Box::new(|_cc| Ok(Box::new(SimUiApp::new()))),
+        Box::new(|cc| {
+            // Scale UI to 80% to fit better on screen
+            cc.egui_ctx.set_pixels_per_point(0.8);
+            Ok(Box::new(SimUiApp::new()))
+        }),
     )
 }
 
@@ -48,21 +53,38 @@ struct SimUiApp {
     rider_cancel_max_mins: u64,
     show_riders: bool,
     show_drivers: bool,
+    matching_algorithm: MatchingAlgorithmType,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MatchingAlgorithmType {
+    Simple,
+    CostBased,
+}
+
+impl MatchingAlgorithmType {
+    fn create_matching_algorithm(&self) -> MatchingAlgorithmResource {
+        match self {
+            MatchingAlgorithmType::Simple => create_simple_matching(),
+            MatchingAlgorithmType::CostBased => create_cost_based_matching(0.1),
+        }
+    }
 }
 
 impl SimUiApp {
     fn new() -> Self {
-        let num_riders = 50;
-        let num_drivers = 50;
-        let request_window_hours = 4;
-        let match_radius_km = 1.2;
-        let min_trip_km = 1.2;
-        let max_trip_km = 14.4;
-        let map_size_km = 30.0;
+        let num_riders = 80;
+        let num_drivers = 40;
+        let request_window_hours = 6;
+        let match_radius_km = 8.0;
+        let min_trip_km = 1.0;
+        let max_trip_km = 25.0;
+        let map_size_km = 25.0;
         let rider_cancel_min_mins = 2;
-        let rider_cancel_max_mins = 40;
+        let rider_cancel_max_mins = 25;
         let seed_enabled = true;
         let seed_value = 123;
+        let matching_algorithm = MatchingAlgorithmType::CostBased;
 
         let mut params = ScenarioParams {
             num_riders,
@@ -78,6 +100,8 @@ impl SimUiApp {
 
         let mut world = World::new();
         build_scenario(&mut world, params);
+        // Override the default algorithm with the selected one
+        world.insert_resource(matching_algorithm.create_matching_algorithm());
         set_clock_epoch_now(&mut world);
         let schedule = simulation_schedule();
 
@@ -88,7 +112,7 @@ impl SimUiApp {
             auto_run: false,
             started: false,
             snapshot_interval_ms: 1000,
-            speed_multiplier: 4.0,
+            speed_multiplier: 200.0,
             sim_budget_ms: 0.0,
             last_frame_instant: None,
             num_riders,
@@ -99,18 +123,21 @@ impl SimUiApp {
             max_trip_km,
             seed_enabled,
             seed_value,
-            grid_enabled: true,
+            grid_enabled: false,
             map_size_km,
             rider_cancel_min_mins,
             rider_cancel_max_mins,
             show_riders: true,
             show_drivers: true,
+            matching_algorithm,
         }
     }
 
     fn reset(&mut self) {
         let mut world = World::new();
         build_scenario(&mut world, self.current_params());
+        // Override the default algorithm with the selected one
+        world.insert_resource(self.create_matching_algorithm());
         apply_cancel_config(
             &mut world,
             self.rider_cancel_min_mins,
@@ -130,6 +157,8 @@ impl SimUiApp {
     fn start_simulation(&mut self) {
         let mut world = World::new();
         build_scenario(&mut world, self.current_params());
+        // Override the default algorithm with the selected one
+        world.insert_resource(self.create_matching_algorithm());
         apply_cancel_config(
             &mut world,
             self.rider_cancel_min_mins,
@@ -144,6 +173,13 @@ impl SimUiApp {
         self.auto_run = true;
         self.sim_budget_ms = 0.0;
         self.last_frame_instant = Some(Instant::now());
+    }
+
+    fn create_matching_algorithm(&self) -> MatchingAlgorithmResource {
+        match self.matching_algorithm {
+            MatchingAlgorithmType::Simple => create_simple_matching(),
+            MatchingAlgorithmType::CostBased => create_cost_based_matching(0.1),
+        }
     }
 
     fn current_params(&self) -> ScenarioParams {
@@ -335,7 +371,7 @@ impl eframe::App for SimUiApp {
                             can_edit,
                             egui::DragValue::new(&mut self.request_window_hours).range(1..=24),
                         );
-                        ui.label("Match radius (km, ~0.24 km per H3 cell)");
+                        ui.label("Match radius (km)");
                         ui.add_enabled(
                             can_edit,
                             egui::DragValue::new(&mut self.match_radius_km)
@@ -388,6 +424,26 @@ impl eframe::App for SimUiApp {
                             can_edit && self.seed_enabled,
                             egui::DragValue::new(&mut self.seed_value).range(0..=u64::MAX),
                         );
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Matching algorithm");
+                        egui::ComboBox::from_id_salt("matching_algorithm")
+                            .selected_text(match self.matching_algorithm {
+                                MatchingAlgorithmType::Simple => "Simple (first match)",
+                                MatchingAlgorithmType::CostBased => "Cost-based (best match)",
+                            })
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(
+                                    &mut self.matching_algorithm,
+                                    MatchingAlgorithmType::Simple,
+                                    "Simple (first match)",
+                                );
+                                ui.selectable_value(
+                                    &mut self.matching_algorithm,
+                                    MatchingAlgorithmType::CostBased,
+                                    "Cost-based (best match)",
+                                );
+                            });
                     });
                 });
         });
@@ -791,6 +847,20 @@ fn apply_cancel_config(world: &mut World, min_mins: u64, max_mins: u64) {
     }
 }
 
+fn last_updated_time(trip: &TripSnapshot) -> u64 {
+    let mut max_time = trip.requested_at.max(trip.matched_at);
+    if let Some(pickup_at) = trip.pickup_at {
+        max_time = max_time.max(pickup_at);
+    }
+    if let Some(dropoff_at) = trip.dropoff_at {
+        max_time = max_time.max(dropoff_at);
+    }
+    if let Some(cancelled_at) = trip.cancelled_at {
+        max_time = max_time.max(cancelled_at);
+    }
+    max_time
+}
+
 fn render_trip_table_all(ui: &mut egui::Ui, trips: &[TripSnapshot], sim_epoch_ms: i64) {
     ui.group(|ui| {
         let available_width = ui.available_width();
@@ -799,7 +869,12 @@ fn render_trip_table_all(ui: &mut egui::Ui, trips: &[TripSnapshot], sim_epoch_ms
         ui.label("Live table updates as trip state changes.");
 
         let mut rows: Vec<&TripSnapshot> = trips.iter().collect();
-        rows.sort_by_key(|trip| trip.requested_at);
+        // Sort by last updated time (most recent first)
+        rows.sort_by(|a, b| {
+            let a_last = last_updated_time(a);
+            let b_last = last_updated_time(b);
+            b_last.cmp(&a_last) // Descending order (newest first)
+        });
 
         render_trip_table_section(
             ui,

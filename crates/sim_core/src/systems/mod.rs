@@ -1,6 +1,6 @@
 pub mod request_inbound;
 pub mod quote_accepted;
-pub mod simple_matching;
+pub mod matching;
 pub mod match_accepted;
 pub mod driver_decision;
 pub mod movement;
@@ -17,8 +17,7 @@ mod end_to_end_tests {
     use crate::clock::{EventKind, SimulationClock, ONE_SEC_MS};
     use crate::ecs::{Driver, DriverState, Position, Trip, TripState};
     use crate::runner::{run_until_empty, simulation_schedule};
-    use crate::scenario::PendingRider;
-    use crate::scenario::PendingRiders;
+    use crate::scenario::{create_simple_matching, PendingRider, PendingRiders};
     use crate::speed::SpeedModel;
     use crate::telemetry::{SimSnapshotConfig, SimSnapshots, SimTelemetry};
 
@@ -30,6 +29,7 @@ mod end_to_end_tests {
         world.insert_resource(SimSnapshotConfig::default());
         world.insert_resource(SimSnapshots::default());
         world.insert_resource(SpeedModel::with_range(Some(1), 40.0, 40.0));
+        world.insert_resource(create_simple_matching());
 
         let cell = h3o::CellIndex::try_from(0x8a1fb46622dffff).expect("cell");
         // Pick a neighbor cell as destination
@@ -108,6 +108,7 @@ mod end_to_end_tests {
         world.insert_resource(SimSnapshotConfig::default());
         world.insert_resource(SimSnapshots::default());
         world.insert_resource(SpeedModel::with_range(Some(2), 40.0, 40.0));
+        world.insert_resource(create_simple_matching());
 
         let cell = h3o::CellIndex::try_from(0x8a1fb46622dffff).expect("cell");
         // Pick a neighbor cell as destination
