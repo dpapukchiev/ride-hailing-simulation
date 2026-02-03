@@ -1,0 +1,12 @@
+# No Dead Code Policy
+
+- Do not use `#[allow(dead_code)]` or similar attributes to suppress dead code warnings.
+- Remove dead code immediately rather than leaving it commented out or marked as allowed.
+- When deprecating code, remove it entirely rather than leaving deprecated paths.
+- If code is temporarily unused but planned for future use, document why it's kept and when it will be used.
+- Dead code includes:
+  - Unused functions, methods, structs, enums, or modules
+  - Unused imports
+  - Unreachable code paths
+  - Unused variables (unless they're intentionally prefixed with `_` for pattern matching)
+- Run `cargo check` and `cargo test` to verify no dead code warnings before committing.

@@ -16,7 +16,9 @@ pub const ONE_MIN_MS: u64 = 60 * ONE_SEC_MS;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum EventKind {
-    RequestInbound,
+    SimulationStarted,
+    SpawnRider,
+    SpawnDriver,
     QuoteAccepted,
     TryMatch,
     MatchAccepted,
@@ -234,10 +236,10 @@ mod tests {
     #[test]
     fn clock_pops_events_in_time_order() {
         let mut clock = SimulationClock::default();
-        clock.schedule_at(20, EventKind::RequestInbound, None);
-        clock.schedule_at(5, EventKind::RequestInbound, None);
+        clock.schedule_at(20, EventKind::SpawnRider, None);
+        clock.schedule_at(5, EventKind::SpawnRider, None);
         clock.schedule_at(20, EventKind::QuoteAccepted, None);
-        clock.schedule_at(10, EventKind::RequestInbound, None);
+        clock.schedule_at(10, EventKind::SpawnRider, None);
 
         let first = clock.pop_next().expect("first event");
         assert_eq!(first.timestamp, 5);
@@ -247,13 +249,13 @@ mod tests {
         assert_eq!(second.timestamp, 10);
         assert_eq!(clock.now(), 10);
 
-        // Same timestamp (20): RequestInbound < QuoteAccepted (enum order)
+        // Same timestamp (20): QuoteAccepted < SpawnRider (enum order)
         let third = clock.pop_next().expect("third event");
         assert_eq!(third.timestamp, 20);
         assert_eq!(third.kind, EventKind::QuoteAccepted);
         let fourth = clock.pop_next().expect("fourth event");
         assert_eq!(fourth.timestamp, 20);
-        assert_eq!(fourth.kind, EventKind::RequestInbound);
+        assert_eq!(fourth.kind, EventKind::SpawnRider);
 
         assert!(clock.pop_next().is_none());
         assert!(clock.is_empty());
@@ -262,7 +264,7 @@ mod tests {
     #[test]
     fn schedule_in_and_conversion() {
         let mut clock = SimulationClock::with_epoch(1_700_000_000_000); // example epoch
-        clock.schedule_in_secs(1, EventKind::RequestInbound, None);
+        clock.schedule_in_secs(1, EventKind::SpawnRider, None);
         let e = clock.pop_next().expect("event");
         assert_eq!(e.timestamp, ONE_SEC_MS);
         assert_eq!(clock.now(), ONE_SEC_MS);

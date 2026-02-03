@@ -103,6 +103,7 @@ impl SimUiApp {
         // Override the default algorithm with the selected one
         world.insert_resource(matching_algorithm.create_matching_algorithm());
         set_clock_epoch_now(&mut world);
+        sim_core::runner::initialize_simulation(&mut world);
         let schedule = simulation_schedule();
 
         Self {
@@ -145,6 +146,7 @@ impl SimUiApp {
         );
         set_clock_epoch_now(&mut world);
         apply_snapshot_interval(&mut world, self.snapshot_interval_ms);
+        sim_core::runner::initialize_simulation(&mut world);
         self.world = world;
         // Note: Schedule creation is fast (just adding systems), so recreating is fine
         // The main performance bottleneck was in build_scenario (grid_disk generation)
@@ -168,6 +170,7 @@ impl SimUiApp {
         );
         set_clock_epoch_now(&mut world);
         apply_snapshot_interval(&mut world, self.snapshot_interval_ms);
+        sim_core::runner::initialize_simulation(&mut world);
         self.world = world;
         self.schedule = simulation_schedule();
         self.steps_executed = 0;

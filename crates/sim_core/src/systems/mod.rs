@@ -1,4 +1,4 @@
-pub mod request_inbound;
+pub mod spawner;
 pub mod quote_accepted;
 pub mod matching;
 pub mod match_accepted;
@@ -14,10 +14,12 @@ pub mod rider_cancel;
 mod end_to_end_tests {
     use bevy_ecs::prelude::World;
 
-    use crate::clock::{EventKind, SimulationClock, ONE_SEC_MS};
-    use crate::ecs::{Driver, DriverState, Position, Trip, TripState};
-    use crate::runner::{run_until_empty, simulation_schedule};
-    use crate::scenario::{create_simple_matching, PendingRider, PendingRiders};
+    use crate::clock::{SimulationClock, ONE_SEC_MS};
+    use crate::distributions::UniformInterArrival;
+    use crate::ecs::{Driver, DriverState, Trip, TripState};
+    use crate::runner::{initialize_simulation, run_until_empty, simulation_schedule};
+    use crate::scenario::{create_simple_matching, MatchRadius, RiderCancelConfig};
+    use crate::spawner::{DriverSpawner, DriverSpawnerConfig, RiderSpawner, RiderSpawnerConfig};
     use crate::speed::SpeedModel;
     use crate::telemetry::{SimSnapshotConfig, SimSnapshots, SimTelemetry};
 
@@ -30,37 +32,44 @@ mod end_to_end_tests {
         world.insert_resource(SimSnapshots::default());
         world.insert_resource(SpeedModel::with_range(Some(1), 40.0, 40.0));
         world.insert_resource(create_simple_matching());
+        world.insert_resource(MatchRadius(0));
+        world.insert_resource(RiderCancelConfig::default());
 
         let cell = h3o::CellIndex::try_from(0x8a1fb46622dffff).expect("cell");
-        // Pick a neighbor cell as destination
-        let destination = cell
-            .grid_disk::<Vec<_>>(1)
-            .into_iter()
-            .find(|c| *c != cell)
-            .unwrap_or(cell);
 
-        // Add pending rider
-        let mut pending_riders = PendingRiders::default();
-        pending_riders.0.push_back(PendingRider {
-            position: cell,
-            destination,
-            request_time_ms: 1000,
-        });
-        world.insert_resource(pending_riders);
+        // Configure spawners: spawn one rider at 1 second, one driver at 0
+        let coord: h3o::LatLng = cell.into();
+        let lat = coord.lat();
+        let lng = coord.lng();
+        let rider_spawner_config = RiderSpawnerConfig {
+            inter_arrival_dist: Box::new(UniformInterArrival::new(1000.0)), // 1 second
+            lat_min: lat - 0.01, // Wider bounds to allow destination selection
+            lat_max: lat + 0.01,
+            lng_min: lng - 0.01,
+            lng_max: lng + 0.01,
+            min_trip_cells: 2,
+            max_trip_cells: 5,
+            start_time_ms: Some(1000),
+            end_time_ms: Some(2000),
+            max_count: Some(1),
+            seed: 42, // Test seed
+        };
+        world.insert_resource(RiderSpawner::new(rider_spawner_config));
 
-        let driver_entity = world
-            .spawn((
-                Driver {
-                    state: DriverState::Idle,
-                    matched_rider: None,
-                },
-                Position(cell),
-            ))
-            .id();
+        let driver_spawner_config = DriverSpawnerConfig {
+            inter_arrival_dist: Box::new(UniformInterArrival::new(1.0)),
+            lat_min: lat - 0.0001, // Tighter bounds to ensure same cell
+            lat_max: lat + 0.0001,
+            lng_min: lng - 0.0001,
+            lng_max: lng + 0.0001,
+            start_time_ms: Some(0),
+            end_time_ms: Some(100),
+            max_count: Some(1),
+            seed: 42, // Test seed
+        };
+        world.insert_resource(DriverSpawner::new(driver_spawner_config));
 
-        world
-            .resource_mut::<SimulationClock>()
-            .schedule_at_secs(1, EventKind::RequestInbound, None);
+        initialize_simulation(&mut world);
 
         let mut schedule = simulation_schedule();
         let steps = run_until_empty(&mut world, &mut schedule, 1000);
@@ -71,17 +80,15 @@ mod end_to_end_tests {
             .iter(&world)
             .find(|entity| world.entity(*entity).contains::<Trip>())
             .expect("trip entity");
+        
+        let drivers: Vec<_> = world.query::<(bevy_ecs::prelude::Entity, &Driver)>().iter(&world).collect();
+        assert_eq!(drivers.len(), 1);
+        let (driver_entity, driver) = drivers[0];
+
         let trip = world.entity(trip_entity).get::<Trip>().expect("trip");
-
-        let driver = world
-            .get_entity(driver_entity)
-            .and_then(|e| e.get::<Driver>())
-            .expect("driver");
-
         assert_eq!(trip.state, TripState::Completed);
         assert_eq!(trip.driver, driver_entity);
-        assert_eq!(trip.pickup, cell);
-        assert_eq!(trip.dropoff, destination, "dropoff should match the requested destination");
+        // Note: pickup cell may differ from expected due to spawner randomness within bounds
         assert_ne!(trip.dropoff, trip.pickup, "dropoff should differ from pickup");
         assert_eq!(driver.state, DriverState::Idle);
         assert_eq!(driver.matched_rider, None);
@@ -109,54 +116,44 @@ mod end_to_end_tests {
         world.insert_resource(SimSnapshots::default());
         world.insert_resource(SpeedModel::with_range(Some(2), 40.0, 40.0));
         world.insert_resource(create_simple_matching());
+        world.insert_resource(MatchRadius(0));
+        world.insert_resource(RiderCancelConfig::default());
 
         let cell = h3o::CellIndex::try_from(0x8a1fb46622dffff).expect("cell");
-        // Pick a neighbor cell as destination
-        let destination = cell
-            .grid_disk::<Vec<_>>(1)
-            .into_iter()
-            .find(|c| *c != cell)
-            .unwrap_or(cell);
 
-        // Add two pending riders
-        let mut pending_riders = PendingRiders::default();
-        pending_riders.0.push_back(PendingRider {
-            position: cell,
-            destination,
-            request_time_ms: 1000,
-        });
-        pending_riders.0.push_back(PendingRider {
-            position: cell,
-            destination,
-            request_time_ms: 2000,
-        });
-        world.insert_resource(pending_riders);
+        // Configure spawners: spawn two riders at 1s and 2s, two drivers at 0
+        let coord: h3o::LatLng = cell.into();
+        let lat = coord.lat();
+        let lng = coord.lng();
+        let rider_spawner_config = RiderSpawnerConfig {
+            inter_arrival_dist: Box::new(UniformInterArrival::new(1000.0)), // 1 second between spawns
+            lat_min: lat - 0.0001, // Tighter bounds to ensure same cell
+            lat_max: lat + 0.0001,
+            lng_min: lng - 0.0001,
+            lng_max: lng + 0.0001,
+            min_trip_cells: 2,
+            max_trip_cells: 5,
+            start_time_ms: Some(1000),
+            end_time_ms: Some(3000),
+            max_count: Some(2),
+            seed: 42, // Test seed
+        };
+        world.insert_resource(RiderSpawner::new(rider_spawner_config));
 
-        let driver1 = world
-            .spawn((
-                Driver {
-                    state: DriverState::Idle,
-                    matched_rider: None,
-                },
-                Position(cell),
-            ))
-            .id();
-        let driver2 = world
-            .spawn((
-                Driver {
-                    state: DriverState::Idle,
-                    matched_rider: None,
-                },
-                Position(cell),
-            ))
-            .id();
+        let driver_spawner_config = DriverSpawnerConfig {
+            inter_arrival_dist: Box::new(UniformInterArrival::new(1.0)),
+            lat_min: lat - 0.0001, // Tighter bounds to ensure same cell
+            lat_max: lat + 0.0001,
+            lng_min: lng - 0.0001,
+            lng_max: lng + 0.0001,
+            start_time_ms: Some(0),
+            end_time_ms: Some(100),
+            max_count: Some(2),
+            seed: 42, // Test seed
+        };
+        world.insert_resource(DriverSpawner::new(driver_spawner_config));
 
-        world
-            .resource_mut::<SimulationClock>()
-            .schedule_at_secs(1, EventKind::RequestInbound, None);
-        world
-            .resource_mut::<SimulationClock>()
-            .schedule_at_secs(2, EventKind::RequestInbound, None);
+        initialize_simulation(&mut world);
 
         let mut schedule = simulation_schedule();
         let steps = run_until_empty(&mut world, &mut schedule, 1000);
@@ -171,20 +168,14 @@ mod end_to_end_tests {
             assert_eq!(trip.state, TripState::Completed);
         }
 
-        let driver1_state = world.entity(driver1).get::<Driver>().expect("driver1").state;
-        let driver2_state = world.entity(driver2).get::<Driver>().expect("driver2").state;
-        assert_eq!(driver1_state, DriverState::Idle);
-        assert_eq!(driver2_state, DriverState::Idle);
+        let drivers: Vec<_> = world.query::<&Driver>().iter(&world).collect();
+        assert_eq!(drivers.len(), 2);
+        for driver in drivers {
+            assert_eq!(driver.state, DriverState::Idle);
+        }
 
         let telemetry = world.resource::<SimTelemetry>();
         assert_eq!(telemetry.completed_trips.len(), 2);
-        let drivers: Vec<_> = telemetry
-            .completed_trips
-            .iter()
-            .map(|r| r.driver_entity)
-            .collect();
-        assert!(drivers.contains(&driver1));
-        assert!(drivers.contains(&driver2));
         for record in &telemetry.completed_trips {
             assert!(record.completed_at >= ONE_SEC_MS);
         }

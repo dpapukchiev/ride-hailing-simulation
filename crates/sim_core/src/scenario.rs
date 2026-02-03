@@ -1,18 +1,14 @@
-//! Scenario setup: spawn riders and drivers with random positions and request times.
+//! Scenario setup: configure spawners for riders and drivers.
 //!
-//! Uses a geographic bounding box to sample random H3 cells (resolution 9) and
-//! spreads rider request events over a configurable time window.
+//! Uses spawners with inter-arrival time distributions to control spawn rates,
+//! enabling variable supply and demand patterns.
 
 use bevy_ecs::prelude::{Resource, World};
-use h3o::{CellIndex, LatLng, Resolution};
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
-use std::collections::VecDeque;
 
-use crate::clock::{EventKind, SimulationClock};
-use crate::ecs::{Driver, DriverState, Position};
+use crate::clock::SimulationClock;
+use crate::distributions::{ExponentialInterArrival, UniformInterArrival};
 use crate::matching::{CostBasedMatching, MatchingAlgorithmResource, SimpleMatching};
-use crate::spatial::GeoIndex;
+use crate::spawner::{DriverSpawner, DriverSpawnerConfig, RiderSpawner, RiderSpawnerConfig};
 use crate::speed::SpeedModel;
 use crate::telemetry::{SimSnapshotConfig, SimSnapshots, SimTelemetry};
 
@@ -24,18 +20,6 @@ const DEFAULT_LNG_MAX: f64 = -122.35;
 
 /// Default time window for rider requests: 1 hour (simulation ms).
 const DEFAULT_REQUEST_WINDOW_MS: u64 = 60 * 60 * 1000;
-
-/// Pending rider spawn data (for just-in-time spawning when RequestInbound fires).
-#[derive(Debug, Clone)]
-pub struct PendingRider {
-    pub position: CellIndex,
-    pub destination: CellIndex,
-    pub request_time_ms: u64,
-}
-
-/// Queue of riders to spawn at their request time (FIFO).
-#[derive(Debug, Clone, Default, Resource)]
-pub struct PendingRiders(pub VecDeque<PendingRider>);
 
 /// Max H3 grid distance (cells) for matching rider to driver. 0 = same cell only.
 #[derive(Debug, Clone, Copy, Default, Resource)]
@@ -69,7 +53,7 @@ pub struct ScenarioParams {
     pub lat_max: f64,
     pub lng_min: f64,
     pub lng_max: f64,
-    /// Time window in simulation ms: rider RequestInbound times are uniform in [0, request_window_ms].
+    /// Time window in simulation ms: riders spawn over this window.
     pub request_window_ms: u64,
     /// Max H3 grid distance for matching (0 = same cell only).
     pub match_radius: u32,
@@ -122,28 +106,38 @@ impl ScenarioParams {
     }
 }
 
-/// Sample a random H3 cell (resolution 9) within the given lat/lng bounds.
-fn random_cell_in_bounds<R: Rng>(rng: &mut R, lat_min: f64, lat_max: f64, lng_min: f64, lng_max: f64) -> CellIndex {
-    let lat = rng.gen_range(lat_min..=lat_max);
-    let lng = rng.gen_range(lng_min..=lng_max);
-    let coord = LatLng::new(lat, lng).expect("valid lat/lng");
-    coord.to_cell(Resolution::Nine)
-}
-
 /// Pick a random destination within [min_cells, max_cells] H3 distance from pickup.
 /// Uses rejection sampling for efficiency when max_cells is large (avoids generating huge grid disks).
-fn random_destination<R: Rng>(
+/// This function is exported for use by spawner systems.
+pub fn random_destination<R: rand::Rng>(
     rng: &mut R,
-    pickup: CellIndex,
-    geo: &GeoIndex,
+    pickup: h3o::CellIndex,
+    geo: &crate::spatial::GeoIndex,
     min_cells: u32,
     max_cells: u32,
     lat_min: f64,
     lat_max: f64,
     lng_min: f64,
     lng_max: f64,
-) -> CellIndex {
+) -> h3o::CellIndex {
+    use h3o::{CellIndex, LatLng, Resolution};
+    use rand::Rng;
+    
     let max_cells = max_cells.max(min_cells);
+    
+    fn random_cell_in_bounds<R: Rng>(rng: &mut R, lat_min: f64, lat_max: f64, lng_min: f64, lng_max: f64) -> CellIndex {
+        let lat = rng.gen_range(lat_min..=lat_max);
+        let lng = rng.gen_range(lng_min..=lng_max);
+        let coord = LatLng::new(lat, lng).expect("valid lat/lng");
+        coord.to_cell(Resolution::Nine)
+    }
+    
+    fn cell_in_bounds(cell: CellIndex, lat_min: f64, lat_max: f64, lng_min: f64, lng_max: f64) -> bool {
+        let coord: LatLng = cell.into();
+        let lat = coord.lat();
+        let lng = coord.lng();
+        lat >= lat_min && lat <= lat_max && lng >= lng_min && lng <= lng_max
+    }
     
     // For small radii, use the original grid_disk approach (more efficient)
     // For large radii, use rejection sampling (much faster)
@@ -207,13 +201,6 @@ fn random_destination<R: Rng>(
     pickup
 }
 
-fn cell_in_bounds(cell: CellIndex, lat_min: f64, lat_max: f64, lng_min: f64, lng_max: f64) -> bool {
-    let coord: LatLng = cell.into();
-    let lat = coord.lat();
-    let lng = coord.lng();
-    lat >= lat_min && lat <= lat_max && lng >= lng_min && lng <= lng_max
-}
-
 /// Create a simple matching algorithm (first match within radius).
 pub fn create_simple_matching() -> MatchingAlgorithmResource {
     MatchingAlgorithmResource::new(Box::new(SimpleMatching::default()))
@@ -224,9 +211,9 @@ pub fn create_cost_based_matching(eta_weight: f64) -> MatchingAlgorithmResource 
     MatchingAlgorithmResource::new(Box::new(CostBasedMatching::new(eta_weight)))
 }
 
-/// Populates `world` with clock, telemetry, drivers, and scheduled RequestInbound events.
-/// Riders are spawned just-in-time when their RequestInbound event fires.
-/// Caller must have already created `world`; this inserts resources and spawns entities.
+/// Populates `world` with clock, telemetry, and spawner configurations.
+/// Entities are spawned dynamically by spawner systems reacting to SimulationStarted events.
+/// Caller must have already created `world`; this inserts resources and configures spawners.
 pub fn build_scenario(world: &mut World, params: ScenarioParams) {
     world.insert_resource(SimulationClock::default());
     world.insert_resource(SimTelemetry::default());
@@ -238,73 +225,52 @@ pub fn build_scenario(world: &mut World, params: ScenarioParams) {
     // Default to cost-based matching with weight 0.1
     world.insert_resource(create_cost_based_matching(0.1));
 
-    let mut rng: StdRng = match params.seed {
-        Some(seed) => StdRng::seed_from_u64(seed),
-        None => StdRng::from_entropy(),
-    };
-
-    let geo = GeoIndex::default();
+    let seed = params.seed.unwrap_or(0);
+    let request_window_ms = params.request_window_ms;
     let lat_min = params.lat_min;
     let lat_max = params.lat_max;
     let lng_min = params.lng_min;
     let lng_max = params.lng_max;
-    let request_window_ms = params.request_window_ms;
     let min_trip = params.min_trip_cells;
     let max_trip = params.max_trip_cells;
 
-    // Generate pending rider data and schedule their request events
-    let mut pending_riders = Vec::with_capacity(params.num_riders);
-    for _ in 0..params.num_riders {
-        let cell = random_cell_in_bounds(&mut rng, lat_min, lat_max, lng_min, lng_max);
-        let destination = random_destination(
-            &mut rng,
-            cell,
-            &geo,
-            min_trip,
-            max_trip,
-            lat_min,
-            lat_max,
-            lng_min,
-            lng_max,
-        );
-        let request_time_ms = rng.gen_range(0..=request_window_ms);
+    // Create rider spawner: exponential distribution with average rate to spawn num_riders over request_window_ms
+    let avg_rate_per_sec = if request_window_ms > 0 {
+        (params.num_riders as f64) / (request_window_ms as f64 / 1000.0)
+    } else {
+        0.0
+    };
+    let rider_spawner_config = RiderSpawnerConfig {
+        inter_arrival_dist: Box::new(ExponentialInterArrival::new(avg_rate_per_sec, seed)),
+        lat_min,
+        lat_max,
+        lng_min,
+        lng_max,
+        min_trip_cells: min_trip,
+        max_trip_cells: max_trip,
+        start_time_ms: Some(0),
+        end_time_ms: Some(request_window_ms),
+        max_count: Some(params.num_riders),
+        seed,
+    };
+    world.insert_resource(RiderSpawner::new(rider_spawner_config));
 
-        pending_riders.push((
-            request_time_ms,
-            PendingRider {
-                position: cell,
-                destination,
-                request_time_ms,
-            },
-        ));
-    }
-
-    // Sort by request time so we can pop from front in order
-    pending_riders.sort_by_key(|(time, _)| *time);
-
-    // Schedule RequestInbound events (without entity subjects - riders don't exist yet)
-    let mut clock = world.resource_mut::<SimulationClock>();
-    for (request_time_ms, _) in &pending_riders {
-        clock.schedule_at(*request_time_ms, EventKind::RequestInbound, None);
-    }
-    drop(clock);
-
-    // Store pending riders in resource
-    world.insert_resource(PendingRiders(
-        pending_riders.into_iter().map(|(_, rider)| rider).collect(),
-    ));
-
-    // Spawn all drivers upfront (they're always in the system)
-    for _ in 0..params.num_drivers {
-        let cell = random_cell_in_bounds(&mut rng, lat_min, lat_max, lng_min, lng_max);
-        world.spawn((
-            Driver {
-                state: DriverState::Idle,
-                matched_rider: None,
-            },
-            Position(cell),
-        ));
-    }
+    // Create driver spawner: spawn all drivers upfront (uniform distribution with very short interval)
+    // For simplicity, we'll spawn them all at time 0, but using a spawner allows future flexibility
+    // Use a different seed offset for drivers to ensure independent randomness
+    let driver_seed = seed.wrapping_add(0xdead_beef);
+    let driver_spawner_config = DriverSpawnerConfig {
+        inter_arrival_dist: Box::new(UniformInterArrival::new(1.0)), // 1ms between spawns
+        lat_min,
+        lat_max,
+        lng_min,
+        lng_max,
+        start_time_ms: Some(0),
+        end_time_ms: Some(1000), // Spawn within first second
+        max_count: Some(params.num_drivers),
+        seed: driver_seed,
+    };
+    world.insert_resource(DriverSpawner::new(driver_spawner_config));
 }
 
 #[cfg(test)]
@@ -312,7 +278,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn build_scenario_prepares_pending_riders_and_spawns_drivers() {
+    fn build_scenario_configures_spawners() {
         let mut world = World::new();
         build_scenario(
             &mut world,
@@ -324,13 +290,12 @@ mod tests {
             },
         );
 
-        let pending_riders = world.resource::<PendingRiders>();
-        assert_eq!(pending_riders.0.len(), 10, "10 pending riders");
+        let rider_spawner = world.resource::<RiderSpawner>();
+        assert_eq!(rider_spawner.config.max_count, Some(10));
+        assert_eq!(rider_spawner.spawned_count, 0);
 
-        let driver_count = world.query::<&Driver>().iter(&world).count();
-        assert_eq!(driver_count, 3);
-
-        let clock = world.resource::<SimulationClock>();
-        assert_eq!(clock.pending_event_count(), 10, "one RequestInbound per rider");
+        let driver_spawner = world.resource::<DriverSpawner>();
+        assert_eq!(driver_spawner.config.max_count, Some(3));
+        assert_eq!(driver_spawner.spawned_count, 0);
     }
 }

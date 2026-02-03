@@ -7,13 +7,14 @@
 use bevy_ecs::prelude::{Schedule, World};
 use bevy_ecs::schedule::apply_deferred;
 
-use crate::clock::{CurrentEvent, Event, SimulationClock};
+use crate::clock::{CurrentEvent, Event, EventKind, SimulationClock};
 use crate::systems::{
     driver_decision::driver_decision_system, match_accepted::match_accepted_system,
     movement::movement_system, pickup_eta_updated::pickup_eta_updated_system,
     quote_accepted::quote_accepted_system,
     rider_cancel::rider_cancel_system,
-    request_inbound::request_inbound_system, matching::matching_system,
+    spawner::{driver_spawner_system, rider_spawner_system, simulation_started_system},
+    matching::matching_system,
     telemetry_snapshot::capture_snapshot_system, trip_completed::trip_completed_system,
     trip_started::trip_started_system,
 };
@@ -77,7 +78,9 @@ where
 pub fn simulation_schedule() -> Schedule {
     let mut schedule = Schedule::default();
     schedule.add_systems((
-        request_inbound_system,
+        simulation_started_system,
+        rider_spawner_system,
+        driver_spawner_system,
         quote_accepted_system,
         matching_system,
         match_accepted_system,
@@ -91,4 +94,11 @@ pub fn simulation_schedule() -> Schedule {
     ));
     schedule.add_systems(capture_snapshot_system);
     schedule
+}
+
+/// Initializes the simulation by scheduling the SimulationStarted event at time 0.
+/// Call this after building the scenario and before running events.
+pub fn initialize_simulation(world: &mut World) {
+    let mut clock = world.resource_mut::<SimulationClock>();
+    clock.schedule_at(0, EventKind::SimulationStarted, None);
 }

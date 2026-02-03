@@ -45,9 +45,12 @@ Once a driver accepts, the simulation creates a dedicated **Trip entity** that
 becomes the stable identifier for the rest of the lifecycle (movement, start,
 completion).
 
-In the current flow, riders are spawned just-in-time when their request event
-fires, browse a quote, then wait for matching. Drivers start idle, evaluate a
-match offer, drive en route to pickup, and then move into an on-trip state. If
+In the current flow, riders and drivers are spawned dynamically by spawner systems
+reacting to `SimulationStarted` and spawn events. Spawners use inter-arrival time
+distributions to control spawn rates, enabling variable supply and demand patterns.
+Riders spawn in `Browsing` state, browse a quote, then wait for matching. Drivers spawn
+in `Idle` state, evaluate a match offer, drive en route to pickup, and then move into
+an on-trip state. If
 a rider waits past a randomized pickup window, the ride is cancelled, the trip
 is marked cancelled, and the driver returns to idle. When the trip completes,
 the rider is despawned and the driver returns to idle. Matching uses a
@@ -150,7 +153,7 @@ All time is in **milliseconds** (simulation ms). Time 0 maps to a real-world dat
 - **Constants**: `ONE_SEC_MS = 1000`, `ONE_MIN_MS = 60_000`.
 - **`Event`**: `timestamp` (u64, ms), `kind`, `subject`.
 - **`CurrentEvent`** (ECS `Resource`): the event currently being handled.
-- **`EventKind`** / **`EventSubject`**: includes `RiderCancel` for pickup timeout events.
+- **`EventKind`** / **`EventSubject`**: includes `SimulationStarted` (at time 0), `SpawnRider`, `SpawnDriver`, and `RiderCancel` for pickup timeout events.
 - **`pending_event_count()`**: returns the number of events in the queue (for tests and scenario validation).
 
 ### `sim_core::ecs`
@@ -182,31 +185,55 @@ Clock progression and event routing are implemented here (outside systems):
   `run_next_event` until the event queue is empty or `max_steps` is reached.
   Returns the number of steps executed.
 - **`simulation_schedule()`**: Builds the default schedule with all event-reacting
-  systems plus `apply_deferred` so that spawned entities (e.g. `Trip`) are
+  systems (including spawner systems) plus `apply_deferred` so that spawned entities (e.g. `Trip`) are
   applied before the next step.
+- **`initialize_simulation(world)`**: Schedules `SimulationStarted` event at time 0. Call this after building the scenario and before running events.
 
 Callers (tests or a binary) use the runner to drive the sim without
-duplicating the pop → route → run loop.
+duplicating the pop → route → run loop. The simulation starts with `SimulationStarted` at time 0, which triggers spawner initialization.
+
+### `sim_core::distributions`
+
+Probability distributions for spawner inter-arrival times, enabling variable supply and demand patterns.
+
+- **`InterArrivalDistribution` trait**: Interface for sampling inter-arrival times (in milliseconds). `sample_ms(spawn_count)` samples the next inter-arrival time; `spawn_count` allows time-varying distributions.
+- **`UniformInterArrival`**: Constant inter-arrival time distribution. `new(interval_ms)` creates with fixed interval; `from_rate(rate_per_sec)` creates from entities per second.
+- **`ExponentialInterArrival`**: Exponential distribution for Poisson process (constant rate, random inter-arrival times). `new(rate_per_sec, seed)` creates with rate parameter (lambda) and seed for reproducibility.
+- **`PiecewiseConstantRate`**: Different rates during different time windows (for rush hours, day/night patterns). `new(windows, seed)` where `windows` is `Vec<(start_ms, end_ms, rate_per_sec)>`.
+- **`TimeVaryingRate`**: Time-varying rate using current simulation time to determine rate. Similar to `PiecewiseConstantRate` but designed for more flexible time-dependent patterns.
+
+### `sim_core::spawner`
+
+Entity spawners: dynamically spawn riders and drivers based on distributions.
+
+- **`RiderSpawnerConfig`**: Configuration for rider spawner:
+  - `inter_arrival_dist`: Boxed `InterArrivalDistribution` controlling spawn rate.
+  - `lat_min`, `lat_max`, `lng_min`, `lng_max`: Geographic bounds for spawn positions.
+  - `min_trip_cells`, `max_trip_cells`: Trip length bounds (H3 cells).
+  - `start_time_ms`, `end_time_ms`: Optional time window for spawning.
+  - `max_count`: Optional maximum number of riders to spawn.
+- **`RiderSpawner`** (ECS `Resource`): Active rider spawner tracking `next_spawn_time_ms`, `spawned_count`, and `initialized` flag. `should_spawn(current_time_ms)` checks if spawning should continue; `advance(current_time_ms)` samples next inter-arrival time and updates state.
+- **`DriverSpawnerConfig`**: Similar to `RiderSpawnerConfig` but without trip length bounds (drivers don't have destinations).
+- **`DriverSpawner`** (ECS `Resource`): Active driver spawner with same interface as `RiderSpawner`.
+- **`random_cell_in_bounds()`**: Helper function to sample random H3 cell within lat/lng bounds.
 
 ### `sim_core::scenario`
 
-Scenario setup: schedule rider requests and spawn entities just-in-time.
+Scenario setup: configure spawners for riders and drivers.
 
-- **`PendingRider`**: data for a rider to be spawned when their request event fires: `{ position, destination, request_time_ms }`.
-- **`PendingRiders`** (ECS `Resource`): FIFO queue (`VecDeque<PendingRider>`) of riders waiting to be spawned when their `RequestInbound` event fires. Consumed by `request_inbound_system`.
 - **`MatchRadius`** (ECS `Resource`, default 0): max H3 grid distance for matching rider to driver. 0 = same cell only; larger values allow matching to idle drivers within that many cells. Inserted by `build_scenario` from `ScenarioParams::match_radius`.
 - **`MatchingAlgorithm`** (ECS `Resource`, required): boxed trait object implementing the matching algorithm. Defaults to `CostBasedMatching` with ETA weight 0.1. Can be swapped with `SimpleMatching` or custom implementations. Inserted by `build_scenario`.
 - **`RiderCancelConfig`** (ECS `Resource`): randomized pickup-wait window in seconds. Defaults to 120–2400 seconds, inserted by `build_scenario`.
 - **`SpeedModel`** (ECS `Resource`): stochastic speed sampler (defaults to 20–60 km/h) seeded from `ScenarioParams::seed` to keep runs reproducible.
 - **`ScenarioParams`**: configurable scenario parameters:
-  - `num_riders`, `num_drivers`: counts.
-  - `seed`: optional RNG seed for reproducibility.
+  - `num_riders`, `num_drivers`: counts (used to configure spawner max_count and rates).
+  - `seed`: optional RNG seed for reproducibility (used for spawner distributions).
   - `lat_min`, `lat_max`, `lng_min`, `lng_max`: bounding box (degrees) for random positions; default San Francisco Bay Area.
-  - `request_window_ms`: rider `RequestInbound` times are uniform in `[0, request_window_ms]`.
+  - `request_window_ms`: time window over which riders spawn (used to calculate spawn rate).
   - `match_radius`: max H3 grid distance for matching (0 = same cell only).
   - `min_trip_cells`, `max_trip_cells`: trip length in H3 cells; rider destinations are chosen at random distance in this range from pickup. Travel time depends on per-trip speeds (20–60 km/h).
   - Builders: `with_seed(seed)`, `with_request_window_hours(hours)`, `with_match_radius(radius)`, `with_trip_duration_cells(min, max)`.
-- **`build_scenario(world, params)`**: inserts `SimulationClock`, `SimTelemetry`, `MatchRadius`, `MatchingAlgorithm` (defaults to `CostBasedMatching`), `RiderCancelConfig`, and `PendingRiders`; generates pending rider data (random `position` and `destination` in `[min_trip_cells, max_trip_cells]` from pickup) and schedules one `RequestInbound` event per rider at a random sim time in `[0, request_window_ms]`; spawns all drivers upfront with random `Position`. Riders are spawned just-in-time when their `RequestInbound` event fires.
+- **`build_scenario(world, params)`**: inserts `SimulationClock`, `SimTelemetry`, `MatchRadius`, `MatchingAlgorithm` (defaults to `CostBasedMatching`), `RiderCancelConfig`, `RiderSpawner`, and `DriverSpawner`. Rider spawner uses exponential distribution with average rate to spawn `num_riders` over `request_window_ms`. Driver spawner uses uniform distribution to spawn all drivers quickly at start. Entities are spawned dynamically by spawner systems reacting to `SimulationStarted` and `SpawnRider`/`SpawnDriver` events.
 - **`random_destination()`**: Optimized destination selection function that uses different strategies based on trip distance:
   - **Small radii (≤20 cells)**: Uses `grid_disk()` to generate all candidate cells and filters by distance/bounds (more accurate, efficient for small distances).
   - **Large radii (>20 cells)**: Uses rejection sampling - randomly samples cells within bounds and checks if distance matches the target range. This avoids generating huge grid disks (e.g., ~33k cells for k=105) which dramatically improves reset performance for scenarios with large trip distances (e.g., 600 riders with 25km max trips). Falls back to a smaller `grid_disk()` if rejection sampling fails.
@@ -239,15 +266,18 @@ Large scenarios (e.g. 500 riders, 100 drivers) are run via the **example** only,
   - **Cancelled**: `requested_at ≤ matched_at ≤ cancelled_at` (and `pickup_at ≤ cancelled_at` if pickup exists), no dropoff timestamp
   Returns `Option<String>` with error message if validation fails, `None` if valid.
 
-### `sim_core::systems::request_inbound`
+### `sim_core::systems::spawner`
 
-System: `request_inbound_system`
+Spawner systems: react to spawn events and create riders/drivers dynamically.
 
-- Reacts to `CurrentEvent`.
-- On `EventKind::RequestInbound` (no subject - event is scheduled without an entity):
-  - Pops the next `PendingRider` from the `PendingRiders` queue.
-  - Spawns a new rider entity in `Browsing` state with the pending rider's position and destination; sets `requested_at = Some(clock.now())`.
-  - Schedules `QuoteAccepted` 1 second from now (`schedule_in_secs(1, ...)`) for the newly spawned rider entity.
+- **`simulation_started_system`**: Reacts to `EventKind::SimulationStarted` (scheduled at time 0). Initializes `RiderSpawner` and `DriverSpawner` resources if present, scheduling their first `SpawnRider`/`SpawnDriver` events if they should spawn immediately.
+- **`rider_spawner_system`**: Reacts to `EventKind::SpawnRider`. If the spawner should spawn at current time:
+  - Generates random position and destination using seeded RNG (deterministic based on current time and spawn count).
+  - Spawns rider entity in `Browsing` state with position, destination, and `requested_at = Some(clock.now())`.
+  - Schedules `QuoteAccepted` 1 second from now for the newly spawned rider.
+  - Advances spawner to next spawn time using inter-arrival distribution.
+  - Schedules next `SpawnRider` event if spawning should continue.
+- **`driver_spawner_system`**: Reacts to `EventKind::SpawnDriver`. Similar to `rider_spawner_system` but spawns drivers in `Idle` state (no destination needed). Drivers spawn with random positions within configured bounds.
 
 ### `sim_core::systems::quote_accepted`
 
@@ -405,18 +435,16 @@ Unit tests exist in each module to confirm behavior:
 - `trip_started`: trip start transitions and completion scheduling.
 - `trip_completed`: rider/driver transition after completion.
 - `telemetry_export`: timestamp ordering validation for all trip states (EnRoute, OnTrip, Completed, Cancelled); integration test validates all trips in snapshots follow funnel order.
-- **End-to-end (single ride)**: Inserts `SimulationClock`, `SimTelemetry`. Seeds one
-  rider (with `destination: None`) and one driver in the same cell, schedules
-  `RequestInbound` (rider). Runs `run_until_empty` with `simulation_schedule()`.
+- **End-to-end (single ride)**: Inserts `SimulationClock`, `SimTelemetry`, spawners configured to spawn one rider and one driver in the same cell. Calls `initialize_simulation()` to schedule `SimulationStarted` at time 0. Runs `run_until_empty` with `simulation_schedule()`.
   Asserts: one `Trip` in `Completed` with correct rider/driver and pickup/dropoff;
   rider `Completed`, driver `Idle`; `SimTelemetry.completed_trips.len() == 1`, record
   matches rider/driver, and KPI timestamps are ordered (requested_at ≤ matched_at ≤ pickup_at ≤ completed_at); `time_to_match()`, `time_to_pickup()`, `trip_duration()` are consistent.
-- **End-to-end (concurrent trips)**: Same setup with two riders and two drivers
-  (same cell), `RequestInbound` at t=1 and t=2. Runs until empty. Asserts: two
+- **End-to-end (concurrent trips)**: Same setup with spawners configured for two riders and two drivers
+  (same cell), riders spawning at t=1s and t=2s. Calls `initialize_simulation()` and runs until empty. Asserts: two
   `Trip` entities in `Completed`, both riders `Completed`, both drivers `Idle`;
   `SimTelemetry.completed_trips.len() == 2`.
 - **Scenario**: `build_scenario` with 10 riders, 3 drivers, seed 42; asserts
-  rider/driver counts, `pending_event_count() == 10`. Large scenarios (e.g.
+  spawner configurations are correct (max_count matches params). Large scenarios (e.g.
   500 riders, 100 drivers) are only in the example, not in automated tests.
 
 All per-system unit tests emulate the runner by popping one event, inserting

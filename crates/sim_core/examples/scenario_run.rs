@@ -31,6 +31,7 @@ fn main() {
         .with_match_radius(5)
         .with_trip_duration_cells(5, 60),
     );
+    sim_core::runner::initialize_simulation(&mut world);
 
     let mut schedule = simulation_schedule();
     // 4h of sim time + 500 riders × many events each; allow enough steps to drain the queue
