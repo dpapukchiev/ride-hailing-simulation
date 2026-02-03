@@ -241,9 +241,10 @@ Entity spawners: dynamically spawn riders and drivers based on distributions.
   - `lat_min`, `lat_max`, `lng_min`, `lng_max`: Geographic bounds for spawn positions.
   - `min_trip_cells`, `max_trip_cells`: Trip length bounds (H3 cells).
   - `start_time_ms`, `end_time_ms`: Optional time window for spawning.
-  - `max_count`: Optional maximum number of riders to spawn.
+  - `max_count`: Optional maximum number of riders to spawn (scheduled spawns only, excludes initial count).
+  - `initial_count`: Number of riders to spawn immediately at simulation start (before scheduled spawning).
 - **`RiderSpawner`** (ECS `Resource`): Active rider spawner tracking `next_spawn_time_ms`, `spawned_count`, and `initialized` flag. `should_spawn(current_time_ms)` checks if spawning should continue; `advance(current_time_ms)` samples next inter-arrival time using the distribution (passing `current_time_ms` for time-aware distributions) and updates state.
-- **`DriverSpawnerConfig`**: Similar to `RiderSpawnerConfig` but without trip length bounds (drivers don't have destinations).
+- **`DriverSpawnerConfig`**: Similar to `RiderSpawnerConfig` but without trip length bounds (drivers don't have destinations). Includes `initial_count` for immediate spawns at simulation start.
 - **`DriverSpawner`** (ECS `Resource`): Active driver spawner with same interface as `RiderSpawner`. `advance(current_time_ms)` passes `current_time_ms` to the distribution for time-aware sampling.
 - **`random_cell_in_bounds()`**: Helper function to sample random H3 cell within lat/lng bounds.
 
@@ -256,15 +257,17 @@ Scenario setup: configure spawners for riders and drivers.
 - **`RiderCancelConfig`** (ECS `Resource`): randomized pickup-wait window in seconds. Defaults to 120–2400 seconds, inserted by `build_scenario`.
 - **`SpeedModel`** (ECS `Resource`): stochastic speed sampler (defaults to 20–60 km/h) seeded from `ScenarioParams::seed` to keep runs reproducible.
 - **`ScenarioParams`**: configurable scenario parameters:
-  - `num_riders`, `num_drivers`: counts (used to configure spawner max_count and rates).
+  - `num_riders`, `num_drivers`: total counts (includes both initial and scheduled spawns).
+  - `initial_rider_count`, `initial_driver_count`: number of entities to spawn immediately at simulation start (before scheduled spawning). Defaults to 0. These are spawned at time 0 when `SimulationStarted` event is processed.
   - `seed`: optional RNG seed for reproducibility (used for spawner distributions).
   - `lat_min`, `lat_max`, `lng_min`, `lng_max`: bounding box (degrees) for random positions; default San Francisco Bay Area.
-  - `request_window_ms`: time window over which riders and drivers spawn (used to calculate spawn rates).
+  - `request_window_ms`: time window over which riders spawn (used to calculate rider spawn rates). Scheduled riders spawn over this window; initial riders spawn immediately at start.
+  - `driver_spread_ms`: time window over which drivers spawn (used to calculate driver spawn rates). Scheduled drivers spawn over this window; initial drivers spawn immediately at start. Defaults to same value as `request_window_ms`.
   - `match_radius`: max H3 grid distance for matching (0 = same cell only).
   - `min_trip_cells`, `max_trip_cells`: trip length in H3 cells; rider destinations are chosen at random distance in this range from pickup. Travel time depends on per-trip speeds (20–60 km/h).
   - `epoch_ms`: optional epoch in milliseconds (real-world time corresponding to simulation time 0). Used by time-of-day distributions to convert simulation time to real datetime. If `None`, defaults to 0.
-  - Builders: `with_seed(seed)`, `with_request_window_hours(hours)`, `with_match_radius(radius)`, `with_trip_duration_cells(min, max)`, `with_epoch_ms(epoch_ms)`.
-- **`build_scenario(world, params)`**: inserts `SimulationClock` (with epoch set from `params.epoch_ms`), `SimTelemetry`, `MatchRadius`, `MatchingAlgorithm` (defaults to `CostBasedMatching`), `RiderCancelConfig`, `RiderSpawner`, and `DriverSpawner`. Rider spawner uses `TimeOfDayDistribution` with realistic demand patterns (rush hours: 7-9 AM and 5-7 PM have 2.5-3.2x multipliers, night: 2-5 AM has 0.3-0.4x multipliers, Friday/Saturday evenings have higher multipliers). Driver spawner uses `TimeOfDayDistribution` with supply patterns (more consistent than demand, higher availability during rush hours with 1.5-2.0x multipliers, lower at night with 0.6-0.8x multipliers). Both spawners spawn continuously over `request_window_ms` with time-varying rates. Entities are spawned dynamically by spawner systems reacting to `SimulationStarted` and `SpawnRider`/`SpawnDriver` events.
+  - Builders: `with_seed(seed)`, `with_request_window_hours(hours)`, `with_driver_spread_hours(hours)`, `with_match_radius(radius)`, `with_trip_duration_cells(min, max)`, `with_epoch_ms(epoch_ms)`.
+- **`build_scenario(world, params)`**: inserts `SimulationClock` (with epoch set from `params.epoch_ms`), `SimTelemetry`, `MatchRadius`, `MatchingAlgorithm` (defaults to `CostBasedMatching`), `RiderCancelConfig`, `RiderSpawner`, and `DriverSpawner`. Rider spawner uses `TimeOfDayDistribution` with realistic demand patterns (rush hours: 7-9 AM and 5-7 PM have 2.5-3.2x multipliers, night: 2-5 AM has 0.3-0.4x multipliers, Friday/Saturday evenings have higher multipliers). Driver spawner uses `TimeOfDayDistribution` with supply patterns (more consistent than demand, higher availability during rush hours with 1.5-2.0x multipliers, lower at night with 0.6-0.8x multipliers). Scheduled riders spawn continuously over `request_window_ms` with time-varying rates; scheduled drivers spawn continuously over `driver_spread_ms` with time-varying rates. Initial entities (specified by `initial_rider_count` and `initial_driver_count`) are spawned immediately when `SimulationStarted` event is processed. The spawner `max_count` is set to `num_riders - initial_rider_count` (and similarly for drivers) so that total spawns match the configured counts.
 - **`random_destination()`**: Optimized destination selection function that uses different strategies based on trip distance:
   - **Small radii (≤20 cells)**: Uses `grid_disk()` to generate all candidate cells and filters by distance/bounds (more accurate, efficient for small distances).
   - **Large radii (>20 cells)**: Uses rejection sampling - randomly samples cells within bounds and checks if distance matches the target range. This avoids generating huge grid disks (e.g., ~33k cells for k=105) which dramatically improves reset performance for scenarios with large trip distances (e.g., 600 riders with 25km max trips). Falls back to a smaller `grid_disk()` if rejection sampling fails.
@@ -302,7 +305,7 @@ Large scenarios (e.g. 500 riders, 100 drivers) are run via the **example** only,
 
 Spawner systems: react to spawn events and create riders/drivers dynamically.
 
-- **`simulation_started_system`**: Reacts to `EventKind::SimulationStarted` (scheduled at time 0). Initializes `RiderSpawner` and `DriverSpawner` resources if present, scheduling their first `SpawnRider`/`SpawnDriver` events if they should spawn immediately.
+- **`simulation_started_system`**: Reacts to `EventKind::SimulationStarted` (scheduled at time 0). Initializes `RiderSpawner` and `DriverSpawner` resources if present. Spawns initial entities immediately (`initial_rider_count` riders and `initial_driver_count` drivers) at time 0, then schedules their first `SpawnRider`/`SpawnDriver` events if scheduled spawning should continue.
 - **`rider_spawner_system`**: Reacts to `EventKind::SpawnRider`. If the spawner should spawn at current time:
   - Generates random position and destination using seeded RNG (deterministic based on current time and spawn count).
   - Spawns rider entity in `Browsing` state with position, destination, and `requested_at = Some(clock.now())`.

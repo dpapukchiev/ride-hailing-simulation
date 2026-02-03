@@ -41,7 +41,10 @@ struct SimUiApp {
     last_frame_instant: Option<Instant>,
     num_riders: usize,
     num_drivers: usize,
+    initial_rider_count: usize,
+    initial_driver_count: usize,
     request_window_hours: u64,
+    driver_spread_hours: u64,
     match_radius_km: f64,
     min_trip_km: f64,
     max_trip_km: f64,
@@ -81,7 +84,10 @@ impl SimUiApp {
     fn new() -> Self {
         let num_riders = 80;
         let num_drivers = 40;
+        let initial_rider_count = 0;
+        let initial_driver_count = 10;
         let request_window_hours = 6;
+        let driver_spread_hours = 6;
         let match_radius_km = 8.0;
         let min_trip_km = 1.0;
         let max_trip_km = 25.0;
@@ -130,7 +136,10 @@ impl SimUiApp {
             last_frame_instant: None,
             num_riders,
             num_drivers,
+            initial_rider_count,
+            initial_driver_count,
             request_window_hours,
+            driver_spread_hours,
             match_radius_km,
             min_trip_km,
             max_trip_km,
@@ -210,9 +219,12 @@ impl SimUiApp {
         let mut params = ScenarioParams {
             num_riders: self.num_riders,
             num_drivers: self.num_drivers,
+            initial_rider_count: self.initial_rider_count,
+            initial_driver_count: self.initial_driver_count,
             ..Default::default()
         }
         .with_request_window_hours(self.request_window_hours)
+        .with_driver_spread_hours(self.driver_spread_hours)
         .with_match_radius(km_to_cells(self.match_radius_km))
         .with_trip_duration_cells(km_to_cells(self.min_trip_km), km_to_cells(self.max_trip_km))
         .with_epoch_ms(start_epoch_ms);
@@ -392,11 +404,30 @@ impl eframe::App for SimUiApp {
                         );
                     });
                     ui.horizontal(|ui| {
+                        ui.label("Initial riders");
+                        ui.add_enabled(
+                            can_edit,
+                            egui::DragValue::new(&mut self.initial_rider_count).range(0..=10_000),
+                        );
+                        ui.label("Initial drivers");
+                        ui.add_enabled(
+                            can_edit,
+                            egui::DragValue::new(&mut self.initial_driver_count).range(0..=10_000),
+                        );
+                    });
+                    ui.horizontal(|ui| {
                         ui.label("Rider demand spread (hours)");
                         ui.add_enabled(
                             can_edit,
                             egui::DragValue::new(&mut self.request_window_hours).range(1..=24),
                         );
+                        ui.label("Driver spread (hours)");
+                        ui.add_enabled(
+                            can_edit,
+                            egui::DragValue::new(&mut self.driver_spread_hours).range(1..=24),
+                        );
+                    });
+                    ui.horizontal(|ui| {
                         ui.label("Match radius (km)");
                         ui.add_enabled(
                             can_edit,

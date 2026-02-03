@@ -10,8 +10,105 @@ use crate::scenario::random_destination;
 use crate::spatial::GeoIndex;
 use crate::spawner::{random_cell_in_bounds, DriverSpawner, RiderSpawner};
 
+/// Helper function to spawn a single rider.
+fn spawn_rider(
+    commands: &mut Commands,
+    clock: &mut SimulationClock,
+    spawner: &mut RiderSpawner,
+    current_time_ms: u64,
+) -> bevy_ecs::prelude::Entity {
+    // Create RNG for position/destination generation (seed from config seed + spawn count for determinism)
+    let seed = spawner.config.seed.wrapping_add(spawner.spawned_count as u64);
+    let mut rng = StdRng::seed_from_u64(seed);
+
+    // Generate position and destination
+    let position = random_cell_in_bounds(
+        &mut rng,
+        spawner.config.lat_min,
+        spawner.config.lat_max,
+        spawner.config.lng_min,
+        spawner.config.lng_max,
+    );
+
+    let geo = GeoIndex::default();
+    let destination = random_destination(
+        &mut rng,
+        position,
+        &geo,
+        spawner.config.min_trip_cells,
+        spawner.config.max_trip_cells,
+        spawner.config.lat_min,
+        spawner.config.lat_max,
+        spawner.config.lng_min,
+        spawner.config.lng_max,
+    );
+
+    // Spawn the rider
+    let rider_entity = commands
+        .spawn((
+            Rider {
+                state: RiderState::Browsing,
+                matched_driver: None,
+                destination: Some(destination),
+                requested_at: Some(current_time_ms),
+            },
+            Position(position),
+        ))
+        .id();
+
+    // Schedule QuoteAccepted event 1 second from now
+    clock.schedule_in_secs(1, EventKind::QuoteAccepted, Some(EventSubject::Rider(rider_entity)));
+
+    rider_entity
+}
+
+/// Helper function to spawn a single driver.
+fn spawn_driver(
+    commands: &mut Commands,
+    spawner: &mut DriverSpawner,
+    current_time_ms: u64,
+) {
+    // Create RNG for position generation (seed from config seed + spawn count for determinism)
+    let seed = spawner.config.seed.wrapping_add(spawner.spawned_count as u64);
+    let mut rng = StdRng::seed_from_u64(seed);
+
+    // Generate position
+    let position = random_cell_in_bounds(
+        &mut rng,
+        spawner.config.lat_min,
+        spawner.config.lat_max,
+        spawner.config.lng_min,
+        spawner.config.lng_max,
+    );
+
+    // Sample earnings target: $100-$300 range
+    let daily_earnings_target = rng.gen_range(100.0..=300.0);
+    
+    // Sample fatigue threshold: 8-12 hours
+    let fatigue_hours = rng.gen_range(8.0..=12.0);
+    let fatigue_threshold_ms = (fatigue_hours * ONE_HOUR_MS as f64) as u64;
+
+    // Spawn the driver with earnings and fatigue components
+    commands.spawn((
+        Driver {
+            state: DriverState::Idle,
+            matched_rider: None,
+        },
+        Position(position),
+        DriverEarnings {
+            daily_earnings: 0.0,
+            daily_earnings_target,
+            session_start_time_ms: current_time_ms,
+        },
+        DriverFatigue {
+            fatigue_threshold_ms,
+        },
+    ));
+}
+
 /// System that reacts to SimulationStarted event and initializes spawners.
 pub fn simulation_started_system(
+    mut commands: Commands,
     mut clock: ResMut<SimulationClock>,
     rider_spawner: Option<ResMut<RiderSpawner>>,
     driver_spawner: Option<ResMut<DriverSpawner>>,
@@ -21,29 +118,51 @@ pub fn simulation_started_system(
         return;
     }
 
-    // Initialize rider spawner
+    let current_time_ms = clock.now();
+
+    // Initialize rider spawner and spawn initial riders
     if let Some(mut spawner) = rider_spawner {
         if !spawner.initialized {
             spawner.initialized = true;
+            
+            // Spawn initial riders immediately
+            for _ in 0..spawner.config.initial_count {
+                spawn_rider(&mut commands, &mut clock, &mut spawner, current_time_ms);
+                // Manually increment count since we're not calling advance() for initial spawns
+                spawner.spawned_count += 1;
+            }
+            
             // Schedule first spawn event at next_spawn_time_ms (even if it's in the future)
-            clock.schedule_at(
-                spawner.next_spawn_time_ms,
-                EventKind::SpawnRider,
-                None,
-            );
+            if spawner.should_spawn(spawner.next_spawn_time_ms) {
+                clock.schedule_at(
+                    spawner.next_spawn_time_ms,
+                    EventKind::SpawnRider,
+                    None,
+                );
+            }
         }
     }
 
-    // Initialize driver spawner
+    // Initialize driver spawner and spawn initial drivers
     if let Some(mut spawner) = driver_spawner {
         if !spawner.initialized {
             spawner.initialized = true;
+            
+            // Spawn initial drivers immediately
+            for _ in 0..spawner.config.initial_count {
+                spawn_driver(&mut commands, &mut spawner, current_time_ms);
+                // Manually increment count since we're not calling advance() for initial spawns
+                spawner.spawned_count += 1;
+            }
+            
             // Schedule first spawn event at next_spawn_time_ms (even if it's in the future)
-            clock.schedule_at(
-                spawner.next_spawn_time_ms,
-                EventKind::SpawnDriver,
-                None,
-            );
+            if spawner.should_spawn(spawner.next_spawn_time_ms) {
+                clock.schedule_at(
+                    spawner.next_spawn_time_ms,
+                    EventKind::SpawnDriver,
+                    None,
+                );
+            }
         }
     }
 }
@@ -72,47 +191,7 @@ pub fn rider_spawner_system(
 
     // Check if we should spawn
     if spawner.should_spawn(current_time_ms) {
-        // Create RNG for position/destination generation (seed from config seed + spawn count for determinism)
-        let seed = spawner.config.seed.wrapping_add(spawner.spawned_count as u64);
-        let mut rng = StdRng::seed_from_u64(seed);
-
-        // Generate position and destination
-        let position = random_cell_in_bounds(
-            &mut rng,
-            spawner.config.lat_min,
-            spawner.config.lat_max,
-            spawner.config.lng_min,
-            spawner.config.lng_max,
-        );
-
-        let geo = GeoIndex::default();
-        let destination = random_destination(
-            &mut rng,
-            position,
-            &geo,
-            spawner.config.min_trip_cells,
-            spawner.config.max_trip_cells,
-            spawner.config.lat_min,
-            spawner.config.lat_max,
-            spawner.config.lng_min,
-            spawner.config.lng_max,
-        );
-
-        // Spawn the rider
-        let rider_entity = commands
-            .spawn((
-                Rider {
-                    state: RiderState::Browsing,
-                    matched_driver: None,
-                    destination: Some(destination),
-                    requested_at: Some(current_time_ms),
-                },
-                Position(position),
-            ))
-            .id();
-
-        // Schedule QuoteAccepted event 1 second from now
-        clock.schedule_in_secs(1, EventKind::QuoteAccepted, Some(EventSubject::Rider(rider_entity)));
+        spawn_rider(&mut commands, &mut clock, &mut spawner, current_time_ms);
 
         // Advance spawner to next spawn time (uses seeded distribution internally)
         spawner.advance(current_time_ms);
@@ -152,42 +231,7 @@ pub fn driver_spawner_system(
 
     // Check if we should spawn
     if spawner.should_spawn(current_time_ms) {
-        // Create RNG for position generation (seed from config seed + spawn count for determinism)
-        let seed = spawner.config.seed.wrapping_add(spawner.spawned_count as u64);
-        let mut rng = StdRng::seed_from_u64(seed);
-
-        // Generate position
-        let position = random_cell_in_bounds(
-            &mut rng,
-            spawner.config.lat_min,
-            spawner.config.lat_max,
-            spawner.config.lng_min,
-            spawner.config.lng_max,
-        );
-
-        // Sample earnings target: $100-$300 range
-        let daily_earnings_target = rng.gen_range(100.0..=300.0);
-        
-        // Sample fatigue threshold: 8-12 hours
-        let fatigue_hours = rng.gen_range(8.0..=12.0);
-        let fatigue_threshold_ms = (fatigue_hours * ONE_HOUR_MS as f64) as u64;
-
-        // Spawn the driver with earnings and fatigue components
-        commands.spawn((
-            Driver {
-                state: DriverState::Idle,
-                matched_rider: None,
-            },
-            Position(position),
-            DriverEarnings {
-                daily_earnings: 0.0,
-                daily_earnings_target,
-                session_start_time_ms: current_time_ms,
-            },
-            DriverFatigue {
-                fatigue_threshold_ms,
-            },
-        ));
+        spawn_driver(&mut commands, &mut spawner, current_time_ms);
 
         // Advance spawner to next spawn time (uses seeded distribution internally)
         spawner.advance(current_time_ms);

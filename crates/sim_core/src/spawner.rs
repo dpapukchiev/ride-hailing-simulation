@@ -28,6 +28,8 @@ pub struct RiderSpawnerConfig {
     pub end_time_ms: Option<u64>,
     /// Optional: maximum number of riders to spawn. If None, spawns indefinitely.
     pub max_count: Option<usize>,
+    /// Number of riders to spawn immediately at simulation start (before scheduled spawning).
+    pub initial_count: usize,
     /// Seed for RNG used for position/destination generation (for determinism).
     pub seed: u64,
 }
@@ -48,6 +50,8 @@ pub struct DriverSpawnerConfig {
     pub end_time_ms: Option<u64>,
     /// Optional: maximum number of drivers to spawn. If None, spawns indefinitely.
     pub max_count: Option<usize>,
+    /// Number of drivers to spawn immediately at simulation start (before scheduled spawning).
+    pub initial_count: usize,
     /// Seed for RNG used for position generation (for determinism).
     pub seed: u64,
 }

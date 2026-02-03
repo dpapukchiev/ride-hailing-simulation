@@ -53,6 +53,7 @@ mod end_to_end_tests {
             start_time_ms: Some(1000),
             end_time_ms: Some(2000),
             max_count: Some(1),
+            initial_count: 0,
             seed: 42, // Test seed
         };
         world.insert_resource(RiderSpawner::new(rider_spawner_config));
@@ -66,6 +67,7 @@ mod end_to_end_tests {
             start_time_ms: Some(0),
             end_time_ms: Some(100),
             max_count: Some(1),
+            initial_count: 0,
             seed: 42, // Test seed
         };
         world.insert_resource(DriverSpawner::new(driver_spawner_config));
@@ -142,6 +144,7 @@ mod end_to_end_tests {
             start_time_ms: Some(1000),
             end_time_ms: Some(3000),
             max_count: Some(2),
+            initial_count: 0,
             seed: 42, // Test seed
         };
         world.insert_resource(RiderSpawner::new(rider_spawner_config));
@@ -155,6 +158,7 @@ mod end_to_end_tests {
             start_time_ms: Some(0),
             end_time_ms: Some(100),
             max_count: Some(2),
+            initial_count: 0,
             seed: 42, // Test seed
         };
         world.insert_resource(DriverSpawner::new(driver_spawner_config));

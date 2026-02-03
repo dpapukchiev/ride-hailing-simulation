@@ -47,6 +47,10 @@ impl Default for RiderCancelConfig {
 pub struct ScenarioParams {
     pub num_riders: usize,
     pub num_drivers: usize,
+    /// Number of riders to spawn immediately at simulation start (before scheduled spawning).
+    pub initial_rider_count: usize,
+    /// Number of drivers to spawn immediately at simulation start (before scheduled spawning).
+    pub initial_driver_count: usize,
     /// Random seed for reproducibility (optional; if None, uses thread rng).
     pub seed: Option<u64>,
     /// Bounding box for random positions (lat/lng degrees).
@@ -56,6 +60,8 @@ pub struct ScenarioParams {
     pub lng_max: f64,
     /// Time window in simulation ms: riders spawn over this window.
     pub request_window_ms: u64,
+    /// Time window in simulation ms: drivers spawn over this window.
+    pub driver_spread_ms: u64,
     /// Max H3 grid distance for matching (0 = same cell only).
     pub match_radius: u32,
     /// Min/max trip length in H3 cells (travel time depends on movement speed).
@@ -71,12 +77,15 @@ impl Default for ScenarioParams {
         Self {
             num_riders: 500,
             num_drivers: 100,
+            initial_rider_count: 0,
+            initial_driver_count: 0,
             seed: None,
             lat_min: DEFAULT_LAT_MIN,
             lat_max: DEFAULT_LAT_MAX,
             lng_min: DEFAULT_LNG_MIN,
             lng_max: DEFAULT_LNG_MAX,
             request_window_ms: DEFAULT_REQUEST_WINDOW_MS,
+            driver_spread_ms: DEFAULT_REQUEST_WINDOW_MS,
             match_radius: 0,
             min_trip_cells: 5,
             max_trip_cells: 60,
@@ -94,6 +103,12 @@ impl ScenarioParams {
     /// Set the request time window in hours (riders request uniformly in [0, hours] sim time).
     pub fn with_request_window_hours(mut self, hours: u64) -> Self {
         self.request_window_ms = hours * 60 * 60 * 1000;
+        self
+    }
+
+    /// Set the driver spread time window in hours (drivers spawn over [0, hours] sim time).
+    pub fn with_driver_spread_hours(mut self, hours: u64) -> Self {
+        self.driver_spread_ms = hours * 60 * 60 * 1000;
         self
     }
 
@@ -256,6 +271,7 @@ pub fn build_scenario(world: &mut World, params: ScenarioParams) {
 
     let seed = params.seed.unwrap_or(0);
     let request_window_ms = params.request_window_ms;
+    let driver_spread_ms = params.driver_spread_ms;
     let lat_min = params.lat_min;
     let lat_max = params.lat_max;
     let lng_min = params.lng_min;
@@ -265,8 +281,10 @@ pub fn build_scenario(world: &mut World, params: ScenarioParams) {
 
     // Create rider spawner: time-of-day distribution with average rate to spawn num_riders over request_window_ms
     // The base rate is calculated to achieve the target number of riders, but actual spawn rate varies by time of day
-    let avg_rate_per_sec = if request_window_ms > 0 {
-        (params.num_riders as f64) / (request_window_ms as f64 / 1000.0)
+    // Note: initial_rider_count are spawned immediately, so we subtract them from the scheduled count
+    let scheduled_rider_count = params.num_riders.saturating_sub(params.initial_rider_count);
+    let avg_rate_per_sec = if request_window_ms > 0 && scheduled_rider_count > 0 {
+        (scheduled_rider_count as f64) / (request_window_ms as f64 / 1000.0)
     } else {
         0.0
     };
@@ -283,16 +301,19 @@ pub fn build_scenario(world: &mut World, params: ScenarioParams) {
         max_trip_cells: max_trip,
         start_time_ms: Some(0),
         end_time_ms: Some(request_window_ms),
-        max_count: Some(params.num_riders),
+        max_count: Some(scheduled_rider_count),
+        initial_count: params.initial_rider_count,
         seed,
     };
     world.insert_resource(RiderSpawner::new(rider_spawner_config));
 
     // Create driver spawner: time-of-day distribution for driver supply
-    // Drivers spawn continuously over the request window with time-varying rates
+    // Drivers spawn continuously over the driver_spread_ms window with time-varying rates
+    // Note: initial_driver_count are spawned immediately, so we subtract them from the scheduled count
     let driver_seed = seed.wrapping_add(0xdead_beef);
-    let driver_base_rate_per_sec = if request_window_ms > 0 {
-        (params.num_drivers as f64) / (request_window_ms as f64 / 1000.0) / 1.2
+    let scheduled_driver_count = params.num_drivers.saturating_sub(params.initial_driver_count);
+    let driver_base_rate_per_sec = if driver_spread_ms > 0 && scheduled_driver_count > 0 {
+        (scheduled_driver_count as f64) / (driver_spread_ms as f64 / 1000.0) / 1.2
     } else {
         0.0
     };
@@ -304,8 +325,9 @@ pub fn build_scenario(world: &mut World, params: ScenarioParams) {
         lng_min,
         lng_max,
         start_time_ms: Some(0),
-        end_time_ms: Some(request_window_ms),
-        max_count: Some(params.num_drivers),
+        end_time_ms: Some(driver_spread_ms),
+        max_count: Some(scheduled_driver_count),
+        initial_count: params.initial_driver_count,
         seed: driver_seed,
     };
     world.insert_resource(DriverSpawner::new(driver_spawner_config));
