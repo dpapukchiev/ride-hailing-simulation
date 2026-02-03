@@ -17,8 +17,10 @@ minimal ECS-based agent model. It currently supports:
 - A **runner API** that advances the clock and routes events (pop → insert
   `CurrentEvent` → run schedule).
 - A **scenario** module that schedules rider requests at random times and spawns
-  riders just-in-time when they request, plus spawns drivers upfront. Configurable
-  match radius and trip duration (min/max H3 cells).
+  riders just-in-time when they request, plus spawns drivers continuously over time.
+  Configurable match radius, trip duration (min/max H3 cells), and simulation start time.
+  Spawners use time-of-day and day-of-week distributions to create realistic demand
+  and supply patterns (rush hours, day/night variations).
 
 This is a "crawl/walk" foundation aligned with the research plan.
 
@@ -48,8 +50,10 @@ completion).
 In the current flow, riders and drivers are spawned dynamically by spawner systems
 reacting to `SimulationStarted` and spawn events. Spawners use inter-arrival time
 distributions to control spawn rates, enabling variable supply and demand patterns.
+The default distributions vary rates based on time of day (hour) and day of week,
+creating realistic patterns with rush hours (7-9 AM, 5-7 PM) and lower demand at night.
 Riders spawn in `Browsing` state, browse a quote, then wait for matching. Drivers spawn
-in `Idle` state, evaluate a match offer, drive en route to pickup, and then move into
+in `Idle` state continuously over the simulation window, evaluate a match offer, drive en route to pickup, and then move into
 an on-trip state. If
 a rider waits past a randomized pickup window, the ride is cancelled, the trip
 is marked cancelled, and the driver returns to idle. When the trip completes,
@@ -58,7 +62,9 @@ configurable **match radius** (H3 grid distance): 0 = same cell only; a larger
 radius allows matching to idle drivers within that many cells. Trip length is
 configurable via min/max H3 cells from pickup to dropoff (movement uses 20–60
 km/h city-driving speeds). Throughout this flow, riders and drivers store links
-to each other so the pairing is explicit while a trip is in progress.
+to each other so the pairing is explicit while a trip is in progress. The simulation
+start time (epoch) is configurable, allowing scenarios to start at any real-world
+datetime, which affects the time-of-day patterns applied to spawn rates.
 
 ## Workspace Layout
 
@@ -196,11 +202,10 @@ duplicating the pop → route → run loop. The simulation starts with `Simulati
 
 Probability distributions for spawner inter-arrival times, enabling variable supply and demand patterns.
 
-- **`InterArrivalDistribution` trait**: Interface for sampling inter-arrival times (in milliseconds). `sample_ms(spawn_count)` samples the next inter-arrival time; `spawn_count` allows time-varying distributions.
+- **`InterArrivalDistribution` trait**: Interface for sampling inter-arrival times (in milliseconds). `sample_ms(spawn_count, current_time_ms)` samples the next inter-arrival time; `spawn_count` allows count-varying distributions, `current_time_ms` enables time-of-day patterns.
 - **`UniformInterArrival`**: Constant inter-arrival time distribution. `new(interval_ms)` creates with fixed interval; `from_rate(rate_per_sec)` creates from entities per second.
 - **`ExponentialInterArrival`**: Exponential distribution for Poisson process (constant rate, random inter-arrival times). `new(rate_per_sec, seed)` creates with rate parameter (lambda) and seed for reproducibility.
-- **`PiecewiseConstantRate`**: Different rates during different time windows (for rush hours, day/night patterns). `new(windows, seed)` where `windows` is `Vec<(start_ms, end_ms, rate_per_sec)>`.
-- **`TimeVaryingRate`**: Time-varying rate using current simulation time to determine rate. Similar to `PiecewiseConstantRate` but designed for more flexible time-dependent patterns.
+- **`TimeOfDayDistribution`**: Time-of-day and day-of-week aware distribution that varies spawn rates based on hour of day (0-23) and day of week (0=Monday, 6=Sunday). Uses a base rate multiplied by time-specific factors. `new(base_rate_per_sec, epoch_ms, seed)` creates with base rate, epoch (real-world ms corresponding to simulation time 0), and seed. `set_multiplier(day_of_week, hour, multiplier)` sets multiplier for specific time; `set_day_multipliers(day_of_week, multipliers)` sets multipliers for all hours of a day. The distribution converts simulation time to real-world datetime using the epoch to determine the current hour and day of week, then applies the appropriate multiplier to the base rate before sampling from an exponential distribution.
 
 ### `sim_core::spawner`
 
@@ -212,9 +217,9 @@ Entity spawners: dynamically spawn riders and drivers based on distributions.
   - `min_trip_cells`, `max_trip_cells`: Trip length bounds (H3 cells).
   - `start_time_ms`, `end_time_ms`: Optional time window for spawning.
   - `max_count`: Optional maximum number of riders to spawn.
-- **`RiderSpawner`** (ECS `Resource`): Active rider spawner tracking `next_spawn_time_ms`, `spawned_count`, and `initialized` flag. `should_spawn(current_time_ms)` checks if spawning should continue; `advance(current_time_ms)` samples next inter-arrival time and updates state.
+- **`RiderSpawner`** (ECS `Resource`): Active rider spawner tracking `next_spawn_time_ms`, `spawned_count`, and `initialized` flag. `should_spawn(current_time_ms)` checks if spawning should continue; `advance(current_time_ms)` samples next inter-arrival time using the distribution (passing `current_time_ms` for time-aware distributions) and updates state.
 - **`DriverSpawnerConfig`**: Similar to `RiderSpawnerConfig` but without trip length bounds (drivers don't have destinations).
-- **`DriverSpawner`** (ECS `Resource`): Active driver spawner with same interface as `RiderSpawner`.
+- **`DriverSpawner`** (ECS `Resource`): Active driver spawner with same interface as `RiderSpawner`. `advance(current_time_ms)` passes `current_time_ms` to the distribution for time-aware sampling.
 - **`random_cell_in_bounds()`**: Helper function to sample random H3 cell within lat/lng bounds.
 
 ### `sim_core::scenario`
@@ -229,11 +234,12 @@ Scenario setup: configure spawners for riders and drivers.
   - `num_riders`, `num_drivers`: counts (used to configure spawner max_count and rates).
   - `seed`: optional RNG seed for reproducibility (used for spawner distributions).
   - `lat_min`, `lat_max`, `lng_min`, `lng_max`: bounding box (degrees) for random positions; default San Francisco Bay Area.
-  - `request_window_ms`: time window over which riders spawn (used to calculate spawn rate).
+  - `request_window_ms`: time window over which riders and drivers spawn (used to calculate spawn rates).
   - `match_radius`: max H3 grid distance for matching (0 = same cell only).
   - `min_trip_cells`, `max_trip_cells`: trip length in H3 cells; rider destinations are chosen at random distance in this range from pickup. Travel time depends on per-trip speeds (20–60 km/h).
-  - Builders: `with_seed(seed)`, `with_request_window_hours(hours)`, `with_match_radius(radius)`, `with_trip_duration_cells(min, max)`.
-- **`build_scenario(world, params)`**: inserts `SimulationClock`, `SimTelemetry`, `MatchRadius`, `MatchingAlgorithm` (defaults to `CostBasedMatching`), `RiderCancelConfig`, `RiderSpawner`, and `DriverSpawner`. Rider spawner uses exponential distribution with average rate to spawn `num_riders` over `request_window_ms`. Driver spawner uses uniform distribution to spawn all drivers quickly at start. Entities are spawned dynamically by spawner systems reacting to `SimulationStarted` and `SpawnRider`/`SpawnDriver` events.
+  - `epoch_ms`: optional epoch in milliseconds (real-world time corresponding to simulation time 0). Used by time-of-day distributions to convert simulation time to real datetime. If `None`, defaults to 0.
+  - Builders: `with_seed(seed)`, `with_request_window_hours(hours)`, `with_match_radius(radius)`, `with_trip_duration_cells(min, max)`, `with_epoch_ms(epoch_ms)`.
+- **`build_scenario(world, params)`**: inserts `SimulationClock` (with epoch set from `params.epoch_ms`), `SimTelemetry`, `MatchRadius`, `MatchingAlgorithm` (defaults to `CostBasedMatching`), `RiderCancelConfig`, `RiderSpawner`, and `DriverSpawner`. Rider spawner uses `TimeOfDayDistribution` with realistic demand patterns (rush hours: 7-9 AM and 5-7 PM have 2.5-3.2x multipliers, night: 2-5 AM has 0.3-0.4x multipliers, Friday/Saturday evenings have higher multipliers). Driver spawner uses `TimeOfDayDistribution` with supply patterns (more consistent than demand, higher availability during rush hours with 1.5-2.0x multipliers, lower at night with 0.6-0.8x multipliers). Both spawners spawn continuously over `request_window_ms` with time-varying rates. Entities are spawned dynamically by spawner systems reacting to `SimulationStarted` and `SpawnRider`/`SpawnDriver` events.
 - **`random_destination()`**: Optimized destination selection function that uses different strategies based on trip distance:
   - **Small radii (≤20 cells)**: Uses `grid_disk()` to generate all candidate cells and filters by distance/bounds (more accurate, efficient for small distances).
   - **Large radii (>20 cells)**: Uses rejection sampling - randomly samples cells within bounds and checks if distance matches the target range. This avoids generating huge grid disks (e.g., ~33k cells for k=105) which dramatically improves reset performance for scenarios with large trip distances (e.g., 600 riders with 25km max trips). Falls back to a smaller `grid_disk()` if rejection sampling fails.
@@ -471,12 +477,15 @@ All per-system unit tests emulate the runner by popping one event, inserting
   the map size defines the scenario bounds used for spawning and destination sampling, so it is
   only editable before the simulation starts, and the grid overlay adapts to the map size. Rider
   cancellation wait windows (min/max minutes) are configurable before start.
-  to complete the simulation; a real-time clock speed selector (2x–50x) controls
-  simulation playback. Riders in `InTransit` state are hidden from the map (they are with the driver).
-  Drivers in `OnTrip` state display "D(R)" instead of "D" to indicate they have a rider on board.
-  The UI differentiates between riders waiting for a match (yellow/orange) and riders waiting for pickup
-  (darker orange/red) based on whether `matched_driver` is set, making it easy to see which riders have
-  a driver assigned and are waiting for pickup versus those still searching for a match.
+  **Simulation start time** is configurable via year, month, day, hour, and minute inputs (UTC);
+  defaults to current time but can be set to any datetime. This start time is used as the simulation
+  epoch, affecting the time-of-day patterns applied to spawn rates (rush hours, day/night variations).
+  A real-time clock speed selector (10x–200x) controls simulation playback. Riders in `InTransit` state
+  are hidden from the map (they are with the driver). Drivers in `OnTrip` state display "D(R)" instead
+  of "D" to indicate they have a rider on board. The UI differentiates between riders waiting for a
+  match (yellow/orange) and riders waiting for pickup (darker orange/red) based on whether `matched_driver`
+  is set, making it easy to see which riders have a driver assigned and are waiting for pickup versus
+  those still searching for a match.
 
 ## Known Gaps (Not Implemented Yet)
 

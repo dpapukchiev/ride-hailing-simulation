@@ -6,8 +6,9 @@
 use bevy_ecs::prelude::{Resource, World};
 
 use crate::clock::SimulationClock;
-use crate::distributions::{ExponentialInterArrival, UniformInterArrival};
+use crate::distributions::TimeOfDayDistribution;
 use crate::matching::{CostBasedMatching, MatchingAlgorithmResource, SimpleMatching};
+use crate::patterns::{apply_driver_patterns, apply_rider_patterns};
 use crate::spawner::{DriverSpawner, DriverSpawnerConfig, RiderSpawner, RiderSpawnerConfig};
 use crate::speed::SpeedModel;
 use crate::telemetry::{SimSnapshotConfig, SimSnapshots, SimTelemetry};
@@ -60,6 +61,9 @@ pub struct ScenarioParams {
     /// Min/max trip length in H3 cells (travel time depends on movement speed).
     pub min_trip_cells: u32,
     pub max_trip_cells: u32,
+    /// Epoch in milliseconds (real-world time corresponding to simulation time 0).
+    /// Used for time-of-day distributions. If None, defaults to 0.
+    pub epoch_ms: Option<i64>,
 }
 
 impl Default for ScenarioParams {
@@ -76,6 +80,7 @@ impl Default for ScenarioParams {
             match_radius: 0,
             min_trip_cells: 5,
             max_trip_cells: 60,
+            epoch_ms: None,
         }
     }
 }
@@ -102,6 +107,12 @@ impl ScenarioParams {
     pub fn with_trip_duration_cells(mut self, min_cells: u32, max_cells: u32) -> Self {
         self.min_trip_cells = min_cells;
         self.max_trip_cells = max_cells;
+        self
+    }
+
+    /// Set the epoch in milliseconds (real-world time corresponding to simulation time 0).
+    pub fn with_epoch_ms(mut self, epoch_ms: i64) -> Self {
+        self.epoch_ms = Some(epoch_ms);
         self
     }
 }
@@ -211,11 +222,29 @@ pub fn create_cost_based_matching(eta_weight: f64) -> MatchingAlgorithmResource 
     MatchingAlgorithmResource::new(Box::new(CostBasedMatching::new(eta_weight)))
 }
 
+/// Create a realistic time-of-day pattern for rider demand.
+/// Uses patterns from the patterns module.
+fn create_rider_time_of_day_pattern(base_rate_per_sec: f64, epoch_ms: i64, seed: u64) -> TimeOfDayDistribution {
+    let dist = TimeOfDayDistribution::new(base_rate_per_sec, epoch_ms, seed);
+    apply_rider_patterns(dist)
+}
+
+/// Create a realistic time-of-day pattern for driver supply.
+/// Uses patterns from the patterns module.
+fn create_driver_time_of_day_pattern(base_rate_per_sec: f64, epoch_ms: i64, seed: u64) -> TimeOfDayDistribution {
+    let dist = TimeOfDayDistribution::new(base_rate_per_sec, epoch_ms, seed);
+    apply_driver_patterns(dist)
+}
+
 /// Populates `world` with clock, telemetry, and spawner configurations.
 /// Entities are spawned dynamically by spawner systems reacting to SimulationStarted events.
 /// Caller must have already created `world`; this inserts resources and configures spawners.
 pub fn build_scenario(world: &mut World, params: ScenarioParams) {
-    world.insert_resource(SimulationClock::default());
+    let epoch_ms = params.epoch_ms.unwrap_or(0);
+    let mut clock = SimulationClock::default();
+    clock.set_epoch_ms(epoch_ms);
+    world.insert_resource(clock);
+    
     world.insert_resource(SimTelemetry::default());
     world.insert_resource(SimSnapshotConfig::default());
     world.insert_resource(SimSnapshots::default());
@@ -234,14 +263,18 @@ pub fn build_scenario(world: &mut World, params: ScenarioParams) {
     let min_trip = params.min_trip_cells;
     let max_trip = params.max_trip_cells;
 
-    // Create rider spawner: exponential distribution with average rate to spawn num_riders over request_window_ms
+    // Create rider spawner: time-of-day distribution with average rate to spawn num_riders over request_window_ms
+    // The base rate is calculated to achieve the target number of riders, but actual spawn rate varies by time of day
     let avg_rate_per_sec = if request_window_ms > 0 {
         (params.num_riders as f64) / (request_window_ms as f64 / 1000.0)
     } else {
         0.0
     };
+    // Adjust base rate to account for multipliers (average multiplier is ~1.3)
+    let base_rate_per_sec = avg_rate_per_sec / 1.3;
+    
     let rider_spawner_config = RiderSpawnerConfig {
-        inter_arrival_dist: Box::new(ExponentialInterArrival::new(avg_rate_per_sec, seed)),
+        inter_arrival_dist: Box::new(create_rider_time_of_day_pattern(base_rate_per_sec, epoch_ms, seed)),
         lat_min,
         lat_max,
         lng_min,
@@ -255,18 +288,23 @@ pub fn build_scenario(world: &mut World, params: ScenarioParams) {
     };
     world.insert_resource(RiderSpawner::new(rider_spawner_config));
 
-    // Create driver spawner: spawn all drivers upfront (uniform distribution with very short interval)
-    // For simplicity, we'll spawn them all at time 0, but using a spawner allows future flexibility
-    // Use a different seed offset for drivers to ensure independent randomness
+    // Create driver spawner: time-of-day distribution for driver supply
+    // Drivers spawn continuously over the request window with time-varying rates
     let driver_seed = seed.wrapping_add(0xdead_beef);
+    let driver_base_rate_per_sec = if request_window_ms > 0 {
+        (params.num_drivers as f64) / (request_window_ms as f64 / 1000.0) / 1.2
+    } else {
+        0.0
+    };
+    
     let driver_spawner_config = DriverSpawnerConfig {
-        inter_arrival_dist: Box::new(UniformInterArrival::new(1.0)), // 1ms between spawns
+        inter_arrival_dist: Box::new(create_driver_time_of_day_pattern(driver_base_rate_per_sec, epoch_ms, driver_seed)),
         lat_min,
         lat_max,
         lng_min,
         lng_max,
         start_time_ms: Some(0),
-        end_time_ms: Some(1000), // Spawn within first second
+        end_time_ms: Some(request_window_ms),
         max_count: Some(params.num_drivers),
         seed: driver_seed,
     };

@@ -10,3 +10,4 @@ pub mod telemetry_export;
 pub mod matching;
 pub mod distributions;
 pub mod spawner;
+pub mod patterns;

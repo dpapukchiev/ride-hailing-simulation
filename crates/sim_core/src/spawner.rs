@@ -106,7 +106,7 @@ impl RiderSpawner {
     /// Advance the spawner to the next spawn time.
     /// Returns the inter-arrival time that was sampled (in ms).
     pub fn advance(&mut self, current_time_ms: u64) -> f64 {
-        let inter_arrival_ms = self.config.inter_arrival_dist.sample_ms(self.spawned_count as u64);
+        let inter_arrival_ms = self.config.inter_arrival_dist.sample_ms(self.spawned_count as u64, current_time_ms);
         self.next_spawn_time_ms = current_time_ms + inter_arrival_ms.max(0.0) as u64;
         self.spawned_count += 1;
         inter_arrival_ms
@@ -167,7 +167,7 @@ impl DriverSpawner {
     /// Advance the spawner to the next spawn time.
     /// Returns the inter-arrival time that was sampled (in ms).
     pub fn advance(&mut self, current_time_ms: u64) -> f64 {
-        let inter_arrival_ms = self.config.inter_arrival_dist.sample_ms(self.spawned_count as u64);
+        let inter_arrival_ms = self.config.inter_arrival_dist.sample_ms(self.spawned_count as u64, current_time_ms);
         self.next_spawn_time_ms = current_time_ms + inter_arrival_ms.max(0.0) as u64;
         self.spawned_count += 1;
         inter_arrival_ms

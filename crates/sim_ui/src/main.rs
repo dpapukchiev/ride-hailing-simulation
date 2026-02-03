@@ -54,6 +54,11 @@ struct SimUiApp {
     show_riders: bool,
     show_drivers: bool,
     matching_algorithm: MatchingAlgorithmType,
+    start_year: i32,
+    start_month: u32,
+    start_day: u32,
+    start_hour: u32,
+    start_minute: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -85,6 +90,11 @@ impl SimUiApp {
         let seed_enabled = true;
         let seed_value = 123;
         let matching_algorithm = MatchingAlgorithmType::CostBased;
+        
+        // Default start time: current time
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_else(|_| Duration::from_secs(0)).as_secs();
+        let (year, month, day, hour, minute) = datetime_from_unix_secs(now as i64);
+        let start_epoch_ms = datetime_to_unix_ms(year, month, day, hour, minute);
 
         let mut params = ScenarioParams {
             num_riders,
@@ -93,7 +103,8 @@ impl SimUiApp {
         }
         .with_request_window_hours(request_window_hours)
         .with_match_radius(km_to_cells(match_radius_km))
-        .with_trip_duration_cells(km_to_cells(min_trip_km), km_to_cells(max_trip_km));
+        .with_trip_duration_cells(km_to_cells(min_trip_km), km_to_cells(max_trip_km))
+        .with_epoch_ms(start_epoch_ms);
         if seed_enabled {
             params = params.with_seed(seed_value);
         }
@@ -102,7 +113,7 @@ impl SimUiApp {
         build_scenario(&mut world, params);
         // Override the default algorithm with the selected one
         world.insert_resource(matching_algorithm.create_matching_algorithm());
-        set_clock_epoch_now(&mut world);
+        // Clock epoch is already set in build_scenario from params.epoch_ms
         sim_core::runner::initialize_simulation(&mut world);
         let schedule = simulation_schedule();
 
@@ -131,6 +142,11 @@ impl SimUiApp {
             show_riders: true,
             show_drivers: true,
             matching_algorithm,
+            start_year: year,
+            start_month: month,
+            start_day: day,
+            start_hour: hour,
+            start_minute: minute,
         }
     }
 
@@ -144,7 +160,7 @@ impl SimUiApp {
             self.rider_cancel_min_mins,
             self.rider_cancel_max_mins,
         );
-        set_clock_epoch_now(&mut world);
+        // Clock epoch is already set in build_scenario from params.epoch_ms
         apply_snapshot_interval(&mut world, self.snapshot_interval_ms);
         sim_core::runner::initialize_simulation(&mut world);
         self.world = world;
@@ -168,7 +184,7 @@ impl SimUiApp {
             self.rider_cancel_min_mins,
             self.rider_cancel_max_mins,
         );
-        set_clock_epoch_now(&mut world);
+        // Clock epoch is already set in build_scenario from params.epoch_ms
         apply_snapshot_interval(&mut world, self.snapshot_interval_ms);
         sim_core::runner::initialize_simulation(&mut world);
         self.world = world;
@@ -188,6 +204,7 @@ impl SimUiApp {
     }
 
     fn current_params(&self) -> ScenarioParams {
+        let start_epoch_ms = datetime_to_unix_ms(self.start_year, self.start_month, self.start_day, self.start_hour, self.start_minute);
         let mut params = ScenarioParams {
             num_riders: self.num_riders,
             num_drivers: self.num_drivers,
@@ -195,7 +212,8 @@ impl SimUiApp {
         }
         .with_request_window_hours(self.request_window_hours)
         .with_match_radius(km_to_cells(self.match_radius_km))
-        .with_trip_duration_cells(km_to_cells(self.min_trip_km), km_to_cells(self.max_trip_km));
+        .with_trip_duration_cells(km_to_cells(self.min_trip_km), km_to_cells(self.max_trip_km))
+        .with_epoch_ms(start_epoch_ms);
         let (lat_min, lat_max, lng_min, lng_max) = bounds_from_km(self.map_size_km);
         params.lat_min = lat_min;
         params.lat_max = lat_max;
@@ -428,6 +446,29 @@ impl eframe::App for SimUiApp {
                         ui.add_enabled(
                             can_edit && self.seed_enabled,
                             egui::DragValue::new(&mut self.seed_value).range(0..=u64::MAX),
+                        );
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Start time (UTC):");
+                        ui.add_enabled(
+                            can_edit,
+                            egui::DragValue::new(&mut self.start_year).range(1970..=2100).suffix(" Y"),
+                        );
+                        ui.add_enabled(
+                            can_edit,
+                            egui::DragValue::new(&mut self.start_month).range(1..=12).suffix(" M"),
+                        );
+                        ui.add_enabled(
+                            can_edit,
+                            egui::DragValue::new(&mut self.start_day).range(1..=31).suffix(" D"),
+                        );
+                        ui.add_enabled(
+                            can_edit,
+                            egui::DragValue::new(&mut self.start_hour).range(0..=23).suffix(" H"),
+                        );
+                        ui.add_enabled(
+                            can_edit,
+                            egui::DragValue::new(&mut self.start_minute).range(0..=59).suffix(" m"),
                         );
                     });
                     ui.horizontal(|ui| {
@@ -830,11 +871,36 @@ fn civil_from_days(days_since_unix_epoch: i64) -> (i32, u32, u32) {
     (year as i32, m as u32, d as u32)
 }
 
-fn set_clock_epoch_now(world: &mut World) {
-    if let Some(mut clock) = world.get_resource_mut::<sim_core::clock::SimulationClock>() {
-        let epoch_ms = now_unix_ms() as i64;
-        clock.set_epoch_ms(epoch_ms);
-    }
+fn datetime_from_unix_secs(total_secs: i64) -> (i32, u32, u32, u32, u32) {
+    let days = total_secs / 86_400;
+    let day_secs = total_secs % 86_400;
+    let (year, month, day) = civil_from_days(days);
+    let hours = (day_secs / 3600) as u32;
+    let minutes = ((day_secs % 3600) / 60) as u32;
+    (year, month, day, hours, minutes)
+}
+
+fn datetime_to_unix_ms(year: i32, month: u32, day: u32, hour: u32, minute: u32) -> i64 {
+    // Convert date to days since Unix epoch
+    // Algorithm from https://howardhinnant.github.io/date_algorithms.html
+    let y = year as i64;
+    let m = month as i64;
+    let d = day as i64;
+    
+    // Adjust for month
+    let adjusted_m = if m <= 2 { m + 12 } else { m };
+    let adjusted_y = if m <= 2 { y - 1 } else { y };
+    
+    // Calculate days since epoch (1970-01-01)
+    let era = (if adjusted_y >= 0 { adjusted_y } else { adjusted_y - 399 }) / 400;
+    let yoe = adjusted_y - era * 400;
+    let doy = (153 * (adjusted_m - 3) + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146097 + doe - 719468;
+    
+    // Add time components
+    let total_secs = days * 86400 + hour as i64 * 3600 + minute as i64 * 60;
+    total_secs * 1000 // Convert to milliseconds
 }
 
 fn apply_snapshot_interval(world: &mut World, interval_ms: u64) {
