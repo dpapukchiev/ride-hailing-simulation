@@ -112,137 +112,135 @@ impl eframe::App for SimUiApp {
                 return;
             };
 
-            ui.group(|ui| {
-                ui.heading("Map Legend");
-                render_map_legend(ui);
+            egui::CollapsingHeader::new("Map")
+                .default_open(true)
+                .show(ui, |ui| {
+                    ui.group(|ui| {
+                        ui.heading("Map Legend");
+                        render_map_legend(ui);
 
-                let map_height = 280.0;
-                let map_size = egui::Vec2::new(ui.available_width(), map_height);
-                let (map_rect, _) = ui.allocate_exact_size(map_size, egui::Sense::hover());
-                let painter = ui.painter_at(map_rect);
+                        let map_height = 560.0;
+                        let map_size = egui::Vec2::new(ui.available_width(), map_height);
+                        let (map_rect, _) = ui.allocate_exact_size(map_size, egui::Sense::hover());
+                        let painter = ui.painter_at(map_rect);
 
-                painter.rect_filled(map_rect, 0.0, egui::Color32::from_gray(20));
-                painter.rect_stroke(
-                    map_rect,
-                    0.0,
-                    egui::Stroke::new(1.0, egui::Color32::from_gray(60)),
-                    egui::StrokeKind::Middle,
-                );
+                        painter.rect_filled(map_rect, 0.0, egui::Color32::from_gray(20));
+                        painter.rect_stroke(
+                            map_rect,
+                            0.0,
+                            egui::Stroke::new(1.0, egui::Color32::from_gray(60)),
+                            egui::StrokeKind::Middle,
+                        );
 
-                if let Some(snapshot) = latest_snapshot.as_ref() {
-                    let params = self.current_params();
-                    let bounds = MapBounds::new(
-                        params.lat_min,
-                        params.lat_max,
-                        params.lng_min,
-                        params.lng_max,
-                    );
-                    if self.grid_enabled {
-                        let spacing_km = (self.map_size_km / 10.0).clamp(0.5, 10.0);
-                        draw_grid(&painter, &bounds, map_rect, spacing_km);
-                    }
-                    if self.show_riders {
-                        for rider in &snapshot.riders {
-                            // Hide riders that are in transit (they're with the driver)
-                            if rider.state != sim_core::ecs::RiderState::InTransit {
-                                if let Some(pos) = project_cell(rider.cell, &bounds, map_rect) {
-                                    draw_agent(&painter, pos, "R", rider_color(rider.state, rider.matched_driver));
+                        if let Some(snapshot) = latest_snapshot.as_ref() {
+                            let params = self.current_params();
+                            let bounds = MapBounds::new(
+                                params.lat_min,
+                                params.lat_max,
+                                params.lng_min,
+                                params.lng_max,
+                            );
+                            if self.grid_enabled {
+                                let spacing_km = (self.map_size_km / 10.0).clamp(0.5, 10.0);
+                                draw_grid(&painter, &bounds, map_rect, spacing_km);
+                            }
+                            if self.show_riders {
+                                for rider in &snapshot.riders {
+                                    if rider.state != sim_core::ecs::RiderState::InTransit {
+                                        if let Some(pos) = project_cell(rider.cell, &bounds, map_rect) {
+                                            draw_agent(&painter, pos, "R", rider_color(rider.state, rider.matched_driver));
+                                        }
+                                    }
+                                }
+                            }
+                            if self.show_drivers {
+                                let current_time = snapshot.timestamp_ms;
+                                for driver in &snapshot.drivers {
+                                    if let Some(pos) = project_cell(driver.cell, &bounds, map_rect) {
+                                        let mut label = String::from("D");
+                                        if driver.state == sim_core::ecs::DriverState::OnTrip {
+                                            label.push_str("(R)");
+                                        }
+                                        if self.show_driver_stats {
+                                            if let (Some(earnings), Some(target)) = (driver.daily_earnings, driver.daily_earnings_target) {
+                                                label.push_str(&format!("[{:.0}/{:.0}]", earnings, target));
+                                            }
+                                            if let (Some(session_start), Some(fatigue_threshold)) = (
+                                                driver.session_start_time_ms,
+                                                driver.fatigue_threshold_ms,
+                                            ) {
+                                                let session_duration_ms = current_time.saturating_sub(session_start);
+                                                let current_hours = (session_duration_ms as f64 / (60.0 * 60.0 * 1000.0)).round() as u32;
+                                                let max_hours = (fatigue_threshold as f64 / (60.0 * 60.0 * 1000.0)).round() as u32;
+                                                label.push_str(&format!("[{}/{}h]", current_hours, max_hours));
+                                            }
+                                        }
+                                        draw_agent(&painter, pos, &label, driver_color(driver.state));
+                                    }
                                 }
                             }
                         }
-                    }
-                    if self.show_drivers {
-                        let current_time = snapshot.timestamp_ms;
-                        for driver in &snapshot.drivers {
-                            if let Some(pos) = project_cell(driver.cell, &bounds, map_rect) {
-                                // Build label with state, earnings, and fatigue info (compact format)
-                                let mut label = String::from("D");
-                                
-                                // Show "(R)" for drivers on trip (with rider)
-                                if driver.state == sim_core::ecs::DriverState::OnTrip {
-                                    label.push_str("(R)");
-                                }
-                                
-                                // Add earnings and fatigue info only if toggle is enabled
-                                if self.show_driver_stats {
-                                    // Add earnings info: [earned/target] without dollar signs
-                                    if let (Some(earnings), Some(target)) = (driver.daily_earnings, driver.daily_earnings_target) {
-                                        label.push_str(&format!("[{:.0}/{:.0}]", earnings, target));
-                                    }
-                                    
-                                    // Add fatigue info: [current/max]h (integers for compactness)
-                                    if let (Some(session_start), Some(fatigue_threshold)) = (
-                                        driver.session_start_time_ms,
-                                        driver.fatigue_threshold_ms
-                                    ) {
-                                        let session_duration_ms = current_time.saturating_sub(session_start);
-                                        let current_hours = (session_duration_ms as f64 / (60.0 * 60.0 * 1000.0)).round() as u32;
-                                        let max_hours = (fatigue_threshold as f64 / (60.0 * 60.0 * 1000.0)).round() as u32;
-                                        label.push_str(&format!("[{}/{}h]", current_hours, max_hours));
-                                    }
-                                }
-                                
-                                draw_agent(&painter, pos, &label, driver_color(driver.state));
-                            }
-                        }
-                    }
-                }
-            });
-
-            ui.add_space(8.0);
-
-            ui.group(|ui| {
-                ui.heading("Metrics Legend");
-                render_metrics_legend(ui);
-                Plot::new("active_trips_plot")
-                    .height(220.0)
-                    .x_axis_formatter(|mark, _range| {
-                        format_datetime_from_unix_ms((mark.value * 1000.0) as u64)
-                    })
-                    .show(ui, |plot_ui| {
-                        plot_ui.line(
-                            Line::new("Active trips", active_trips_points.clone())
-                                .color(chart_color_active_trips()),
-                        );
-                        plot_ui.line(
-                            Line::new("Waiting riders", waiting_riders_points.clone())
-                                .color(chart_color_waiting_riders()),
-                        );
-                        plot_ui.line(
-                            Line::new("Idle drivers", idle_drivers_points.clone())
-                                .color(chart_color_idle_drivers()),
-                        );
-                        plot_ui.line(
-                            Line::new("Cancelled riders", cancelled_riders_points.clone())
-                                .color(chart_color_cancelled_riders()),
-                        );
-                        plot_ui.line(
-                            Line::new("Abandoned (quote)", abandoned_quote_points.clone())
-                                .color(chart_color_abandoned_quote()),
-                        );
-                        plot_ui.line(
-                            Line::new("Completed trips", completed_trips_points.clone())
-                                .color(chart_color_completed_trips()),
-                        );
-                        plot_ui.line(
-                            Line::new("Cancelled trips", cancelled_trips_points.clone())
-                                .color(chart_color_cancelled_trips()),
-                        );
                     });
-            });
+                });
 
-            ui.add_space(8.0);
+            egui::CollapsingHeader::new("Metrics")
+                .default_open(true)
+                .show(ui, |ui| {
+                    ui.group(|ui| {
+                        ui.heading("Metrics Legend");
+                        render_metrics_legend(ui);
+                        Plot::new("active_trips_plot")
+                            .height(340.0)
+                            .x_axis_formatter(|mark, _range| {
+                                format_datetime_from_unix_ms((mark.value * 1000.0) as u64)
+                            })
+                            .show(ui, |plot_ui| {
+                                plot_ui.line(
+                                    Line::new("Active trips", active_trips_points.clone())
+                                        .color(chart_color_active_trips()),
+                                );
+                                plot_ui.line(
+                                    Line::new("Waiting riders", waiting_riders_points.clone())
+                                        .color(chart_color_waiting_riders()),
+                                );
+                                plot_ui.line(
+                                    Line::new("Idle drivers", idle_drivers_points.clone())
+                                        .color(chart_color_idle_drivers()),
+                                );
+                                plot_ui.line(
+                                    Line::new("Cancelled riders", cancelled_riders_points.clone())
+                                        .color(chart_color_cancelled_riders()),
+                                );
+                                plot_ui.line(
+                                    Line::new("Abandoned (quote)", abandoned_quote_points.clone())
+                                        .color(chart_color_abandoned_quote()),
+                                );
+                                plot_ui.line(
+                                    Line::new("Completed trips", completed_trips_points.clone())
+                                        .color(chart_color_completed_trips()),
+                                );
+                                plot_ui.line(
+                                    Line::new("Cancelled trips", cancelled_trips_points.clone())
+                                        .color(chart_color_cancelled_trips()),
+                                );
+                            });
+                    });
+                });
 
-            if let Some(snapshot) = latest_snapshot.as_ref() {
-                let sim_epoch_ms = self
-                    .world
-                    .get_resource::<sim_core::clock::SimulationClock>()
-                    .map(|clock| clock.epoch_ms())
-                    .unwrap_or(0);
-                render_trip_table_all(ui, snapshot.trips.as_slice(), sim_epoch_ms);
-            } else {
-                ui.label("Waiting for first snapshot...");
-            }
+            egui::CollapsingHeader::new("Trips")
+                .default_open(true)
+                .show(ui, |ui| {
+                    if let Some(snapshot) = latest_snapshot.as_ref() {
+                        let sim_epoch_ms = self
+                            .world
+                            .get_resource::<sim_core::clock::SimulationClock>()
+                            .map(|clock| clock.epoch_ms())
+                            .unwrap_or(0);
+                        render_trip_table_all(ui, snapshot.trips.as_slice(), sim_epoch_ms);
+                    } else {
+                        ui.label("Waiting for first snapshot...");
+                    }
+                });
         });
     }
 }
