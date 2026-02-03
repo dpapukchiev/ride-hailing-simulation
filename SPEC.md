@@ -207,10 +207,13 @@ Scenario setup: schedule rider requests and spawn entities just-in-time.
   - `min_trip_cells`, `max_trip_cells`: trip length in H3 cells; rider destinations are chosen at random distance in this range from pickup. Travel time depends on per-trip speeds (20–60 km/h).
   - Builders: `with_seed(seed)`, `with_request_window_hours(hours)`, `with_match_radius(radius)`, `with_trip_duration_cells(min, max)`.
 - **`build_scenario(world, params)`**: inserts `SimulationClock`, `SimTelemetry`, `MatchRadius`, `MatchingAlgorithm` (defaults to `CostBasedMatching`), `RiderCancelConfig`, and `PendingRiders`; generates pending rider data (random `position` and `destination` in `[min_trip_cells, max_trip_cells]` from pickup) and schedules one `RequestInbound` event per rider at a random sim time in `[0, request_window_ms]`; spawns all drivers upfront with random `Position`. Riders are spawned just-in-time when their `RequestInbound` event fires.
+- **`random_destination()`**: Optimized destination selection function that uses different strategies based on trip distance:
+  - **Small radii (≤20 cells)**: Uses `grid_disk()` to generate all candidate cells and filters by distance/bounds (more accurate, efficient for small distances).
+  - **Large radii (>20 cells)**: Uses rejection sampling - randomly samples cells within bounds and checks if distance matches the target range. This avoids generating huge grid disks (e.g., ~33k cells for k=105) which dramatically improves reset performance for scenarios with large trip distances (e.g., 600 riders with 25km max trips). Falls back to a smaller `grid_disk()` if rejection sampling fails.
 - Helper functions: `create_simple_matching()` returns a `SimpleMatching` algorithm, `create_cost_based_matching(eta_weight)` returns a `CostBasedMatching` algorithm with the given ETA weight.
 - Also inserts `SimSnapshotConfig` and `SimSnapshots` for periodic snapshot capture (used by the UI/export).
 
-Large scenarios (e.g. 500 riders, 100 drivers) are run via the **example** only, not in automated tests.
+Large scenarios (e.g. 500 riders, 100 drivers) are run via the **example** only, not in automated tests. The `random_destination()` optimization ensures fast reset times even for large scenarios with long trip distances (e.g., 600 riders over 6 hours with 25km max trips).
 
 ### `sim_core::telemetry`
 

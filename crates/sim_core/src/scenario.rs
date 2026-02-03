@@ -131,6 +131,7 @@ fn random_cell_in_bounds<R: Rng>(rng: &mut R, lat_min: f64, lat_max: f64, lng_mi
 }
 
 /// Pick a random destination within [min_cells, max_cells] H3 distance from pickup.
+/// Uses rejection sampling for efficiency when max_cells is large (avoids generating huge grid disks).
 fn random_destination<R: Rng>(
     rng: &mut R,
     pickup: CellIndex,
@@ -143,7 +144,50 @@ fn random_destination<R: Rng>(
     lng_max: f64,
 ) -> CellIndex {
     let max_cells = max_cells.max(min_cells);
-    let disk = geo.grid_disk(pickup, max_cells);
+    
+    // For small radii, use the original grid_disk approach (more efficient)
+    // For large radii, use rejection sampling (much faster)
+    const GRID_DISK_THRESHOLD: u32 = 20;
+    
+    if max_cells <= GRID_DISK_THRESHOLD {
+        // Original approach: generate disk and filter
+        let disk = geo.grid_disk(pickup, max_cells);
+        let candidates: Vec<CellIndex> = disk
+            .into_iter()
+            .filter(|c| {
+                pickup
+                    .grid_distance(*c)
+                    .map(|d| d >= min_cells as i32 && d <= max_cells as i32)
+                    .unwrap_or(false)
+                    && cell_in_bounds(*c, lat_min, lat_max, lng_min, lng_max)
+            })
+            .collect();
+        if candidates.is_empty() {
+            return pickup;
+        }
+        let i = rng.gen_range(0..candidates.len());
+        return candidates[i];
+    }
+    
+    // Rejection sampling: randomly sample cells within bounds and check distance
+    // This avoids generating huge grid disks (e.g., 33k+ cells for k=105)
+    // For a 25km city with max_trip_km=25, we need ~105 cells distance
+    // The probability of hitting the right distance range is reasonable with enough attempts
+    const MAX_ATTEMPTS: usize = 2000;
+    for _ in 0..MAX_ATTEMPTS {
+        let cell = random_cell_in_bounds(rng, lat_min, lat_max, lng_min, lng_max);
+        if let Ok(distance) = pickup.grid_distance(cell) {
+            let distance_u32 = distance as u32;
+            if distance_u32 >= min_cells && distance_u32 <= max_cells {
+                return cell;
+            }
+        }
+    }
+    
+    // Fallback: if rejection sampling fails (unlikely), try a smaller grid_disk
+    // Use a radius closer to min_cells to reduce the number of cells generated
+    let fallback_radius = (min_cells + max_cells) / 2;
+    let disk = geo.grid_disk(pickup, fallback_radius);
     let candidates: Vec<CellIndex> = disk
         .into_iter()
         .filter(|c| {
@@ -154,11 +198,13 @@ fn random_destination<R: Rng>(
                 && cell_in_bounds(*c, lat_min, lat_max, lng_min, lng_max)
         })
         .collect();
-    if candidates.is_empty() {
-        return pickup;
+    if !candidates.is_empty() {
+        let i = rng.gen_range(0..candidates.len());
+        return candidates[i];
     }
-    let i = rng.gen_range(0..candidates.len());
-    candidates[i]
+    
+    // Last resort: return pickup
+    pickup
 }
 
 fn cell_in_bounds(cell: CellIndex, lat_min: f64, lat_max: f64, lng_min: f64, lng_max: f64) -> bool {

@@ -146,6 +146,8 @@ impl SimUiApp {
         set_clock_epoch_now(&mut world);
         apply_snapshot_interval(&mut world, self.snapshot_interval_ms);
         self.world = world;
+        // Note: Schedule creation is fast (just adding systems), so recreating is fine
+        // The main performance bottleneck was in build_scenario (grid_disk generation)
         self.schedule = simulation_schedule();
         self.steps_executed = 0;
         self.auto_run = false;
