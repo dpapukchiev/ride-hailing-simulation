@@ -104,10 +104,13 @@ mod tests {
                 driver: driver_entity,
                 pickup: cell,
                 dropoff: cell,
+                pickup_distance_km_at_accept: 0.0,
                 requested_at: 0,
                 matched_at: 0,
                 pickup_at: None,
+                pickup_eta_ms: 0,
                 dropoff_at: None,
+                cancelled_at: None,
             })
             .id();
 

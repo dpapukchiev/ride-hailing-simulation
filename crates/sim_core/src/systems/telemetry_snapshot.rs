@@ -53,10 +53,14 @@ pub fn capture_snapshot_system(
             rider: trip.rider,
             driver: trip.driver,
             state: trip.state,
+            pickup_cell: trip.pickup,
+            dropoff_cell: trip.dropoff,
+            pickup_distance_km_at_accept: trip.pickup_distance_km_at_accept,
             requested_at: trip.requested_at,
             matched_at: trip.matched_at,
             pickup_at: trip.pickup_at,
             dropoff_at: trip.dropoff_at,
+            cancelled_at: trip.cancelled_at,
         });
     }
 

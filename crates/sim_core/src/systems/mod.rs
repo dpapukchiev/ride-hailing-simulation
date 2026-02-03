@@ -4,6 +4,7 @@ pub mod simple_matching;
 pub mod match_accepted;
 pub mod driver_decision;
 pub mod movement;
+pub mod pickup_eta_updated;
 pub mod trip_started;
 pub mod trip_completed;
 pub mod telemetry_snapshot;

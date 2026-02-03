@@ -66,10 +66,14 @@ pub struct TripSnapshot {
     pub rider: Entity,
     pub driver: Entity,
     pub state: TripState,
+    pub pickup_cell: CellIndex,
+    pub dropoff_cell: CellIndex,
+    pub pickup_distance_km_at_accept: f64,
     pub requested_at: u64,
     pub matched_at: u64,
     pub pickup_at: Option<u64>,
     pub dropoff_at: Option<u64>,
+    pub cancelled_at: Option<u64>,
 }
 
 /// Aggregated counts at a point in time.

@@ -1,10 +1,11 @@
 use bevy_ecs::prelude::{Commands, Query, Res};
 
-use crate::clock::{CurrentEvent, EventKind, EventSubject};
+use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
 use crate::ecs::{Driver, DriverState, Rider, RiderState, Trip, TripState};
 
 pub fn rider_cancel_system(
     event: Res<CurrentEvent>,
+    clock: Res<SimulationClock>,
     mut commands: Commands,
     mut riders: Query<&mut Rider>,
     mut drivers: Query<&mut Driver>,
@@ -31,6 +32,7 @@ pub fn rider_cancel_system(
     for mut trip in trips.iter_mut() {
         if trip.rider == rider_entity && trip.state == TripState::EnRoute {
             trip.state = TripState::Cancelled;
+            trip.cancelled_at = Some(clock.now());
             canceled = true;
             break;
         }
@@ -92,10 +94,13 @@ mod tests {
                 driver: driver_entity,
                 pickup: cell,
                 dropoff: cell,
+                pickup_distance_km_at_accept: 0.0,
                 requested_at: 0,
                 matched_at: 0,
                 pickup_at: None,
+                pickup_eta_ms: 0,
                 dropoff_at: None,
+                cancelled_at: None,
             })
             .id();
 

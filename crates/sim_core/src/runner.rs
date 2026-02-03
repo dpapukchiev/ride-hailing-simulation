@@ -10,7 +10,8 @@ use bevy_ecs::schedule::apply_deferred;
 use crate::clock::{CurrentEvent, Event, SimulationClock};
 use crate::systems::{
     driver_decision::driver_decision_system, match_accepted::match_accepted_system,
-    movement::movement_system, quote_accepted::quote_accepted_system,
+    movement::movement_system, pickup_eta_updated::pickup_eta_updated_system,
+    quote_accepted::quote_accepted_system,
     rider_cancel::rider_cancel_system,
     request_inbound::request_inbound_system, simple_matching::simple_matching_system,
     telemetry_snapshot::capture_snapshot_system, trip_completed::trip_completed_system,
@@ -83,6 +84,7 @@ pub fn simulation_schedule() -> Schedule {
         driver_decision_system,
         rider_cancel_system,
         movement_system,
+        pickup_eta_updated_system,
         trip_started_system,
         trip_completed_system,
         apply_deferred,

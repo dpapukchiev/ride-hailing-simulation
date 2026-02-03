@@ -22,6 +22,7 @@ pub enum EventKind {
     MatchAccepted,
     DriverDecision,
     MoveStep,
+    PickupEtaUpdated,
     TripStarted,
     TripCompleted,
     RiderCancel,

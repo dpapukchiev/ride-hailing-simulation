@@ -97,10 +97,13 @@ mod tests {
                 driver: driver_entity,
                 pickup: h3o::CellIndex::try_from(0x8a1fb46622dffff).expect("cell"),
                 dropoff: h3o::CellIndex::try_from(0x8a1fb46622dffff).expect("cell"),
+                pickup_distance_km_at_accept: 0.0,
                 requested_at: 0,
                 matched_at: 1,
                 pickup_at: Some(2),
+                pickup_eta_ms: 0,
                 dropoff_at: None,
+                cancelled_at: None,
             })
             .id();
 

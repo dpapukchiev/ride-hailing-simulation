@@ -6,8 +6,11 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use sim_core::ecs::{DriverState, RiderState, TripState};
 use sim_core::runner::{run_next_event, simulation_schedule};
-use sim_core::scenario::{build_scenario, ScenarioParams};
+use sim_core::scenario::{build_scenario, RiderCancelConfig, ScenarioParams};
 use sim_core::telemetry::{SimSnapshotConfig, SimSnapshots, TripSnapshot};
+
+const H3_RES9_CELL_WIDTH_KM: f64 = 0.24;
+const METERS_PER_DEG_LAT: f64 = 111_320.0;
 
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
@@ -34,13 +37,15 @@ struct SimUiApp {
     num_riders: usize,
     num_drivers: usize,
     request_window_hours: u64,
-    match_radius: u32,
-    min_trip_cells: u32,
-    max_trip_cells: u32,
+    match_radius_km: f64,
+    min_trip_km: f64,
+    max_trip_km: f64,
     seed_enabled: bool,
     seed_value: u64,
     grid_enabled: bool,
-    grid_spacing_km: f64,
+    map_size_km: f64,
+    rider_cancel_min_mins: u64,
+    rider_cancel_max_mins: u64,
     show_riders: bool,
     show_drivers: bool,
 }
@@ -50,9 +55,12 @@ impl SimUiApp {
         let num_riders = 50;
         let num_drivers = 50;
         let request_window_hours = 4;
-        let match_radius = 5;
-        let min_trip_cells = 5;
-        let max_trip_cells = 60;
+        let match_radius_km = 1.2;
+        let min_trip_km = 1.2;
+        let max_trip_km = 14.4;
+        let map_size_km = 30.0;
+        let rider_cancel_min_mins = 2;
+        let rider_cancel_max_mins = 40;
         let seed_enabled = true;
         let seed_value = 123;
 
@@ -62,8 +70,8 @@ impl SimUiApp {
             ..Default::default()
         }
         .with_request_window_hours(request_window_hours)
-        .with_match_radius(match_radius)
-        .with_trip_duration_cells(min_trip_cells, max_trip_cells);
+        .with_match_radius(km_to_cells(match_radius_km))
+        .with_trip_duration_cells(km_to_cells(min_trip_km), km_to_cells(max_trip_km));
         if seed_enabled {
             params = params.with_seed(seed_value);
         }
@@ -86,13 +94,15 @@ impl SimUiApp {
             num_riders,
             num_drivers,
             request_window_hours,
-            match_radius,
-            min_trip_cells,
-            max_trip_cells,
+            match_radius_km,
+            min_trip_km,
+            max_trip_km,
             seed_enabled,
             seed_value,
             grid_enabled: true,
-            grid_spacing_km: 2.0,
+            map_size_km,
+            rider_cancel_min_mins,
+            rider_cancel_max_mins,
             show_riders: true,
             show_drivers: true,
         }
@@ -101,6 +111,11 @@ impl SimUiApp {
     fn reset(&mut self) {
         let mut world = World::new();
         build_scenario(&mut world, self.current_params());
+        apply_cancel_config(
+            &mut world,
+            self.rider_cancel_min_mins,
+            self.rider_cancel_max_mins,
+        );
         set_clock_epoch_now(&mut world);
         apply_snapshot_interval(&mut world, self.snapshot_interval_ms);
         self.world = world;
@@ -115,6 +130,11 @@ impl SimUiApp {
     fn start_simulation(&mut self) {
         let mut world = World::new();
         build_scenario(&mut world, self.current_params());
+        apply_cancel_config(
+            &mut world,
+            self.rider_cancel_min_mins,
+            self.rider_cancel_max_mins,
+        );
         set_clock_epoch_now(&mut world);
         apply_snapshot_interval(&mut world, self.snapshot_interval_ms);
         self.world = world;
@@ -133,8 +153,13 @@ impl SimUiApp {
             ..Default::default()
         }
         .with_request_window_hours(self.request_window_hours)
-        .with_match_radius(self.match_radius)
-        .with_trip_duration_cells(self.min_trip_cells, self.max_trip_cells);
+        .with_match_radius(km_to_cells(self.match_radius_km))
+        .with_trip_duration_cells(km_to_cells(self.min_trip_km), km_to_cells(self.max_trip_km));
+        let (lat_min, lat_max, lng_min, lng_max) = bounds_from_km(self.map_size_km);
+        params.lat_min = lat_min;
+        params.lat_max = lat_max;
+        params.lng_min = lng_min;
+        params.lng_max = lng_max;
 
         if self.seed_enabled {
             params = params.with_seed(self.seed_value);
@@ -144,6 +169,15 @@ impl SimUiApp {
 
     fn run_steps(&mut self, steps: usize) {
         for _ in 0..steps {
+            if !run_next_event(&mut self.world, &mut self.schedule) {
+                break;
+            }
+            self.steps_executed += 1;
+        }
+    }
+
+    fn run_until_done(&mut self) {
+        loop {
             if !run_next_event(&mut self.world, &mut self.schedule) {
                 break;
             }
@@ -224,6 +258,13 @@ impl eframe::App for SimUiApp {
                     }
                     self.run_steps(100);
                 }
+                if ui.button("Run to end").clicked() {
+                    if !self.started {
+                        self.start_simulation();
+                    }
+                    self.auto_run = false;
+                    self.run_until_done();
+                }
                 if ui.button("Reset").clicked() {
                     self.reset();
                 }
@@ -248,10 +289,6 @@ impl eframe::App for SimUiApp {
                 ui.checkbox(&mut self.show_riders, "Riders");
                 ui.checkbox(&mut self.show_drivers, "Drivers");
                 ui.checkbox(&mut self.grid_enabled, "Grid");
-                ui.add(
-                    egui::Slider::new(&mut self.grid_spacing_km, 0.5..=10.0)
-                        .text("Grid km"),
-                );
                 ui.label(format!("Steps executed: {}", self.steps_executed));
             });
 
@@ -298,22 +335,51 @@ impl eframe::App for SimUiApp {
                             can_edit,
                             egui::DragValue::new(&mut self.request_window_hours).range(1..=24),
                         );
-                        ui.label("Match radius (H3 cells ~0.1 km^2, ~240m wide)");
+                        ui.label("Match radius (km, ~0.24 km per H3 cell)");
                         ui.add_enabled(
                             can_edit,
-                            egui::DragValue::new(&mut self.match_radius).range(0..=50),
+                            egui::DragValue::new(&mut self.match_radius_km)
+                                .range(0.0..=20.0)
+                                .speed(0.1),
                         );
                     });
                     ui.horizontal(|ui| {
-                        ui.label("Trip cells");
+                        ui.label("Map size (km)");
                         ui.add_enabled(
                             can_edit,
-                            egui::DragValue::new(&mut self.min_trip_cells).range(1..=200),
+                            egui::DragValue::new(&mut self.map_size_km)
+                                .range(1.0..=200.0)
+                                .speed(1.0),
+                        );
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Trip length (km)");
+                        ui.add_enabled(
+                            can_edit,
+                            egui::DragValue::new(&mut self.min_trip_km)
+                                .range(0.1..=100.0)
+                                .speed(0.1),
                         );
                         ui.label("to");
                         ui.add_enabled(
                             can_edit,
-                            egui::DragValue::new(&mut self.max_trip_cells).range(1..=500),
+                            egui::DragValue::new(&mut self.max_trip_km)
+                                .range(0.1..=200.0)
+                                .speed(0.1),
+                        );
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Cancel wait (mins)");
+                        ui.add_enabled(
+                            can_edit,
+                            egui::DragValue::new(&mut self.rider_cancel_min_mins)
+                                .range(1..=600),
+                        );
+                        ui.label("to");
+                        ui.add_enabled(
+                            can_edit,
+                            egui::DragValue::new(&mut self.rider_cancel_max_mins)
+                                .range(1..=600),
                         );
                     });
                     ui.horizontal(|ui| {
@@ -333,6 +399,7 @@ impl eframe::App for SimUiApp {
                 waiting_riders_points,
                 idle_drivers_points,
                 cancelled_riders_points,
+                completed_trips_points,
                 cancelled_trips_points,
             ) = if let Some(snapshots) = self.world.get_resource::<SimSnapshots>() {
                 let latest = snapshots.snapshots.back().cloned();
@@ -345,6 +412,7 @@ impl eframe::App for SimUiApp {
                 let mut waiting = Vec::new();
                 let mut idle = Vec::new();
                 let mut cancelled_riders = Vec::new();
+                let mut completed_trips = Vec::new();
                 let mut cancelled_trips = Vec::new();
                 for snapshot in snapshots.snapshots.iter() {
                     let real_ms = sim_epoch_ms.saturating_add(snapshot.timestamp_ms as i64);
@@ -355,6 +423,7 @@ impl eframe::App for SimUiApp {
                     waiting.push([t, snapshot.counts.riders_waiting as f64]);
                     idle.push([t, snapshot.counts.drivers_idle as f64]);
                     cancelled_riders.push([t, snapshot.counts.riders_cancelled as f64]);
+                    completed_trips.push([t, snapshot.counts.trips_completed as f64]);
                     cancelled_trips.push([t, snapshot.counts.trips_cancelled as f64]);
                 }
                 (
@@ -363,6 +432,7 @@ impl eframe::App for SimUiApp {
                     waiting,
                     idle,
                     cancelled_riders,
+                    completed_trips,
                     cancelled_trips,
                 )
             } else {
@@ -395,7 +465,8 @@ impl eframe::App for SimUiApp {
                         params.lng_max,
                     );
                     if self.grid_enabled {
-                        draw_grid(&painter, &bounds, map_rect, self.grid_spacing_km);
+                        let spacing_km = (self.map_size_km / 10.0).clamp(0.5, 10.0);
+                        draw_grid(&painter, &bounds, map_rect, spacing_km);
                     }
                     if self.show_riders {
                         for rider in &snapshot.riders {
@@ -442,6 +513,10 @@ impl eframe::App for SimUiApp {
                                 .color(chart_color_cancelled_riders()),
                         );
                         plot_ui.line(
+                            Line::new("Completed trips", completed_trips_points.clone())
+                                .color(chart_color_completed_trips()),
+                        );
+                        plot_ui.line(
                             Line::new("Cancelled trips", cancelled_trips_points.clone())
                                 .color(chart_color_cancelled_trips()),
                         );
@@ -451,12 +526,12 @@ impl eframe::App for SimUiApp {
             ui.add_space(8.0);
 
             if let Some(snapshot) = latest_snapshot.as_ref() {
-                let sim_done = self
+                let sim_epoch_ms = self
                     .world
                     .get_resource::<sim_core::clock::SimulationClock>()
-                    .map(|clock| clock.is_empty())
-                    .unwrap_or(false);
-                render_trip_table_all(ui, snapshot.trips.as_slice(), sim_done);
+                    .map(|clock| clock.epoch_ms())
+                    .unwrap_or(0);
+                render_trip_table_all(ui, snapshot.trips.as_slice(), sim_epoch_ms);
             } else {
                 ui.label("Waiting for first snapshot...");
             }
@@ -579,6 +654,7 @@ fn render_metrics_legend(ui: &mut egui::Ui) {
         legend_item(ui, chart_color_waiting_riders(), "Waiting riders");
         legend_item(ui, chart_color_idle_drivers(), "Idle drivers");
         legend_item(ui, chart_color_cancelled_riders(), "Cancelled riders");
+        legend_item(ui, chart_color_completed_trips(), "Completed trips");
         legend_item(ui, chart_color_cancelled_trips(), "Cancelled trips");
     });
 }
@@ -618,6 +694,10 @@ fn chart_color_idle_drivers() -> Color32 {
 
 fn chart_color_cancelled_riders() -> Color32 {
     Color32::from_rgb(200, 80, 80)
+}
+
+fn chart_color_completed_trips() -> Color32 {
+    Color32::from_rgb(160, 200, 80)
 }
 
 fn chart_color_cancelled_trips() -> Color32 {
@@ -680,7 +760,16 @@ fn apply_snapshot_interval(world: &mut World, interval_ms: u64) {
     }
 }
 
-fn render_trip_table_all(ui: &mut egui::Ui, trips: &[TripSnapshot], sim_done: bool) {
+fn apply_cancel_config(world: &mut World, min_mins: u64, max_mins: u64) {
+    if let Some(mut config) = world.get_resource_mut::<RiderCancelConfig>() {
+        let min_secs = min_mins.saturating_mul(60);
+        let max_secs = max_mins.saturating_mul(60);
+        config.min_wait_secs = min_secs;
+        config.max_wait_secs = max_secs.max(min_secs);
+    }
+}
+
+fn render_trip_table_all(ui: &mut egui::Ui, trips: &[TripSnapshot], sim_epoch_ms: i64) {
     ui.group(|ui| {
         let available_width = ui.available_width();
         ui.set_min_width(available_width);
@@ -688,29 +777,7 @@ fn render_trip_table_all(ui: &mut egui::Ui, trips: &[TripSnapshot], sim_done: bo
         ui.label("Live table updates as trip state changes.");
 
         let mut rows: Vec<&TripSnapshot> = trips.iter().collect();
-        if sim_done {
-            rows.sort_by(|a, b| {
-                let a_completed = a.dropoff_at.unwrap_or(0);
-                let b_completed = b.dropoff_at.unwrap_or(0);
-                let a_started = a.pickup_at.unwrap_or(0);
-                let b_started = b.pickup_at.unwrap_or(0);
-                b_completed
-                    .cmp(&a_completed)
-                    .then_with(|| b_started.cmp(&a_started))
-            });
-        } else {
-            rows.sort_by(|a, b| {
-                let a_last = a
-                    .dropoff_at
-                    .or(a.pickup_at)
-                    .unwrap_or(a.matched_at.max(a.requested_at));
-                let b_last = b
-                    .dropoff_at
-                    .or(b.pickup_at)
-                    .unwrap_or(b.matched_at.max(b.requested_at));
-                b_last.cmp(&a_last)
-            });
-        }
+        rows.sort_by_key(|trip| trip.requested_at);
 
         render_trip_table_section(
             ui,
@@ -718,6 +785,7 @@ fn render_trip_table_all(ui: &mut egui::Ui, trips: &[TripSnapshot], sim_done: bo
             &rows,
             available_width,
             280.0,
+            sim_epoch_ms,
         );
     });
 }
@@ -728,6 +796,7 @@ fn render_trip_table_section(
     rows: &[&TripSnapshot],
     available_width: f32,
     max_height: f32,
+    sim_epoch_ms: i64,
 ) {
     egui::ScrollArea::vertical()
         .id_salt(format!("{}_scroll", table_id))
@@ -736,17 +805,20 @@ fn render_trip_table_section(
         .show(ui, |ui| {
             ui.set_min_width(available_width);
             egui::Grid::new(table_id)
-                .min_col_width(available_width / 8.0)
+                .min_col_width(available_width / 11.0)
                 .striped(true)
                 .show(ui, |ui| {
                     ui.label("Trip");
                     ui.label("Rider");
                     ui.label("Driver");
                     ui.label("State");
+                    ui.label("Pickup km (accept)");
+                    ui.label("Distance km");
                     ui.label("Requested");
                     ui.label("Matched");
                     ui.label("Started");
                     ui.label("Completed");
+                    ui.label("Cancelled");
                     ui.end_row();
 
                     for trip in rows {
@@ -754,10 +826,13 @@ fn render_trip_table_section(
                         ui.label(trip.rider.to_bits().to_string());
                         ui.label(trip.driver.to_bits().to_string());
                         ui.label(trip_state_label(trip.state));
-                        ui.label(format_hms_from_ms(trip.requested_at));
-                        ui.label(format_hms_from_ms(trip.matched_at));
-                        ui.label(format_optional_ms(trip.pickup_at));
-                        ui.label(format_optional_ms(trip.dropoff_at));
+                        ui.label(format_distance_km(trip.pickup_distance_km_at_accept));
+                        ui.label(format_trip_distance_km(trip.pickup_cell, trip.dropoff_cell));
+                        ui.label(format_sim_datetime_from_ms(sim_epoch_ms, trip.requested_at));
+                        ui.label(format_sim_datetime_from_ms(sim_epoch_ms, trip.matched_at));
+                        ui.label(format_optional_sim_datetime(sim_epoch_ms, trip.pickup_at));
+                        ui.label(format_optional_sim_datetime(sim_epoch_ms, trip.dropoff_at));
+                        ui.label(format_optional_sim_datetime(sim_epoch_ms, trip.cancelled_at));
                         ui.end_row();
                     }
                 });
@@ -773,6 +848,60 @@ fn trip_state_label(state: TripState) -> &'static str {
     }
 }
 
-fn format_optional_ms(ms: Option<u64>) -> String {
-    ms.map(format_hms_from_ms).unwrap_or_else(|| "-".to_string())
+fn km_to_cells(km: f64) -> u32 {
+    if km <= 0.0 {
+        return 0;
+    }
+    (km / H3_RES9_CELL_WIDTH_KM).ceil().max(1.0) as u32
+}
+
+fn bounds_from_km(size_km: f64) -> (f64, f64, f64, f64) {
+    let clamped_km = size_km.max(1.0);
+    let half_km = clamped_km * 0.5;
+    let defaults = ScenarioParams::default();
+    let center_lat = 0.5 * (defaults.lat_min + defaults.lat_max);
+    let center_lng = 0.5 * (defaults.lng_min + defaults.lng_max);
+    let lat_delta = (half_km * 1000.0) / METERS_PER_DEG_LAT;
+    let lng_delta =
+        (half_km * 1000.0) / (METERS_PER_DEG_LAT * center_lat.to_radians().cos().max(0.1));
+    (
+        center_lat - lat_delta,
+        center_lat + lat_delta,
+        center_lng - lng_delta,
+        center_lng + lng_delta,
+    )
+}
+
+fn format_sim_datetime_from_ms(sim_epoch_ms: i64, sim_ms: u64) -> String {
+    let real_ms = sim_epoch_ms.saturating_add(sim_ms as i64).max(0) as u64;
+    format_datetime_from_unix_ms(real_ms)
+}
+
+fn format_optional_sim_datetime(sim_epoch_ms: i64, sim_ms: Option<u64>) -> String {
+    sim_ms
+        .map(|value| format_sim_datetime_from_ms(sim_epoch_ms, value))
+        .unwrap_or_else(|| "-".to_string())
+}
+
+fn format_trip_distance_km(pickup: CellIndex, dropoff: CellIndex) -> String {
+    let distance_km = distance_km_between_cells(pickup, dropoff);
+    format_distance_km(distance_km)
+}
+
+fn format_distance_km(distance_km: f64) -> String {
+    format!("{:.2} km", distance_km)
+}
+
+fn distance_km_between_cells(a: CellIndex, b: CellIndex) -> f64 {
+    let a: LatLng = a.into();
+    let b: LatLng = b.into();
+    let (lat1, lon1) = (a.lat().to_radians(), a.lng().to_radians());
+    let (lat2, lon2) = (b.lat().to_radians(), b.lng().to_radians());
+    let dlat = lat2 - lat1;
+    let dlon = lon2 - lon1;
+    let sin_dlat = (dlat * 0.5).sin();
+    let sin_dlon = (dlon * 0.5).sin();
+    let h = sin_dlat * sin_dlat + lat1.cos() * lat2.cos() * sin_dlon * sin_dlon;
+    let c = 2.0 * h.sqrt().atan2((1.0 - h).sqrt());
+    6371.0 * c
 }

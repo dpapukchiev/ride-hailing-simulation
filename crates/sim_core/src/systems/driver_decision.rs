@@ -1,9 +1,6 @@
 use bevy_ecs::prelude::{Commands, Query, Res, ResMut};
-use rand::Rng;
-
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
 use crate::ecs::{Driver, DriverState, Position, Rider, RiderState, Trip, TripState};
-use crate::scenario::RiderCancelConfig;
 
 fn logit_accepts(score: f64) -> bool {
     let probability = 1.0 / (1.0 + (-score).exp());
@@ -22,9 +19,8 @@ pub fn driver_decision_system(
     mut clock: ResMut<SimulationClock>,
     event: Res<CurrentEvent>,
     mut commands: Commands,
-    mut drivers: Query<&mut Driver>,
+    mut drivers: Query<(&mut Driver, &Position)>,
     riders: Query<(&Rider, &Position)>,
-    cancel_config: Option<Res<RiderCancelConfig>>,
 ) {
     if event.0.kind != EventKind::DriverDecision {
         return;
@@ -33,7 +29,7 @@ pub fn driver_decision_system(
     let Some(EventSubject::Driver(driver_entity)) = event.0.subject else {
         return;
     };
-    let Ok(mut driver) = drivers.get_mut(driver_entity) else {
+    let Ok((mut driver, driver_pos)) = drivers.get_mut(driver_entity) else {
         return;
     };
     if driver.state != DriverState::Evaluating {
@@ -67,6 +63,7 @@ pub fn driver_decision_system(
         }
 
         let matched_at = clock.now();
+        let pickup_distance_km_at_accept = distance_km_between_cells(driver_pos.0, pickup);
         driver.state = DriverState::EnRoute;
         let trip_entity = commands
             .spawn(Trip {
@@ -75,31 +72,35 @@ pub fn driver_decision_system(
                 driver: driver_entity,
                 pickup,
                 dropoff,
+                pickup_distance_km_at_accept,
                 requested_at,
                 matched_at,
                 pickup_at: None,
+                pickup_eta_ms: 0,
                 dropoff_at: None,
+                cancelled_at: None,
             })
             .id();
 
         clock.schedule_in_secs(1, EventKind::MoveStep, Some(EventSubject::Trip(trip_entity)));
-        let config = cancel_config
-            .as_deref()
-            .copied()
-            .unwrap_or_default();
-        let min_wait_secs = config.min_wait_secs;
-        let max_wait_secs = config.max_wait_secs.max(min_wait_secs);
-        let mut rng = rand::thread_rng();
-        let wait_secs = rng.gen_range(min_wait_secs..=max_wait_secs);
-        clock.schedule_in_secs(
-            wait_secs,
-            EventKind::RiderCancel,
-            Some(EventSubject::Rider(rider_entity)),
-        );
     } else {
         driver.state = DriverState::Idle;
         driver.matched_rider = None;
     }
+}
+
+fn distance_km_between_cells(a: h3o::CellIndex, b: h3o::CellIndex) -> f64 {
+    let a: h3o::LatLng = a.into();
+    let b: h3o::LatLng = b.into();
+    let (lat1, lon1) = (a.lat().to_radians(), a.lng().to_radians());
+    let (lat2, lon2) = (b.lat().to_radians(), b.lng().to_radians());
+    let dlat = lat2 - lat1;
+    let dlon = lon2 - lon1;
+    let sin_dlat = (dlat * 0.5).sin();
+    let sin_dlon = (dlon * 0.5).sin();
+    let h = sin_dlat * sin_dlat + lat1.cos() * lat2.cos() * sin_dlon * sin_dlon;
+    let c = 2.0 * h.sqrt().atan2((1.0 - h).sqrt());
+    6371.0 * c
 }
 
 #[cfg(test)]
@@ -127,10 +128,13 @@ mod tests {
             ))
             .id();
         let driver_entity = world
-            .spawn(Driver {
-            state: DriverState::Evaluating,
-            matched_rider: Some(rider_entity),
-        })
+            .spawn((
+                Driver {
+                    state: DriverState::Evaluating,
+                    matched_rider: Some(rider_entity),
+                },
+                Position(cell),
+            ))
             .id();
         world
             .resource_mut::<SimulationClock>()

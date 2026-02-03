@@ -15,7 +15,7 @@ fn eta_ms(distance: i32) -> u64 {
 pub fn movement_system(
     mut clock: ResMut<SimulationClock>,
     event: Res<CurrentEvent>,
-    trips: Query<&Trip>,
+    mut trips: Query<&mut Trip>,
     mut drivers: Query<(&mut Driver, &mut Position)>,
 ) {
     if event.0.kind != EventKind::MoveStep {
@@ -52,6 +52,11 @@ pub fn movement_system(
 
     let distance = driver_pos.0.grid_distance(target_cell).unwrap_or(0);
     if distance <= 0 {
+        if is_en_route {
+            if let Ok(mut trip) = trips.get_mut(trip_entity) {
+                trip.pickup_eta_ms = 0;
+            }
+        }
         let kind = if is_en_route {
             EventKind::TripStarted
         } else {
@@ -70,6 +75,12 @@ pub fn movement_system(
     }
 
     let remaining = driver_pos.0.grid_distance(target_cell).unwrap_or(0);
+    if is_en_route {
+        if let Ok(mut trip) = trips.get_mut(trip_entity) {
+            trip.pickup_eta_ms = eta_ms(remaining);
+        }
+        clock.schedule_in(0, EventKind::PickupEtaUpdated, Some(EventSubject::Trip(trip_entity)));
+    }
     if remaining == 0 {
         let kind = if is_en_route {
             EventKind::TripStarted
@@ -128,10 +139,13 @@ mod tests {
                 driver: driver_entity,
                 pickup: neighbor,
                 dropoff: neighbor,
+                pickup_distance_km_at_accept: 0.0,
                 requested_at: 0,
                 matched_at: 0,
                 pickup_at: None,
+                pickup_eta_ms: 0,
                 dropoff_at: None,
+                cancelled_at: None,
             })
             .id();
 
@@ -153,6 +167,14 @@ mod tests {
             pos.0
         };
         assert_eq!(driver_position, neighbor);
+
+        let eta_event = world
+            .resource_mut::<SimulationClock>()
+            .pop_next()
+            .expect("pickup eta updated event");
+        assert_eq!(eta_event.kind, EventKind::PickupEtaUpdated);
+        assert_eq!(eta_event.timestamp, 1000);
+        assert_eq!(eta_event.subject, Some(EventSubject::Trip(trip_entity)));
 
         let next_event = world
             .resource_mut::<SimulationClock>()

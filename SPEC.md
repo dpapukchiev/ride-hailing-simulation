@@ -262,8 +262,7 @@ System: `driver_decision_system`
     - Accept: `Evaluating` → `EnRoute`, **spawns a `Trip` entity** with `pickup` =
       rider’s position, `dropoff` = rider’s `destination` or a neighbor of pickup,
       `requested_at` = rider’s `requested_at`, `matched_at` = clock.now(), `pickup_at` = None;
-      schedules `MoveStep` 1 second from now (`schedule_in_secs(1, ...)`) for that trip (`subject: Trip(trip_entity)`),
-      and schedules `RiderCancel` for the matched rider after a randomized wait window (`RiderCancelConfig`).
+      schedules `MoveStep` 1 second from now (`schedule_in_secs(1, ...)`) for that trip (`subject: Trip(trip_entity)`).
     - Reject: `Evaluating` → `Idle` and clears `matched_rider`.
 
 ### `sim_core::systems::rider_cancel`
@@ -283,12 +282,24 @@ System: `movement_system`
 
 - Reacts to `CurrentEvent`.
 - On `EventKind::MoveStep` with subject `Trip(trip_entity)`:
-  - **EnRoute**: moves the trip’s driver one H3 hop toward `trip.pickup` (rider cell).
-    If still en route, reschedules `MoveStep` with `schedule_in(eta_ms(remaining), ...)`; when driver
-    reaches pickup, schedules `TripStarted` 1 second from now (`schedule_in_secs(1, ...)`).
+  - **EnRoute**: moves the trip’s driver one H3 hop toward `trip.pickup` (rider cell), updates
+    `trip.pickup_eta_ms` based on remaining distance, and emits `PickupEtaUpdated` for the trip.
+    If still en route, reschedules `MoveStep` with `schedule_in(eta_ms(remaining), ...)`; when
+    driver reaches pickup, schedules `TripStarted` 1 second from now (`schedule_in_secs(1, ...)`).
   - **OnTrip**: moves the trip’s driver one H3 hop toward `trip.dropoff`. If still en route,
     reschedules `MoveStep` with `schedule_in(eta_ms(remaining), ...)`; when driver reaches dropoff,
     schedules `TripCompleted` 1 second from now (`schedule_in_secs(1, ...)`).
+
+### `sim_core::systems::pickup_eta_updated`
+
+System: `pickup_eta_updated_system`
+
+- Reacts to `CurrentEvent`.
+- On `EventKind::PickupEtaUpdated` with subject `Trip(trip_entity)`:
+  - If the trip is `EnRoute` and the rider is still `Waiting`, compares projected pickup time
+    (`now + trip.pickup_eta_ms`) to the rider’s wait window (`RiderCancelConfig`).
+  - If the projected pickup exceeds the wait deadline (after min wait), cancels the trip, marks
+    the rider cancelled, despawns the rider, and returns the driver to `Idle`.
   - **Cancelled/Completed**: no-op.
 - ETA in ms: `eta_ms(distance)` — at least 1 second (`ONE_SEC_MS`); otherwise distance × 1 min per H3 cell (`ONE_MIN_MS`). Used for `schedule_in(eta_ms(remaining), ...)`.
 
@@ -370,10 +381,17 @@ All per-system unit tests emulate the runner by popping one event, inserting
   and `agent_positions.parquet`.
 - **`sim_ui`** (`cargo run -p sim_ui`): Native UI that runs the scenario in-process,
   renders riders/drivers on a map with icons and state-based colors, and charts for
-  active trips, waiting riders, and idle drivers. The UI starts paused, allows
+  active trips, completed trips, waiting riders, and idle drivers. The UI starts paused, allows
   scenario parameter edits before start, shows sim/wall-clock datetimes, overlays
-  a metric grid for scale, and includes a live trip table sorted by completion
-  when the simulation ends. A real-time clock speed selector (2x–50x) controls
+  a metric grid for scale, and includes a live trip table with pickup distance at
+  driver acceptance (km), pickup-to-dropoff distance (km), and cancellation time,
+  with timestamps shown as simulation datetimes sorted by request time (ascending). Controls include
+  step buttons and a one-click "Run to end". Match radius, trip length, and map size inputs are
+  configured in kilometers and converted to H3 cell distances (resolution 9, ~0.24 km per cell);
+  the map size defines the scenario bounds used for spawning and destination sampling, so it is
+  only editable before the simulation starts, and the grid overlay adapts to the map size. Rider
+  cancellation wait windows (min/max minutes) are configurable before start.
+  to complete the simulation; a real-time clock speed selector (2x–50x) controls
   simulation playback.
 
 ## Known Gaps (Not Implemented Yet)

@@ -122,7 +122,11 @@ fn random_destination<R: Rng>(
     geo: &GeoIndex,
     min_cells: u32,
     max_cells: u32,
-) -> Option<CellIndex> {
+    lat_min: f64,
+    lat_max: f64,
+    lng_min: f64,
+    lng_max: f64,
+) -> CellIndex {
     let max_cells = max_cells.max(min_cells);
     let disk = geo.grid_disk(pickup, max_cells);
     let candidates: Vec<CellIndex> = disk
@@ -132,13 +136,21 @@ fn random_destination<R: Rng>(
                 .grid_distance(*c)
                 .map(|d| d >= min_cells as i32 && d <= max_cells as i32)
                 .unwrap_or(false)
+                && cell_in_bounds(*c, lat_min, lat_max, lng_min, lng_max)
         })
         .collect();
     if candidates.is_empty() {
-        return None;
+        return pickup;
     }
     let i = rng.gen_range(0..candidates.len());
-    Some(candidates[i])
+    candidates[i]
+}
+
+fn cell_in_bounds(cell: CellIndex, lat_min: f64, lat_max: f64, lng_min: f64, lng_max: f64) -> bool {
+    let coord: LatLng = cell.into();
+    let lat = coord.lat();
+    let lng = coord.lng();
+    lat >= lat_min && lat <= lat_max && lng >= lng_min && lng <= lng_max
 }
 
 /// Populates `world` with clock, telemetry, riders, drivers, and scheduled RequestInbound events.
@@ -169,14 +181,24 @@ pub fn build_scenario(world: &mut World, params: ScenarioParams) {
 
     for _ in 0..params.num_riders {
         let cell = random_cell_in_bounds(&mut rng, lat_min, lat_max, lng_min, lng_max);
-        let destination = random_destination(&mut rng, cell, &geo, min_trip, max_trip);
+        let destination = random_destination(
+            &mut rng,
+            cell,
+            &geo,
+            min_trip,
+            max_trip,
+            lat_min,
+            lat_max,
+            lng_min,
+            lng_max,
+        );
 
         let entity = world
             .spawn((
                 Rider {
                     state: RiderState::Requesting,
                     matched_driver: None,
-                    destination,
+                    destination: Some(destination),
                     requested_at: None,
                 },
                 Position(cell),
