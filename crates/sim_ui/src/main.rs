@@ -986,8 +986,11 @@ fn apply_cancel_config(world: &mut World, min_mins: u64, max_mins: u64) {
     if let Some(mut config) = world.get_resource_mut::<RiderCancelConfig>() {
         let min_secs = min_mins.saturating_mul(60);
         let max_secs = max_mins.saturating_mul(60);
+        // Preserve the seed when updating bounds
+        let seed = config.seed;
         config.min_wait_secs = min_secs;
         config.max_wait_secs = max_secs.max(min_secs);
+        config.seed = seed;
     }
 }
 

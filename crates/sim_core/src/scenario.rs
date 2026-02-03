@@ -27,10 +27,13 @@ const DEFAULT_REQUEST_WINDOW_MS: u64 = 60 * 60 * 1000;
 pub struct MatchRadius(pub u32);
 
 /// Rider cancel window while waiting for pickup (seconds).
+/// Uses a uniform distribution between min_wait_secs and max_wait_secs.
 #[derive(Debug, Clone, Copy, Resource)]
 pub struct RiderCancelConfig {
     pub min_wait_secs: u64,
     pub max_wait_secs: u64,
+    /// Seed for RNG (for reproducibility).
+    pub seed: u64,
 }
 
 impl Default for RiderCancelConfig {
@@ -38,6 +41,7 @@ impl Default for RiderCancelConfig {
         Self {
             min_wait_secs: 120,
             max_wait_secs: 2400,
+            seed: 0,
         }
     }
 }
@@ -264,7 +268,12 @@ pub fn build_scenario(world: &mut World, params: ScenarioParams) {
     world.insert_resource(SimSnapshotConfig::default());
     world.insert_resource(SimSnapshots::default());
     world.insert_resource(MatchRadius(params.match_radius));
-    world.insert_resource(RiderCancelConfig::default());
+    let seed = params.seed.unwrap_or(0);
+    world.insert_resource(RiderCancelConfig {
+        min_wait_secs: 120,
+        max_wait_secs: 2400,
+        seed: seed.wrapping_add(0xcafe_babe), // Use a different seed offset for cancellation
+    });
     world.insert_resource(SpeedModel::new(params.seed.map(|seed| seed ^ 0x5eed_cafe)));
     // Default to cost-based matching with weight 0.1
     world.insert_resource(create_cost_based_matching(0.1));

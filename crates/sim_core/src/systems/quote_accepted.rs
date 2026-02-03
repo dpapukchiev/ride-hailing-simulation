@@ -1,4 +1,6 @@
 use bevy_ecs::prelude::{Query, Res, ResMut};
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
 use crate::ecs::{Rider, RiderState};
@@ -27,8 +29,16 @@ pub fn quote_accepted_system(
     clock.schedule_in_secs(1, EventKind::TryMatch, Some(EventSubject::Rider(rider_entity)));
 
     let config = cancel_config.as_deref().copied().unwrap_or_default();
+    let min_wait_secs = config.min_wait_secs;
     let max_wait_secs = config.max_wait_secs.max(config.min_wait_secs);
-    clock.schedule_in_secs(max_wait_secs, EventKind::RiderCancel, Some(EventSubject::Rider(rider_entity)));
+    
+    // Sample cancellation time from uniform distribution between min and max
+    // Use rider entity ID to ensure each rider gets a different sample even with the same seed
+    let seed = config.seed.wrapping_add(rider_entity.index() as u64);
+    let mut rng = StdRng::seed_from_u64(seed);
+    let wait_secs = rng.gen_range(min_wait_secs..=max_wait_secs);
+    
+    clock.schedule_in_secs(wait_secs, EventKind::RiderCancel, Some(EventSubject::Rider(rider_entity)));
 }
 
 #[cfg(test)]
@@ -87,7 +97,19 @@ mod tests {
             .pop_next()
             .expect("rider cancel event");
         assert_eq!(cancel_event.kind, EventKind::RiderCancel);
-        assert_eq!(cancel_event.timestamp, 2_401_000);
+        // Cancellation time should be sampled from uniform distribution between min and max
+        // Default config: min_wait_secs=120, max_wait_secs=2400
+        // Quote accepted at 1000ms, so cancellation should be between 1000+120*1000 and 1000+2400*1000
+        let config = world.resource::<RiderCancelConfig>();
+        let min_timestamp = 1000 + config.min_wait_secs * 1000;
+        let max_timestamp = 1000 + config.max_wait_secs * 1000;
+        assert!(
+            cancel_event.timestamp >= min_timestamp && cancel_event.timestamp <= max_timestamp,
+            "Cancellation timestamp {} should be between {} and {}",
+            cancel_event.timestamp,
+            min_timestamp,
+            max_timestamp
+        );
         assert_eq!(cancel_event.subject, Some(EventSubject::Rider(rider_entity)));
     }
 }
