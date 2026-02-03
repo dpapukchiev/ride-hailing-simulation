@@ -6,7 +6,7 @@
 
 - Story: As a dispatcher, I can use a cost function (distance, ETA) to score
   pairings and select the best match instead of the first available driver.
-  Status: In Progress
+  Status: Done
 
 - Story: As a dispatcher, I can batch pending requests every N seconds and run
   a global matching pass to reduce total ETA.

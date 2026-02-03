@@ -133,11 +133,13 @@ cargo run -p sim_ui
 ```
 
 The UI provides:
-- Real-time map visualization
-- Interactive parameter adjustment
-- Time-series charts
-- Trip detail tables
-- Playback controls (step, run, pause, speed multiplier)
+- Real-time map visualization with state-based coloring and optional grid overlay
+- Interactive parameter adjustment (riders, drivers, match radius, trip length, cancellation windows, start time, matching algorithm)
+- Time-series charts (active trips, waiting riders, idle drivers, cancellations, abandoned quotes, completed/cancelled trips)
+- Trip detail table (all trips with timestamps, distances, and states)
+- Playback controls (start, step, step 100, run/pause, run to end, reset, speed multiplier 10x-200x)
+- Fleet metrics (utilization, earnings distributions, fatigue tracking)
+- Run outcomes (conversion rates, timing distributions with percentiles)
 
 ### Example: Custom Scenario
 

@@ -1,11 +1,12 @@
 ## Riders
 
-- Story: As a rider, I move through Requesting → Browsing → Waiting → InTransit
+- Story: As a rider, I move through Browsing → Waiting → InTransit
   and complete or cancel the trip.
   Status: Done
 
 - Story: As a rider, I cancel if the projected pickup time exceeds my wait
-  window.
+  window. The system continuously updates pickup ETAs as drivers move, and I
+  cancel if the projected pickup time (now + ETA) exceeds my wait deadline.
   Status: Done
 
 - Story: As a rider, I decide to book based on price elasticity and my maximum
