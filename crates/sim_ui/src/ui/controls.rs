@@ -2,6 +2,8 @@
 
 use eframe::egui;
 
+use sim_core::telemetry::{CompletedTripRecord, SimSnapshots, SimTelemetry};
+
 use crate::app::{MatchingAlgorithmType, SimUiApp};
 use crate::ui::utils::{datetime_from_unix_ms, format_datetime_from_unix_ms, format_hms_from_ms, now_unix_ms};
 
@@ -96,6 +98,167 @@ pub fn render_control_panel(ui: &mut egui::Ui, app: &mut SimUiApp) {
         .show(ui, |ui| {
             render_scenario_parameters(ui, app);
         });
+
+    egui::CollapsingHeader::new("Run outcomes")
+        .default_open(true)
+        .show(ui, |ui| {
+            render_run_outcomes(ui, app);
+        });
+}
+
+/// Render run outcome counters and optional completed-trip timing stats from SimTelemetry.
+fn render_run_outcomes(ui: &mut egui::Ui, app: &SimUiApp) {
+    let telemetry = match app.world.get_resource::<SimTelemetry>() {
+        Some(t) => t,
+        None => {
+            ui.label("—");
+            return;
+        }
+    };
+
+    // Outcome counters: 3 columns
+    let total_resolved = telemetry.riders_completed_total
+        .saturating_add(telemetry.riders_cancelled_total)
+        .saturating_add(telemetry.riders_abandoned_quote_total);
+    let conversion_pct = if total_resolved > 0 {
+        (telemetry.riders_completed_total as f64 / total_resolved as f64) * 100.0
+    } else {
+        0.0
+    };
+
+    ui.columns(3, |columns| {
+        columns[0].vertical(|ui| {
+            ui.label("Riders completed");
+            ui.label(telemetry.riders_completed_total.to_string());
+            ui.label("Trips completed");
+            ui.label(telemetry.completed_trips.len().to_string());
+        });
+        columns[1].vertical(|ui| {
+            ui.label("Riders cancelled");
+            ui.label(telemetry.riders_cancelled_total.to_string());
+            ui.label("Abandoned (quote)");
+            ui.label(telemetry.riders_abandoned_quote_total.to_string());
+        });
+        columns[2].vertical(|ui| {
+            ui.label("Total resolved");
+            ui.label(total_resolved.to_string());
+            ui.label("Conversion %");
+            ui.label(format!("{:.1}%", conversion_pct));
+        });
+    });
+
+    // Current state (from latest snapshot)
+    if let Some(snapshots) = app.world.get_resource::<SimSnapshots>() {
+        if let Some(latest) = snapshots.snapshots.back() {
+            let c = &latest.counts;
+            ui.columns(3, |columns| {
+                columns[0].vertical(|ui| {
+                    ui.label("Riders now:");
+                    ui.horizontal(|ui| {
+                        ui.label(format!("browsing {} waiting {} in transit {}", c.riders_browsing, c.riders_waiting, c.riders_in_transit));
+                    });
+                });
+                columns[1].vertical(|ui| {
+                    ui.label("Drivers now:");
+                    ui.horizontal(|ui| {
+                        ui.label(format!("idle {} en route {} on trip {} off duty {}", c.drivers_idle, c.drivers_en_route, c.drivers_on_trip, c.drivers_off_duty));
+                    });
+                });
+                columns[2].vertical(|ui| {
+                    ui.label("Trips now:");
+                    ui.horizontal(|ui| {
+                        ui.label(format!("en route {} on trip {}", c.trips_en_route, c.trips_on_trip));
+                    });
+                });
+            });
+        }
+    }
+
+    // Timing distribution: 3 columns (time to match | time to pickup | trip duration)
+    if !telemetry.completed_trips.is_empty() {
+        const PERCENTILES: &[(u8, &str)] = &[(50, "p50"), (90, "p90"), (95, "p95"), (99, "p99")];
+        let n = telemetry.completed_trips.len();
+
+        let match_dist = timing_distribution(telemetry.completed_trips.as_slice(), CompletedTripRecord::time_to_match);
+        let pickup_dist = timing_distribution(telemetry.completed_trips.as_slice(), CompletedTripRecord::time_to_pickup);
+        let trip_dist = timing_distribution(telemetry.completed_trips.as_slice(), CompletedTripRecord::trip_duration);
+
+        ui.columns(3, |columns| {
+            columns[0].vertical(|ui| {
+                ui.label(format!("Time to match (n={})", n));
+                ui.label(format!("min {}  max {}", format_hms_from_ms(match_dist.min), format_hms_from_ms(match_dist.max)));
+                for (p, label) in PERCENTILES {
+                    if let Some(v) = match_dist.percentile(*p) {
+                        ui.label(format!("{} {}", label, format_hms_from_ms(v)));
+                    }
+                }
+                ui.label(format!("avg {}", format_hms_from_ms(match_dist.mean)));
+            });
+            columns[1].vertical(|ui| {
+                ui.label(format!("Time to pickup (n={})", n));
+                ui.label(format!("min {}  max {}", format_hms_from_ms(pickup_dist.min), format_hms_from_ms(pickup_dist.max)));
+                for (p, label) in PERCENTILES {
+                    if let Some(v) = pickup_dist.percentile(*p) {
+                        ui.label(format!("{} {}", label, format_hms_from_ms(v)));
+                    }
+                }
+                ui.label(format!("avg {}", format_hms_from_ms(pickup_dist.mean)));
+            });
+            columns[2].vertical(|ui| {
+                ui.label(format!("Trip duration (n={})", n));
+                ui.label(format!("min {}  max {}", format_hms_from_ms(trip_dist.min), format_hms_from_ms(trip_dist.max)));
+                for (p, label) in PERCENTILES {
+                    if let Some(v) = trip_dist.percentile(*p) {
+                        ui.label(format!("{} {}", label, format_hms_from_ms(v)));
+                    }
+                }
+                ui.label(format!("avg {}", format_hms_from_ms(trip_dist.mean)));
+            });
+        });
+    }
+}
+
+/// Min, mean, max and sorted values for percentile computation. Durations in ms.
+struct TimingDistribution {
+    min: u64,
+    mean: u64,
+    max: u64,
+    sorted: Vec<u64>,
+}
+
+impl TimingDistribution {
+    /// Nearest-rank percentile (0–100). Returns None if empty or p out of range.
+    fn percentile(&self, p: u8) -> Option<u64> {
+        if self.sorted.is_empty() || p > 100 {
+            return None;
+        }
+        let n = self.sorted.len();
+        let idx = ((p as usize) * (n - 1)) / 100;
+        Some(self.sorted[idx])
+    }
+}
+
+/// Compute min, mean, max and sorted values for percentiles. Durations in ms.
+fn timing_distribution(trips: &[CompletedTripRecord], f: fn(&CompletedTripRecord) -> u64) -> TimingDistribution {
+    if trips.is_empty() {
+        return TimingDistribution {
+            min: 0,
+            mean: 0,
+            max: 0,
+            sorted: Vec::new(),
+        };
+    }
+    let mut values: Vec<u64> = trips.iter().map(f).collect();
+    let min = *values.iter().min().unwrap();
+    let max = *values.iter().max().unwrap();
+    let mean = values.iter().sum::<u64>() / (values.len() as u64);
+    values.sort_unstable();
+    TimingDistribution {
+        min,
+        mean,
+        max,
+        sorted: values,
+    }
 }
 
 /// Render scenario parameter inputs in an eight-column layout to use horizontal space.
