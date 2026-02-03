@@ -62,6 +62,15 @@ the pairing is explicit while a trip is in progress.
 ```text
 README.md
 Cargo.toml
+stories/
+  README.md
+  core-sim/
+  drivers/
+  matching/
+  pricing/
+  riders/
+  telemetry/
+  ui/
 crates/
   sim_core/
     Cargo.toml
