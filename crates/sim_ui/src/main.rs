@@ -58,6 +58,7 @@ struct SimUiApp {
     show_drivers: bool,
     show_driver_stats: bool,
     matching_algorithm: MatchingAlgorithmType,
+    matching_algorithm_changed: bool, // Track if algorithm was changed in UI
     start_year: i32,
     start_month: u32,
     start_day: u32,
@@ -153,6 +154,7 @@ impl SimUiApp {
             show_drivers: true,
             show_driver_stats: true,
             matching_algorithm,
+            matching_algorithm_changed: false,
             start_year: year,
             start_month: month,
             start_day: day,
@@ -183,6 +185,7 @@ impl SimUiApp {
         self.started = false;
         self.sim_budget_ms = 0.0;
         self.last_frame_instant = None;
+        self.matching_algorithm_changed = false;
     }
 
     fn start_simulation(&mut self) {
@@ -289,6 +292,15 @@ impl SimUiApp {
 
 impl eframe::App for SimUiApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Update matching algorithm resource if it changed (works even during simulation)
+        if self.matching_algorithm_changed {
+            let new_algorithm = self.create_matching_algorithm();
+            if let Some(mut resource) = self.world.get_resource_mut::<MatchingAlgorithmResource>() {
+                *resource = new_algorithm;
+            }
+            self.matching_algorithm_changed = false;
+        }
+        
         if self.auto_run && self.started {
             let now = Instant::now();
             let last = self.last_frame_instant.unwrap_or(now);
@@ -507,6 +519,7 @@ impl eframe::App for SimUiApp {
                     });
                     ui.horizontal(|ui| {
                         ui.label("Matching algorithm");
+                        let old_algorithm = self.matching_algorithm;
                         egui::ComboBox::from_id_salt("matching_algorithm")
                             .selected_text(match self.matching_algorithm {
                                 MatchingAlgorithmType::Simple => "Simple (first match)",
@@ -524,6 +537,10 @@ impl eframe::App for SimUiApp {
                                     "Cost-based (best match)",
                                 );
                             });
+                        // Track if algorithm changed (works even during simulation)
+                        if self.matching_algorithm != old_algorithm {
+                            self.matching_algorithm_changed = true;
+                        }
                     });
                 });
         });

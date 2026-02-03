@@ -253,7 +253,7 @@ Entity spawners: dynamically spawn riders and drivers based on distributions.
 Scenario setup: configure spawners for riders and drivers.
 
 - **`MatchRadius`** (ECS `Resource`, default 0): max H3 grid distance for matching rider to driver. 0 = same cell only; larger values allow matching to idle drivers within that many cells. Inserted by `build_scenario` from `ScenarioParams::match_radius`.
-- **`MatchingAlgorithm`** (ECS `Resource`, required): boxed trait object implementing the matching algorithm. Defaults to `CostBasedMatching` with ETA weight 0.1. Can be swapped with `SimpleMatching` or custom implementations. Inserted by `build_scenario`.
+- **`MatchingAlgorithm`** (ECS `Resource`, required): boxed trait object implementing the matching algorithm. Defaults to `CostBasedMatching` with ETA weight 0.1. Can be swapped with `SimpleMatching` or custom implementations. Inserted by `build_scenario`. The resource can be updated dynamically during simulation execution (e.g., via UI), and changes take effect immediately for new matching attempts.
 - **`RiderCancelConfig`** (ECS `Resource`): randomized pickup-wait window in seconds. Defaults to 120–2400 seconds, inserted by `build_scenario`.
 - **`SpeedModel`** (ECS `Resource`): stochastic speed sampler (defaults to 20–60 km/h) seeded from `ScenarioParams::seed` to keep runs reproducible.
 - **`ScenarioParams`**: configurable scenario parameters:
@@ -545,7 +545,9 @@ All per-system unit tests emulate the runner by popping one event, inserting
   labels in compact format: `D[50/200][3/8h]` shows earnings (current/target) and fatigue (current hours/max hours).
   A toggle checkbox "Driver stats (earnings/fatigue)" controls whether this information is displayed; when disabled,
   drivers show only "D" or "D(R)" without the earnings and fatigue brackets. The font size is 8.5pt monospace
-  for compact display.
+  for compact display. **Matching algorithm** can be changed at any time (even while simulation is running) via a dropdown
+  selector; changes take effect immediately for new matching attempts (riders already waiting continue with their current
+  matching attempts, but new `TryMatch` events will use the updated algorithm).
 
 ## Known Gaps (Not Implemented Yet)
 
