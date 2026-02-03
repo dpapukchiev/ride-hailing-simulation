@@ -59,6 +59,7 @@ pub fn trip_completed_system(
         matched_at: trip.matched_at,
         pickup_at,
     });
+    telemetry.riders_completed_total = telemetry.riders_completed_total.saturating_add(1);
 
     commands.entity(rider_entity).despawn();
 }

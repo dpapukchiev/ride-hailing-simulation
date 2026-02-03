@@ -1,12 +1,14 @@
-use bevy_ecs::prelude::{Commands, Query, Res};
+use bevy_ecs::prelude::{Commands, Query, Res, ResMut};
 
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
 use crate::ecs::{Driver, DriverState, Rider, RiderState, Trip, TripState};
+use crate::telemetry::SimTelemetry;
 
 pub fn rider_cancel_system(
     event: Res<CurrentEvent>,
     clock: Res<SimulationClock>,
     mut commands: Commands,
+    mut telemetry: ResMut<SimTelemetry>,
     mut riders: Query<&mut Rider>,
     mut drivers: Query<&mut Driver>,
     mut trips: Query<&mut Trip>,
@@ -46,6 +48,7 @@ pub fn rider_cancel_system(
 
     rider.state = RiderState::Cancelled;
     rider.matched_driver = None;
+    telemetry.riders_cancelled_total = telemetry.riders_cancelled_total.saturating_add(1);
     commands.entity(rider_entity).despawn();
 }
 

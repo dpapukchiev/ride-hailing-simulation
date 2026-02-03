@@ -422,7 +422,7 @@ impl eframe::App for SimUiApp {
                     active.push([t, active_trips]);
                     waiting.push([t, snapshot.counts.riders_waiting as f64]);
                     idle.push([t, snapshot.counts.drivers_idle as f64]);
-                    cancelled_riders.push([t, snapshot.counts.riders_cancelled as f64]);
+                    cancelled_riders.push([t, snapshot.counts.riders_cancelled_total as f64]);
                     completed_trips.push([t, snapshot.counts.trips_completed as f64]);
                     cancelled_trips.push([t, snapshot.counts.trips_cancelled as f64]);
                 }

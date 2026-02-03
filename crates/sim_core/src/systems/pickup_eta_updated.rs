@@ -1,14 +1,16 @@
-use bevy_ecs::prelude::{Commands, Query, Res};
+use bevy_ecs::prelude::{Commands, Query, Res, ResMut};
 
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
 use crate::ecs::{Driver, DriverState, Rider, RiderState, Trip, TripState};
 use crate::scenario::RiderCancelConfig;
+use crate::telemetry::SimTelemetry;
 
 pub fn pickup_eta_updated_system(
     event: Res<CurrentEvent>,
     clock: Res<SimulationClock>,
     cancel_config: Option<Res<RiderCancelConfig>>,
     mut commands: Commands,
+    mut telemetry: ResMut<SimTelemetry>,
     mut trips: Query<&mut Trip>,
     mut riders: Query<&mut Rider>,
     mut drivers: Query<&mut Driver>,
@@ -71,5 +73,6 @@ pub fn pickup_eta_updated_system(
     driver.matched_rider = None;
     rider.state = RiderState::Cancelled;
     rider.matched_driver = None;
+    telemetry.riders_cancelled_total = telemetry.riders_cancelled_total.saturating_add(1);
     commands.entity(rider_entity).despawn();
 }

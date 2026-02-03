@@ -4,13 +4,14 @@ use crate::clock::SimulationClock;
 use crate::ecs::{Driver, Position, Rider, Trip};
 use crate::telemetry::{
     DriverSnapshot, RiderSnapshot, SimCounts, SimSnapshot, SimSnapshotConfig, SimSnapshots,
-    TripSnapshot,
+    SimTelemetry, TripSnapshot,
 };
 
 pub fn capture_snapshot_system(
     clock: Res<SimulationClock>,
     config: Res<SimSnapshotConfig>,
     mut snapshots: ResMut<SimSnapshots>,
+    telemetry: Res<SimTelemetry>,
     rider_query: Query<(Entity, &Rider, &Position)>,
     driver_query: Query<(Entity, &Driver, &Position)>,
     trip_query: Query<(Entity, &Trip)>,
@@ -25,6 +26,8 @@ pub fn capture_snapshot_system(
     }
 
     let mut counts = SimCounts::default();
+    counts.riders_cancelled_total = telemetry.riders_cancelled_total;
+    counts.riders_completed_total = telemetry.riders_completed_total;
     let mut riders = Vec::with_capacity(rider_query.iter().count());
     for (entity, rider, position) in rider_query.iter() {
         counts.add_rider(rider.state);
