@@ -185,6 +185,7 @@ Scenario setup: spawn riders and drivers with random positions and request times
 
 - **`MatchRadius`** (ECS `Resource`, default 0): max H3 grid distance for matching rider to driver. 0 = same cell only; larger values allow matching to idle drivers within that many cells. Inserted by `build_scenario` from `ScenarioParams::match_radius`.
 - **`RiderCancelConfig`** (ECS `Resource`): randomized pickup-wait window in seconds. Defaults to 120–600 seconds, inserted by `build_scenario`.
+- **`SpeedModel`** (ECS `Resource`): stochastic speed sampler (defaults to 20–60 km/h) seeded from `ScenarioParams::seed` to keep runs reproducible.
 - **`ScenarioParams`**: configurable scenario parameters:
   - `num_riders`, `num_drivers`: counts.
   - `seed`: optional RNG seed for reproducibility.
@@ -231,6 +232,7 @@ System: `quote_accepted_system`
 - On `EventKind::QuoteAccepted` with subject `Rider(rider_entity)`:
   - Rider: `Browsing` → `Waiting`
   - Schedules `TryMatch` 1 second from now (`schedule_in_secs(1, ...)`) for the same rider.
+  - Schedules `RiderCancel` at the max wait deadline from `RiderCancelConfig` to cancel unmatched riders.
 
 ### `sim_core::systems::simple_matching`
 
@@ -243,6 +245,7 @@ System: `simple_matching_system`
     - Rider stores `matched_driver = Some(driver_entity)`
     - Driver: `Idle` → `Evaluating` and stores `matched_rider = Some(rider_entity)`
     - Schedules `MatchAccepted` 1 second from now (`schedule_in_secs(1, ...)`) with subject `Driver(driver_entity)`.
+  - If no driver is found, reschedules `TryMatch` after a short delay (30s).
 
 ### `sim_core::systems::match_accepted`
 
@@ -263,7 +266,8 @@ System: `driver_decision_system`
       rider’s position, `dropoff` = rider’s `destination` or a neighbor of pickup,
       `requested_at` = rider’s `requested_at`, `matched_at` = clock.now(), `pickup_at` = None;
       schedules `MoveStep` 1 second from now (`schedule_in_secs(1, ...)`) for that trip (`subject: Trip(trip_entity)`).
-    - Reject: `Evaluating` → `Idle` and clears `matched_rider`.
+    - Reject: `Evaluating` → `Idle`, clears `matched_rider`, clears the rider’s `matched_driver`,
+      and reschedules `TryMatch` after a short delay (30s) if the rider is still `Waiting`.
 
 ### `sim_core::systems::rider_cancel`
 
@@ -271,10 +275,10 @@ System: `rider_cancel_system`
 
 - Reacts to `CurrentEvent`.
 - On `EventKind::RiderCancel` with subject `Rider(rider_entity)`:
-  - If the rider is still `Waiting` with a matched driver and an `EnRoute` trip:
+  - If the rider is still `Waiting`:
     - Rider: `Waiting` → `Cancelled`, clears `matched_driver`, then the rider entity is despawned
-    - Driver: `EnRoute` → `Idle`, clears `matched_rider`
-    - Trip: `EnRoute` → `Cancelled`
+    - If a matched driver exists, clears `matched_rider` and returns the driver to `Idle`
+    - If an `EnRoute` trip exists for that rider, marks it `Cancelled`
 
 ### `sim_core::systems::movement`
 
@@ -283,8 +287,8 @@ System: `movement_system`
 - Reacts to `CurrentEvent`.
 - On `EventKind::MoveStep` with subject `Trip(trip_entity)`:
   - **EnRoute**: moves the trip’s driver one H3 hop toward `trip.pickup` (rider cell), updates
-    `trip.pickup_eta_ms` using remaining haversine distance and a per-trip speed in the
-    20–60 km/h range, and emits `PickupEtaUpdated` for the trip. If still en route, reschedules
+    `trip.pickup_eta_ms` using remaining haversine distance and a stochastic speed sample
+    (default 20–60 km/h), and emits `PickupEtaUpdated` for the trip. If still en route, reschedules
     `MoveStep` based on the time to traverse the next hop; when driver reaches pickup, schedules
     `TripStarted` 1 second from now (`schedule_in_secs(1, ...)`).
   - **OnTrip**: moves the trip’s driver one H3 hop toward `trip.dropoff`. If still en route,
@@ -302,11 +306,11 @@ System: `pickup_eta_updated_system`
   - If the projected pickup exceeds the wait deadline (after min wait), cancels the trip, marks
     the rider cancelled, despawns the rider, and returns the driver to `Idle`.
   - **Cancelled/Completed**: no-op.
-- ETA in ms: derived from haversine distance and a per-trip speed in the
-  20–60 km/h range, with a 1 second minimum (`ONE_SEC_MS`).
+- ETA in ms: derived from haversine distance and a stochastic speed sample
+  (default 20–60 km/h), with a 1 second minimum (`ONE_SEC_MS`).
 
 This is a deterministic, FCFS-style placeholder. No distance or cost logic
-is implemented yet beyond H3 grid distance and simple per-trip speeds.
+is implemented yet beyond H3 grid distance and simple stochastic speeds.
 
 ### `sim_core::systems::trip_started`
 

@@ -1,6 +1,8 @@
-use bevy_ecs::prelude::{Commands, Query, Res, ResMut};
+use bevy_ecs::prelude::{Commands, Entity, Query, Res, ResMut};
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
 use crate::ecs::{Driver, DriverState, Position, Rider, RiderState, Trip, TripState};
+
+const MATCH_RETRY_SECS: u64 = 30;
 use crate::spatial::distance_km_between_cells;
 
 fn logit_accepts(score: f64) -> bool {
@@ -21,7 +23,7 @@ pub fn driver_decision_system(
     event: Res<CurrentEvent>,
     mut commands: Commands,
     mut drivers: Query<(&mut Driver, &Position)>,
-    riders: Query<(&Rider, &Position)>,
+    mut riders: Query<(Entity, &mut Rider, &Position)>,
 ) {
     if event.0.kind != EventKind::DriverDecision {
         return;
@@ -43,8 +45,8 @@ pub fn driver_decision_system(
             return;
         };
 
-        let (pickup, dropoff, requested_at, rider_waiting) = match riders.get(rider_entity) {
-            Ok((rider, pos)) => {
+        let (pickup, dropoff, requested_at, rider_waiting) = match riders.get_mut(rider_entity) {
+            Ok((_entity, rider, pos)) => {
                 let pickup = pos.0;
                 let dropoff = rider
                     .destination
@@ -60,6 +62,9 @@ pub fn driver_decision_system(
         if !rider_waiting {
             driver.state = DriverState::Idle;
             driver.matched_rider = None;
+            if let Ok((_entity, mut rider, _)) = riders.get_mut(rider_entity) {
+                rider.matched_driver = None;
+            }
             return;
         }
 
@@ -85,8 +90,21 @@ pub fn driver_decision_system(
 
         clock.schedule_in_secs(1, EventKind::MoveStep, Some(EventSubject::Trip(trip_entity)));
     } else {
+        let rejected_rider = driver.matched_rider;
         driver.state = DriverState::Idle;
         driver.matched_rider = None;
+        if let Some(rider_entity) = rejected_rider {
+            if let Ok((_entity, mut rider, _)) = riders.get_mut(rider_entity) {
+                rider.matched_driver = None;
+                if rider.state == RiderState::Waiting {
+                    clock.schedule_in_secs(
+                        MATCH_RETRY_SECS,
+                        EventKind::TryMatch,
+                        Some(EventSubject::Rider(rider_entity)),
+                    );
+                }
+            }
+        }
     }
 }
 

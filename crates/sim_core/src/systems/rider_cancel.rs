@@ -24,28 +24,24 @@ pub fn rider_cancel_system(
     if rider.state != RiderState::Waiting {
         return;
     }
-    let Some(driver_entity) = rider.matched_driver else {
-        return;
-    };
 
-    let mut canceled = false;
-    for mut trip in trips.iter_mut() {
-        if trip.rider == rider_entity && trip.state == TripState::EnRoute {
-            trip.state = TripState::Cancelled;
-            trip.cancelled_at = Some(clock.now());
-            canceled = true;
-            break;
+    if let Some(driver_entity) = rider.matched_driver {
+        for mut trip in trips.iter_mut() {
+            if trip.rider == rider_entity && trip.state == TripState::EnRoute {
+                trip.state = TripState::Cancelled;
+                trip.cancelled_at = Some(clock.now());
+                break;
+            }
         }
-    }
-    if !canceled {
-        return;
-    }
 
-    if let Ok(mut driver) = drivers.get_mut(driver_entity) {
-        if driver.state == DriverState::EnRoute {
-            driver.state = DriverState::Idle;
+        if let Ok(mut driver) = drivers.get_mut(driver_entity) {
+            if driver.matched_rider == Some(rider_entity) {
+                if driver.state == DriverState::EnRoute || driver.state == DriverState::Evaluating {
+                    driver.state = DriverState::Idle;
+                }
+                driver.matched_rider = None;
+            }
         }
-        driver.matched_rider = None;
     }
 
     rider.state = RiderState::Cancelled;
@@ -132,5 +128,39 @@ mod tests {
 
         let trip = world.entity(trip_entity).get::<Trip>().expect("trip");
         assert_eq!(trip.state, TripState::Cancelled);
+    }
+
+    #[test]
+    fn rider_cancel_without_match_despawns_rider() {
+        let mut world = World::new();
+        world.insert_resource(SimulationClock::default());
+        let cell = h3o::CellIndex::try_from(0x8a1fb46622dffff).expect("cell");
+        let rider_entity = world
+            .spawn((
+                Rider {
+                    state: RiderState::Waiting,
+                    matched_driver: None,
+                    destination: None,
+                    requested_at: None,
+                },
+                Position(cell),
+            ))
+            .id();
+
+        world
+            .resource_mut::<SimulationClock>()
+            .schedule_at_secs(1, EventKind::RiderCancel, Some(EventSubject::Rider(rider_entity)));
+        let event = world
+            .resource_mut::<SimulationClock>()
+            .pop_next()
+            .expect("rider cancel event");
+        world.insert_resource(CurrentEvent(event));
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems((rider_cancel_system, apply_deferred));
+        schedule.run(&mut world);
+
+        let rider_exists = world.get_entity(rider_entity).is_some();
+        assert!(!rider_exists, "rider should be despawned on cancel");
     }
 }

@@ -4,6 +4,8 @@ use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
 use crate::ecs::{Driver, DriverState, Position, Rider, RiderState};
 use crate::scenario::MatchRadius;
 
+const MATCH_RETRY_SECS: u64 = 30;
+
 pub fn simple_matching_system(
     mut clock: ResMut<SimulationClock>,
     event: Res<CurrentEvent>,
@@ -42,6 +44,11 @@ pub fn simple_matching_system(
         })
         .map(|(entity, _, _)| entity);
     let Some(driver_entity) = driver_entity else {
+        clock.schedule_in_secs(
+            MATCH_RETRY_SECS,
+            EventKind::TryMatch,
+            Some(EventSubject::Rider(rider_entity)),
+        );
         return;
     };
 

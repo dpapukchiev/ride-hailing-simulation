@@ -1,18 +1,9 @@
-use bevy_ecs::prelude::{Entity, Query, Res, ResMut};
+use bevy_ecs::prelude::{Query, Res, ResMut};
 
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock, ONE_SEC_MS};
 use crate::ecs::{Driver, DriverState, Position, Trip, TripState};
 use crate::spatial::distance_km_between_cells;
-
-const MIN_SPEED_KMH: f64 = 20.0;
-const MAX_SPEED_KMH: f64 = 60.0;
-
-fn speed_kmh_for_trip(trip_entity: Entity) -> f64 {
-    let raw = trip_entity.to_bits();
-    let spread = (MAX_SPEED_KMH - MIN_SPEED_KMH).max(0.0);
-    let bucket = (raw % (spread as u64 + 1)) as f64;
-    MIN_SPEED_KMH + bucket
-}
+use crate::speed::{SpeedFactors, SpeedModel};
 
 fn travel_time_ms(distance_km: f64, speed_kmh: f64) -> u64 {
     if distance_km <= 0.0 {
@@ -27,6 +18,7 @@ fn travel_time_ms(distance_km: f64, speed_kmh: f64) -> u64 {
 pub fn movement_system(
     mut clock: ResMut<SimulationClock>,
     event: Res<CurrentEvent>,
+    mut speed: ResMut<SpeedModel>,
     mut trips: Query<&mut Trip>,
     mut drivers: Query<(&mut Driver, &mut Position)>,
 ) {
@@ -62,7 +54,7 @@ pub fn movement_system(
         return;
     }
 
-    let speed_kmh = speed_kmh_for_trip(trip_entity);
+    let speed_kmh = speed.sample_kmh(SpeedFactors::default());
     let remaining_km = distance_km_between_cells(driver_pos.0, target_cell);
     if remaining_km <= 0.0 {
         if is_en_route {
@@ -119,11 +111,13 @@ mod tests {
     use bevy_ecs::prelude::{Schedule, World};
     use crate::clock::ONE_SEC_MS;
     use crate::ecs::{Rider, RiderState};
+    use crate::speed::SpeedModel;
 
     #[test]
     fn movement_steps_toward_rider_and_schedules_trip_start() {
         let mut world = World::new();
         world.insert_resource(SimulationClock::default());
+        world.insert_resource(SpeedModel::with_range(Some(1), 40.0, 40.0));
 
         let origin = h3o::CellIndex::try_from(0x8a1fb46622dffff).expect("cell");
         let neighbor = origin

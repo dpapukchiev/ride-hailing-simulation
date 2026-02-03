@@ -2,10 +2,12 @@ use bevy_ecs::prelude::{Query, Res, ResMut};
 
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
 use crate::ecs::{Rider, RiderState};
+use crate::scenario::RiderCancelConfig;
 
 pub fn quote_accepted_system(
     mut clock: ResMut<SimulationClock>,
     event: Res<CurrentEvent>,
+    cancel_config: Option<Res<RiderCancelConfig>>,
     mut riders: Query<&mut Rider>,
 ) {
     if event.0.kind != EventKind::QuoteAccepted {
@@ -23,6 +25,10 @@ pub fn quote_accepted_system(
     }
 
     clock.schedule_in_secs(1, EventKind::TryMatch, Some(EventSubject::Rider(rider_entity)));
+
+    let config = cancel_config.as_deref().copied().unwrap_or_default();
+    let max_wait_secs = config.max_wait_secs.max(config.min_wait_secs);
+    clock.schedule_in_secs(max_wait_secs, EventKind::RiderCancel, Some(EventSubject::Rider(rider_entity)));
 }
 
 #[cfg(test)]
@@ -34,6 +40,7 @@ mod tests {
     fn quote_accepted_transitions_rider_state() {
         let mut world = World::new();
         world.insert_resource(SimulationClock::default());
+        world.insert_resource(RiderCancelConfig::default());
         let rider_entity = world
             .spawn(Rider {
                 state: RiderState::Browsing,
@@ -67,5 +74,13 @@ mod tests {
         assert_eq!(next_event.kind, EventKind::TryMatch);
         assert_eq!(next_event.timestamp, 2000);
         assert_eq!(next_event.subject, Some(EventSubject::Rider(rider_entity)));
+
+        let cancel_event = world
+            .resource_mut::<SimulationClock>()
+            .pop_next()
+            .expect("rider cancel event");
+        assert_eq!(cancel_event.kind, EventKind::RiderCancel);
+        assert_eq!(cancel_event.timestamp, 2_401_000);
+        assert_eq!(cancel_event.subject, Some(EventSubject::Rider(rider_entity)));
     }
 }

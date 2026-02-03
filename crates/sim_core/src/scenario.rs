@@ -11,6 +11,7 @@ use rand::{Rng, SeedableRng};
 use crate::clock::{EventKind, EventSubject, SimulationClock};
 use crate::ecs::{Driver, DriverState, Position, Rider, RiderState};
 use crate::spatial::GeoIndex;
+use crate::speed::SpeedModel;
 use crate::telemetry::{SimSnapshotConfig, SimSnapshots, SimTelemetry};
 
 /// Default bounding box: San Francisco Bay Area (approx).
@@ -162,6 +163,7 @@ pub fn build_scenario(world: &mut World, params: ScenarioParams) {
     world.insert_resource(SimSnapshots::default());
     world.insert_resource(MatchRadius(params.match_radius));
     world.insert_resource(RiderCancelConfig::default());
+    world.insert_resource(SpeedModel::new(params.seed.map(|seed| seed ^ 0x5eed_cafe)));
 
     let mut rng: StdRng = match params.seed {
         Some(seed) => StdRng::seed_from_u64(seed),
