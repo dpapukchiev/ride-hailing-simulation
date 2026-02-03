@@ -7,9 +7,10 @@ use bevy_ecs::prelude::{Resource, World};
 use h3o::{CellIndex, LatLng, Resolution};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
+use std::collections::VecDeque;
 
-use crate::clock::{EventKind, EventSubject, SimulationClock};
-use crate::ecs::{Driver, DriverState, Position, Rider, RiderState};
+use crate::clock::{EventKind, SimulationClock};
+use crate::ecs::{Driver, DriverState, Position};
 use crate::spatial::GeoIndex;
 use crate::speed::SpeedModel;
 use crate::telemetry::{SimSnapshotConfig, SimSnapshots, SimTelemetry};
@@ -22,6 +23,18 @@ const DEFAULT_LNG_MAX: f64 = -122.35;
 
 /// Default time window for rider requests: 1 hour (simulation ms).
 const DEFAULT_REQUEST_WINDOW_MS: u64 = 60 * 60 * 1000;
+
+/// Pending rider spawn data (for just-in-time spawning when RequestInbound fires).
+#[derive(Debug, Clone)]
+pub struct PendingRider {
+    pub position: CellIndex,
+    pub destination: CellIndex,
+    pub request_time_ms: u64,
+}
+
+/// Queue of riders to spawn at their request time (FIFO).
+#[derive(Debug, Clone, Default, Resource)]
+pub struct PendingRiders(pub VecDeque<PendingRider>);
 
 /// Max H3 grid distance (cells) for matching rider to driver. 0 = same cell only.
 #[derive(Debug, Clone, Copy, Default, Resource)]
@@ -154,7 +167,8 @@ fn cell_in_bounds(cell: CellIndex, lat_min: f64, lat_max: f64, lng_min: f64, lng
     lat >= lat_min && lat <= lat_max && lng >= lng_min && lng <= lng_max
 }
 
-/// Populates `world` with clock, telemetry, riders, drivers, and scheduled RequestInbound events.
+/// Populates `world` with clock, telemetry, drivers, and scheduled RequestInbound events.
+/// Riders are spawned just-in-time when their RequestInbound event fires.
 /// Caller must have already created `world`; this inserts resources and spawns entities.
 pub fn build_scenario(world: &mut World, params: ScenarioParams) {
     world.insert_resource(SimulationClock::default());
@@ -179,8 +193,8 @@ pub fn build_scenario(world: &mut World, params: ScenarioParams) {
     let min_trip = params.min_trip_cells;
     let max_trip = params.max_trip_cells;
 
-    let mut rider_entities = Vec::with_capacity(params.num_riders);
-
+    // Generate pending rider data and schedule their request events
+    let mut pending_riders = Vec::with_capacity(params.num_riders);
     for _ in 0..params.num_riders {
         let cell = random_cell_in_bounds(&mut rng, lat_min, lat_max, lng_min, lng_max);
         let destination = random_destination(
@@ -194,21 +208,34 @@ pub fn build_scenario(world: &mut World, params: ScenarioParams) {
             lng_min,
             lng_max,
         );
+        let request_time_ms = rng.gen_range(0..=request_window_ms);
 
-        let entity = world
-            .spawn((
-                Rider {
-                    state: RiderState::Requesting,
-                    matched_driver: None,
-                    destination: Some(destination),
-                    requested_at: None,
-                },
-                Position(cell),
-            ))
-            .id();
-        rider_entities.push(entity);
+        pending_riders.push((
+            request_time_ms,
+            PendingRider {
+                position: cell,
+                destination,
+                request_time_ms,
+            },
+        ));
     }
 
+    // Sort by request time so we can pop from front in order
+    pending_riders.sort_by_key(|(time, _)| *time);
+
+    // Schedule RequestInbound events (without entity subjects - riders don't exist yet)
+    let mut clock = world.resource_mut::<SimulationClock>();
+    for (request_time_ms, _) in &pending_riders {
+        clock.schedule_at(*request_time_ms, EventKind::RequestInbound, None);
+    }
+    drop(clock);
+
+    // Store pending riders in resource
+    world.insert_resource(PendingRiders(
+        pending_riders.into_iter().map(|(_, rider)| rider).collect(),
+    ));
+
+    // Spawn all drivers upfront (they're always in the system)
     for _ in 0..params.num_drivers {
         let cell = random_cell_in_bounds(&mut rng, lat_min, lat_max, lng_min, lng_max);
         world.spawn((
@@ -219,12 +246,6 @@ pub fn build_scenario(world: &mut World, params: ScenarioParams) {
             Position(cell),
         ));
     }
-
-    let mut clock = world.resource_mut::<SimulationClock>();
-    for rider_entity in rider_entities {
-        let at_ms = rng.gen_range(0..=request_window_ms);
-        clock.schedule_at(at_ms, EventKind::RequestInbound, Some(EventSubject::Rider(rider_entity)));
-    }
 }
 
 #[cfg(test)]
@@ -232,7 +253,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn build_scenario_spawns_riders_and_drivers() {
+    fn build_scenario_prepares_pending_riders_and_spawns_drivers() {
         let mut world = World::new();
         build_scenario(
             &mut world,
@@ -244,9 +265,10 @@ mod tests {
             },
         );
 
-        let rider_count = world.query::<&Rider>().iter(&world).count();
+        let pending_riders = world.resource::<PendingRiders>();
+        assert_eq!(pending_riders.0.len(), 10, "10 pending riders");
+
         let driver_count = world.query::<&Driver>().iter(&world).count();
-        assert_eq!(rider_count, 10);
         assert_eq!(driver_count, 3);
 
         let clock = world.resource::<SimulationClock>();

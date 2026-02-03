@@ -64,7 +64,6 @@ pub fn write_snapshot_counts_parquet<P: AsRef<Path>>(
     snapshots: &SimSnapshots,
 ) -> Result<(), Box<dyn Error>> {
     let mut timestamp_ms = Vec::with_capacity(snapshots.snapshots.len());
-    let mut riders_requesting = Vec::with_capacity(snapshots.snapshots.len());
     let mut riders_browsing = Vec::with_capacity(snapshots.snapshots.len());
     let mut riders_waiting = Vec::with_capacity(snapshots.snapshots.len());
     let mut riders_in_transit = Vec::with_capacity(snapshots.snapshots.len());
@@ -82,7 +81,6 @@ pub fn write_snapshot_counts_parquet<P: AsRef<Path>>(
 
     for snapshot in &snapshots.snapshots {
         timestamp_ms.push(snapshot.timestamp_ms);
-        riders_requesting.push(snapshot.counts.riders_requesting as u64);
         riders_browsing.push(snapshot.counts.riders_browsing as u64);
         riders_waiting.push(snapshot.counts.riders_waiting as u64);
         riders_in_transit.push(snapshot.counts.riders_in_transit as u64);
@@ -101,7 +99,6 @@ pub fn write_snapshot_counts_parquet<P: AsRef<Path>>(
 
     let schema = Schema::new(vec![
         Field::new("timestamp_ms", DataType::UInt64, false),
-        Field::new("riders_requesting", DataType::UInt64, false),
         Field::new("riders_browsing", DataType::UInt64, false),
         Field::new("riders_waiting", DataType::UInt64, false),
         Field::new("riders_in_transit", DataType::UInt64, false),
@@ -120,7 +117,6 @@ pub fn write_snapshot_counts_parquet<P: AsRef<Path>>(
 
     let arrays: Vec<ArrayRef> = vec![
         Arc::new(UInt64Array::from(timestamp_ms)),
-        Arc::new(UInt64Array::from(riders_requesting)),
         Arc::new(UInt64Array::from(riders_browsing)),
         Arc::new(UInt64Array::from(riders_waiting)),
         Arc::new(UInt64Array::from(riders_in_transit)),
@@ -206,12 +202,11 @@ fn cell_to_u64(cell: h3o::CellIndex) -> u64 {
 
 fn rider_state_code(state: RiderState) -> u8 {
     match state {
-        RiderState::Requesting => 0,
-        RiderState::Browsing => 1,
-        RiderState::Waiting => 2,
-        RiderState::InTransit => 3,
-        RiderState::Completed => 4,
-        RiderState::Cancelled => 5,
+        RiderState::Browsing => 0,
+        RiderState::Waiting => 1,
+        RiderState::InTransit => 2,
+        RiderState::Completed => 3,
+        RiderState::Cancelled => 4,
     }
 }
 

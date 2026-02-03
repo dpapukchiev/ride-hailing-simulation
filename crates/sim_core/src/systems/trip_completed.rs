@@ -77,11 +77,18 @@ mod tests {
         let mut world = World::new();
         world.insert_resource(SimulationClock::default());
         world.insert_resource(crate::telemetry::SimTelemetry::default());
+        let cell = h3o::CellIndex::try_from(0x8a1fb46622dffff).expect("cell");
+        let destination = cell
+            .grid_disk::<Vec<_>>(1)
+            .into_iter()
+            .find(|c| *c != cell)
+            .expect("neighbor cell");
+        
         let rider_entity = world
             .spawn(Rider {
                 state: RiderState::InTransit,
                 matched_driver: None,
-                destination: None,
+                destination: Some(destination),
                 requested_at: None,
             })
             .id();
@@ -96,8 +103,8 @@ mod tests {
                 state: TripState::OnTrip,
                 rider: rider_entity,
                 driver: driver_entity,
-                pickup: h3o::CellIndex::try_from(0x8a1fb46622dffff).expect("cell"),
-                dropoff: h3o::CellIndex::try_from(0x8a1fb46622dffff).expect("cell"),
+                pickup: cell,
+                dropoff: destination,
                 pickup_distance_km_at_accept: 0.0,
                 requested_at: 0,
                 matched_at: 1,

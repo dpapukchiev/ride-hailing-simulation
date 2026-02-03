@@ -14,9 +14,11 @@ pub mod rider_cancel;
 mod end_to_end_tests {
     use bevy_ecs::prelude::World;
 
-    use crate::clock::{EventKind, EventSubject, SimulationClock, ONE_SEC_MS};
-    use crate::ecs::{Driver, DriverState, Position, Rider, RiderState, Trip, TripState};
+    use crate::clock::{EventKind, SimulationClock, ONE_SEC_MS};
+    use crate::ecs::{Driver, DriverState, Position, Trip, TripState};
     use crate::runner::{run_until_empty, simulation_schedule};
+    use crate::scenario::PendingRider;
+    use crate::scenario::PendingRiders;
     use crate::speed::SpeedModel;
     use crate::telemetry::{SimSnapshotConfig, SimSnapshots, SimTelemetry};
 
@@ -30,18 +32,22 @@ mod end_to_end_tests {
         world.insert_resource(SpeedModel::with_range(Some(1), 40.0, 40.0));
 
         let cell = h3o::CellIndex::try_from(0x8a1fb46622dffff).expect("cell");
+        // Pick a neighbor cell as destination
+        let destination = cell
+            .grid_disk::<Vec<_>>(1)
+            .into_iter()
+            .find(|c| *c != cell)
+            .unwrap_or(cell);
 
-        let rider_entity = world
-            .spawn((
-                Rider {
-                    state: RiderState::Requesting,
-                    matched_driver: None,
-                    destination: None,
-                    requested_at: None,
-                },
-                Position(cell),
-            ))
-            .id();
+        // Add pending rider
+        let mut pending_riders = PendingRiders::default();
+        pending_riders.0.push_back(PendingRider {
+            position: cell,
+            destination,
+            request_time_ms: 1000,
+        });
+        world.insert_resource(pending_riders);
+
         let driver_entity = world
             .spawn((
                 Driver {
@@ -54,7 +60,7 @@ mod end_to_end_tests {
 
         world
             .resource_mut::<SimulationClock>()
-            .schedule_at_secs(1, EventKind::RequestInbound, Some(EventSubject::Rider(rider_entity)));
+            .schedule_at_secs(1, EventKind::RequestInbound, None);
 
         let mut schedule = simulation_schedule();
         let steps = run_until_empty(&mut world, &mut schedule, 1000);
@@ -67,26 +73,22 @@ mod end_to_end_tests {
             .expect("trip entity");
         let trip = world.entity(trip_entity).get::<Trip>().expect("trip");
 
-        let rider = world.get_entity(rider_entity).and_then(|e| e.get::<Rider>());
         let driver = world
             .get_entity(driver_entity)
             .and_then(|e| e.get::<Driver>())
             .expect("driver");
 
         assert_eq!(trip.state, TripState::Completed);
-        assert_eq!(trip.rider, rider_entity);
         assert_eq!(trip.driver, driver_entity);
         assert_eq!(trip.pickup, cell);
-        // When destination is None, dropoff is a neighbor of pickup
-        assert_ne!(trip.dropoff, trip.pickup, "dropoff should differ from pickup when defaulted");
-        assert!(rider.is_none(), "rider should be despawned on completion");
+        assert_eq!(trip.dropoff, destination, "dropoff should match the requested destination");
+        assert_ne!(trip.dropoff, trip.pickup, "dropoff should differ from pickup");
         assert_eq!(driver.state, DriverState::Idle);
         assert_eq!(driver.matched_rider, None);
 
         let telemetry = world.resource::<SimTelemetry>();
         assert_eq!(telemetry.completed_trips.len(), 1);
         let record = &telemetry.completed_trips[0];
-        assert_eq!(record.rider_entity, rider_entity);
         assert_eq!(record.driver_entity, driver_entity);
         assert_eq!(record.trip_entity, trip_entity);
         assert!(record.completed_at >= ONE_SEC_MS, "completed_at should be in ms (>= 1s)");
@@ -108,29 +110,27 @@ mod end_to_end_tests {
         world.insert_resource(SpeedModel::with_range(Some(2), 40.0, 40.0));
 
         let cell = h3o::CellIndex::try_from(0x8a1fb46622dffff).expect("cell");
+        // Pick a neighbor cell as destination
+        let destination = cell
+            .grid_disk::<Vec<_>>(1)
+            .into_iter()
+            .find(|c| *c != cell)
+            .unwrap_or(cell);
 
-        let rider1 = world
-            .spawn((
-                Rider {
-                    state: RiderState::Requesting,
-                    matched_driver: None,
-                    destination: None,
-                    requested_at: None,
-                },
-                Position(cell),
-            ))
-            .id();
-        let rider2 = world
-            .spawn((
-                Rider {
-                    state: RiderState::Requesting,
-                    matched_driver: None,
-                    destination: None,
-                    requested_at: None,
-                },
-                Position(cell),
-            ))
-            .id();
+        // Add two pending riders
+        let mut pending_riders = PendingRiders::default();
+        pending_riders.0.push_back(PendingRider {
+            position: cell,
+            destination,
+            request_time_ms: 1000,
+        });
+        pending_riders.0.push_back(PendingRider {
+            position: cell,
+            destination,
+            request_time_ms: 2000,
+        });
+        world.insert_resource(pending_riders);
+
         let driver1 = world
             .spawn((
                 Driver {
@@ -152,10 +152,10 @@ mod end_to_end_tests {
 
         world
             .resource_mut::<SimulationClock>()
-            .schedule_at_secs(1, EventKind::RequestInbound, Some(EventSubject::Rider(rider1)));
+            .schedule_at_secs(1, EventKind::RequestInbound, None);
         world
             .resource_mut::<SimulationClock>()
-            .schedule_at_secs(2, EventKind::RequestInbound, Some(EventSubject::Rider(rider2)));
+            .schedule_at_secs(2, EventKind::RequestInbound, None);
 
         let mut schedule = simulation_schedule();
         let steps = run_until_empty(&mut world, &mut schedule, 1000);
@@ -170,11 +170,6 @@ mod end_to_end_tests {
             assert_eq!(trip.state, TripState::Completed);
         }
 
-        let rider1_state = world.get_entity(rider1).and_then(|e| e.get::<Rider>()).map(|r| r.state);
-        let rider2_state = world.get_entity(rider2).and_then(|e| e.get::<Rider>()).map(|r| r.state);
-        assert_eq!(rider1_state, None);
-        assert_eq!(rider2_state, None);
-
         let driver1_state = world.entity(driver1).get::<Driver>().expect("driver1").state;
         let driver2_state = world.entity(driver2).get::<Driver>().expect("driver2").state;
         assert_eq!(driver1_state, DriverState::Idle);
@@ -182,13 +177,13 @@ mod end_to_end_tests {
 
         let telemetry = world.resource::<SimTelemetry>();
         assert_eq!(telemetry.completed_trips.len(), 2);
-        let riders_drivers: Vec<_> = telemetry
+        let drivers: Vec<_> = telemetry
             .completed_trips
             .iter()
-            .map(|r| (r.rider_entity, r.driver_entity))
+            .map(|r| r.driver_entity)
             .collect();
-        assert!(riders_drivers.contains(&(rider1, driver1)));
-        assert!(riders_drivers.contains(&(rider2, driver2)));
+        assert!(drivers.contains(&driver1));
+        assert!(drivers.contains(&driver2));
         for record in &telemetry.completed_trips {
             assert!(record.completed_at >= ONE_SEC_MS);
         }

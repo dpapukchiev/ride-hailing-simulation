@@ -16,8 +16,8 @@ minimal ECS-based agent model. It currently supports:
   and rider pickup cancellations.
 - A **runner API** that advances the clock and routes events (pop → insert
   `CurrentEvent` → run schedule).
-- A **scenario** module that spawns riders and drivers with random positions
-  (H3 cells in a bounding box) and random request times, plus configurable
+- A **scenario** module that schedules rider requests at random times and spawns
+  riders just-in-time when they request, plus spawns drivers upfront. Configurable
   match radius and trip duration (min/max H3 cells).
 
 This is a "crawl/walk" foundation aligned with the research plan.
@@ -45,17 +45,17 @@ Once a driver accepts, the simulation creates a dedicated **Trip entity** that
 becomes the stable identifier for the rest of the lifecycle (movement, start,
 completion).
 
-In the current flow, riders start by requesting a trip, browse a quote, then
-wait for matching. Drivers start idle, evaluate a match offer, drive en route to
-pickup, and then move into an on-trip state. If a rider waits past a randomized
-pickup window, the ride is cancelled, the trip is marked cancelled, and the
-driver returns to idle. When the trip completes, the rider is marked completed
-and the driver returns to idle. Matching uses a configurable **match radius**
-(H3 grid distance): 0 = same cell only; a larger radius allows matching to idle
-drivers within that many cells. Trip length is configurable via min/max H3 cells
-from pickup to dropoff (movement uses 20–60 km/h city-driving speeds). Throughout
-this flow, riders and drivers store links to each other so
-the pairing is explicit while a trip is in progress.
+In the current flow, riders are spawned just-in-time when their request event
+fires, browse a quote, then wait for matching. Drivers start idle, evaluate a
+match offer, drive en route to pickup, and then move into an on-trip state. If
+a rider waits past a randomized pickup window, the ride is cancelled, the trip
+is marked cancelled, and the driver returns to idle. When the trip completes,
+the rider is despawned and the driver returns to idle. Matching uses a
+configurable **match radius** (H3 grid distance): 0 = same cell only; a larger
+radius allows matching to idle drivers within that many cells. Trip length is
+configurable via min/max H3 cells from pickup to dropoff (movement uses 20–60
+km/h city-driving speeds). Throughout this flow, riders and drivers store links
+to each other so the pairing is explicit while a trip is in progress.
 
 ## Workspace Layout
 
@@ -157,10 +157,10 @@ All time is in **milliseconds** (simulation ms). Time 0 maps to a real-world dat
 
 Components and state enums:
 
-- `RiderState`: `Requesting`, `Browsing`, `Waiting`, `InTransit`, `Completed`, `Cancelled`
+- `RiderState`: `Browsing`, `Waiting`, `InTransit`, `Completed`, `Cancelled`
 - `Rider` component: `{ state, matched_driver, destination: Option<CellIndex>, requested_at: Option<u64> }`
-  - `destination`: requested dropoff cell; if `None`, a neighbor of pickup is used when the trip is created.
-  - `requested_at`: simulation time (ms) when the rider transitioned to Browsing (set by `request_inbound_system`).
+  - `destination`: requested dropoff cell. Must be set; riders without a destination will be rejected by the driver decision system.
+  - `requested_at`: simulation time (ms) when the rider was spawned (set by `request_inbound_system` when spawning).
 - `DriverState`: `Idle`, `Evaluating`, `EnRoute`, `OnTrip`, `OffDuty`
 - `Driver` component: `{ state: DriverState, matched_rider: Option<Entity> }`
 - `TripState`: `EnRoute`, `OnTrip`, `Completed`, `Cancelled`
@@ -190,10 +190,12 @@ duplicating the pop → route → run loop.
 
 ### `sim_core::scenario`
 
-Scenario setup: spawn riders and drivers with random positions and request times.
+Scenario setup: schedule rider requests and spawn entities just-in-time.
 
+- **`PendingRider`**: data for a rider to be spawned when their request event fires: `{ position, destination, request_time_ms }`.
+- **`PendingRiders`** (ECS `Resource`): FIFO queue (`VecDeque<PendingRider>`) of riders waiting to be spawned when their `RequestInbound` event fires. Consumed by `request_inbound_system`.
 - **`MatchRadius`** (ECS `Resource`, default 0): max H3 grid distance for matching rider to driver. 0 = same cell only; larger values allow matching to idle drivers within that many cells. Inserted by `build_scenario` from `ScenarioParams::match_radius`.
-- **`RiderCancelConfig`** (ECS `Resource`): randomized pickup-wait window in seconds. Defaults to 120–600 seconds, inserted by `build_scenario`.
+- **`RiderCancelConfig`** (ECS `Resource`): randomized pickup-wait window in seconds. Defaults to 120–2400 seconds, inserted by `build_scenario`.
 - **`SpeedModel`** (ECS `Resource`): stochastic speed sampler (defaults to 20–60 km/h) seeded from `ScenarioParams::seed` to keep runs reproducible.
 - **`ScenarioParams`**: configurable scenario parameters:
   - `num_riders`, `num_drivers`: counts.
@@ -203,7 +205,7 @@ Scenario setup: spawn riders and drivers with random positions and request times
   - `match_radius`: max H3 grid distance for matching (0 = same cell only).
   - `min_trip_cells`, `max_trip_cells`: trip length in H3 cells; rider destinations are chosen at random distance in this range from pickup. Travel time depends on per-trip speeds (20–60 km/h).
   - Builders: `with_seed(seed)`, `with_request_window_hours(hours)`, `with_match_radius(radius)`, `with_trip_duration_cells(min, max)`.
-- **`build_scenario(world, params)`**: inserts `SimulationClock`, `SimTelemetry`, `MatchRadius`, and `RiderCancelConfig`; spawns riders (with random `Position` and optional `destination` in `[min_trip_cells, max_trip_cells]` from pickup) and drivers (random `Position`); schedules one `RequestInbound` per rider at a random sim time in `[0, request_window_ms]`.
+- **`build_scenario(world, params)`**: inserts `SimulationClock`, `SimTelemetry`, `MatchRadius`, `RiderCancelConfig`, and `PendingRiders`; generates pending rider data (random `position` and `destination` in `[min_trip_cells, max_trip_cells]` from pickup) and schedules one `RequestInbound` event per rider at a random sim time in `[0, request_window_ms]`; spawns all drivers upfront with random `Position`. Riders are spawned just-in-time when their `RequestInbound` event fires.
 - Also inserts `SimSnapshotConfig` and `SimSnapshots` for periodic snapshot capture (used by the UI/export).
 
 Large scenarios (e.g. 500 riders, 100 drivers) are run via the **example** only, not in automated tests.
@@ -229,9 +231,10 @@ Large scenarios (e.g. 500 riders, 100 drivers) are run via the **example** only,
 System: `request_inbound_system`
 
 - Reacts to `CurrentEvent`.
-- On `EventKind::RequestInbound` with subject `Rider(rider_entity)`:
-  - Rider: `Requesting` → `Browsing`; sets `requested_at = Some(clock.now())`.
-  - Schedules `QuoteAccepted` 1 second from now (`schedule_in_secs(1, ...)`) for the same rider.
+- On `EventKind::RequestInbound` (no subject - event is scheduled without an entity):
+  - Pops the next `PendingRider` from the `PendingRiders` queue.
+  - Spawns a new rider entity in `Browsing` state with the pending rider's position and destination; sets `requested_at = Some(clock.now())`.
+  - Schedules `QuoteAccepted` 1 second from now (`schedule_in_secs(1, ...)`) for the newly spawned rider entity.
 
 ### `sim_core::systems::quote_accepted`
 

@@ -65,13 +65,20 @@ mod tests {
     fn rider_cancel_resets_driver_and_trip() {
         let mut world = World::new();
         world.insert_resource(SimulationClock::default());
+        world.insert_resource(SimTelemetry::default());
         let cell = h3o::CellIndex::try_from(0x8a1fb46622dffff).expect("cell");
+        let destination = cell
+            .grid_disk::<Vec<_>>(1)
+            .into_iter()
+            .find(|c| *c != cell)
+            .expect("neighbor cell");
+        
         let rider_entity = world
             .spawn((
                 Rider {
                     state: RiderState::Waiting,
                     matched_driver: None,
-                    destination: None,
+                    destination: Some(destination),
                     requested_at: None,
                 },
                 Position(cell),
@@ -92,7 +99,7 @@ mod tests {
                 rider: rider_entity,
                 driver: driver_entity,
                 pickup: cell,
-                dropoff: cell,
+                dropoff: destination,
                 pickup_distance_km_at_accept: 0.0,
                 requested_at: 0,
                 matched_at: 0,
@@ -137,13 +144,20 @@ mod tests {
     fn rider_cancel_without_match_despawns_rider() {
         let mut world = World::new();
         world.insert_resource(SimulationClock::default());
+        world.insert_resource(SimTelemetry::default());
         let cell = h3o::CellIndex::try_from(0x8a1fb46622dffff).expect("cell");
+        let destination = cell
+            .grid_disk::<Vec<_>>(1)
+            .into_iter()
+            .find(|c| *c != cell)
+            .expect("neighbor cell");
+        
         let rider_entity = world
             .spawn((
                 Rider {
                     state: RiderState::Waiting,
                     matched_driver: None,
-                    destination: None,
+                    destination: Some(destination),
                     requested_at: None,
                 },
                 Position(cell),

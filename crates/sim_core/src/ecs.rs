@@ -3,7 +3,6 @@ use h3o::CellIndex;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RiderState {
-    Requesting,
     Browsing,
     Waiting,
     InTransit,
@@ -15,9 +14,9 @@ pub enum RiderState {
 pub struct Rider {
     pub state: RiderState,
     pub matched_driver: Option<Entity>,
-    /// Requested dropoff cell; if `None`, a neighbor of pickup is used when the trip is created.
+    /// Requested dropoff cell. Must be set; riders without a destination are rejected by driver_decision_system.
     pub destination: Option<CellIndex>,
-    /// Simulation time when the rider transitioned to Browsing (request received).
+    /// Simulation time when the rider was spawned (set by request_inbound_system).
     pub requested_at: Option<u64>,
 }
 

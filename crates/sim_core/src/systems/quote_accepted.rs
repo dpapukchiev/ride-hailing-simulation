@@ -41,11 +41,18 @@ mod tests {
         let mut world = World::new();
         world.insert_resource(SimulationClock::default());
         world.insert_resource(RiderCancelConfig::default());
+        let cell = h3o::CellIndex::try_from(0x8a1fb46622dffff).expect("cell");
+        let destination = cell
+            .grid_disk::<Vec<_>>(1)
+            .into_iter()
+            .find(|c| *c != cell)
+            .expect("neighbor cell");
+        
         let rider_entity = world
             .spawn(Rider {
                 state: RiderState::Browsing,
                 matched_driver: None,
-                destination: None,
+                destination: Some(destination),
                 requested_at: None,
             })
             .id();

@@ -81,7 +81,6 @@ pub struct TripSnapshot {
 /// Aggregated counts at a point in time.
 #[derive(Debug, Clone, Default)]
 pub struct SimCounts {
-    pub riders_requesting: usize,
     pub riders_browsing: usize,
     pub riders_waiting: usize,
     pub riders_in_transit: usize,
@@ -136,7 +135,6 @@ pub struct SimSnapshots {
 impl SimCounts {
     pub fn add_rider(&mut self, state: RiderState) {
         match state {
-            RiderState::Requesting => self.riders_requesting += 1,
             RiderState::Browsing => self.riders_browsing += 1,
             RiderState::Waiting => self.riders_waiting += 1,
             RiderState::InTransit => self.riders_in_transit += 1,

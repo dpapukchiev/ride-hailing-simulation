@@ -125,13 +125,18 @@ mod tests {
             .into_iter()
             .find(|cell| *cell != origin)
             .expect("neighbor");
+        let dropoff = origin
+            .grid_disk::<Vec<_>>(2)
+            .into_iter()
+            .find(|cell| *cell != origin && *cell != neighbor)
+            .expect("dropoff cell");
 
         let rider_entity = world
             .spawn((
                 Rider {
                     state: RiderState::Waiting,
                     matched_driver: None,
-                    destination: None,
+                    destination: Some(dropoff),
                     requested_at: None,
                 },
                 Position(neighbor),
@@ -152,7 +157,7 @@ mod tests {
                 rider: rider_entity,
                 driver: driver_entity,
                 pickup: neighbor,
-                dropoff: neighbor,
+                dropoff,
                 pickup_distance_km_at_accept: 0.0,
                 requested_at: 0,
                 matched_at: 0,

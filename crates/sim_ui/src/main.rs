@@ -630,7 +630,6 @@ fn legend_item(ui: &mut egui::Ui, color: Color32, label: &str) {
 fn render_map_legend(ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
         ui.label("Riders:");
-        legend_item(ui, rider_color(RiderState::Requesting), "Requesting");
         legend_item(ui, rider_color(RiderState::Browsing), "Browsing");
         legend_item(ui, rider_color(RiderState::Waiting), "Waiting");
         legend_item(ui, rider_color(RiderState::InTransit), "In transit");
@@ -661,7 +660,6 @@ fn render_metrics_legend(ui: &mut egui::Ui) {
 
 fn rider_color(state: RiderState) -> Color32 {
     match state {
-        RiderState::Requesting => Color32::from_rgb(255, 200, 0),
         RiderState::Browsing => Color32::from_rgb(120, 180, 255),
         RiderState::Waiting => Color32::from_rgb(255, 140, 0),
         RiderState::InTransit => Color32::from_rgb(0, 200, 120),

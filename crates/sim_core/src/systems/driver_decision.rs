@@ -10,14 +10,6 @@ fn logit_accepts(score: f64) -> bool {
     probability >= 0.5
 }
 
-fn default_dropoff(pickup: h3o::CellIndex) -> h3o::CellIndex {
-    pickup
-        .grid_disk::<Vec<_>>(1)
-        .into_iter()
-        .find(|c| *c != pickup)
-        .unwrap_or(pickup)
-}
-
 pub fn driver_decision_system(
     mut clock: ResMut<SimulationClock>,
     event: Res<CurrentEvent>,
@@ -48,9 +40,12 @@ pub fn driver_decision_system(
         let (pickup, dropoff, requested_at, rider_waiting) = match riders.get_mut(rider_entity) {
             Ok((_entity, rider, pos)) => {
                 let pickup = pos.0;
-                let dropoff = rider
-                    .destination
-                    .unwrap_or_else(|| default_dropoff(pickup));
+                let Some(dropoff) = rider.destination else {
+                    // Rider has no destination; reset driver and bail
+                    driver.state = DriverState::Idle;
+                    driver.matched_rider = None;
+                    return;
+                };
                 let requested_at = rider.requested_at.unwrap_or(clock.now());
                 (pickup, dropoff, requested_at, rider.state == RiderState::Waiting)
             }
@@ -121,12 +116,18 @@ mod tests {
         let mut world = World::new();
         world.insert_resource(SimulationClock::default());
         let cell = h3o::CellIndex::try_from(0x8a1fb46622dffff).expect("cell");
+        let destination = cell
+            .grid_disk::<Vec<_>>(1)
+            .into_iter()
+            .find(|c| *c != cell)
+            .expect("neighbor cell");
+        
         let rider_entity = world
             .spawn((
                 Rider {
                     state: RiderState::Waiting,
                     matched_driver: None,
-                    destination: None,
+                    destination: Some(destination),
                     requested_at: None,
                 },
                 Position(cell),
@@ -173,6 +174,6 @@ mod tests {
         assert_eq!(trip.driver, driver_entity);
         assert_eq!(trip.rider, rider_entity);
         assert_eq!(trip.pickup, cell);
-        // dropoff is a neighbor of pickup when destination is None
+        assert_eq!(trip.dropoff, destination);
     }
 }
