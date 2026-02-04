@@ -113,6 +113,39 @@ impl Default for RiderQuoteConfig {
     }
 }
 
+/// Driver decision behavior: stochastic logit model for accept/reject decisions.
+#[derive(Debug, Clone, Copy, Resource)]
+pub struct DriverDecisionConfig {
+    /// Seed for RNG (for reproducibility).
+    pub seed: u64,
+    /// Weight for fare attractiveness (higher fare increases acceptance).
+    pub fare_weight: f64,
+    /// Penalty per km of pickup distance (longer pickup distance decreases acceptance).
+    pub pickup_distance_penalty: f64,
+    /// Bonus per km of trip distance (longer trips increase acceptance).
+    pub trip_distance_bonus: f64,
+    /// Weight for earnings progress (drivers closer to target are less likely to accept).
+    pub earnings_progress_weight: f64,
+    /// Penalty for fatigue (more fatigued drivers are less likely to accept).
+    pub fatigue_penalty: f64,
+    /// Base acceptance score before factors are applied.
+    pub base_acceptance_score: f64,
+}
+
+impl Default for DriverDecisionConfig {
+    fn default() -> Self {
+        Self {
+            seed: 0,
+            fare_weight: 0.1,
+            pickup_distance_penalty: -2.0,
+            trip_distance_bonus: 0.5,
+            earnings_progress_weight: -0.5,
+            fatigue_penalty: -1.0,
+            base_acceptance_score: 1.0,
+        }
+    }
+}
+
 /// Parameters for building a scenario.
 #[derive(Debug, Clone)]
 pub struct ScenarioParams {
@@ -145,6 +178,8 @@ pub struct ScenarioParams {
     pub pricing_config: Option<PricingConfig>,
     /// Rider quote configuration. If None, uses default RiderQuoteConfig.
     pub rider_quote_config: Option<RiderQuoteConfig>,
+    /// Driver decision configuration. If None, uses default DriverDecisionConfig.
+    pub driver_decision_config: Option<DriverDecisionConfig>,
     /// Simulation end time in ms. When set, the runner stops when the next event is at or after this time.
     pub simulation_end_time_ms: Option<u64>,
 }
@@ -169,6 +204,7 @@ impl Default for ScenarioParams {
             epoch_ms: None,
             pricing_config: None,
             rider_quote_config: None,
+            driver_decision_config: None,
             simulation_end_time_ms: None,
         }
     }
@@ -226,6 +262,12 @@ impl ScenarioParams {
     /// Set rider quote configuration.
     pub fn with_rider_quote_config(mut self, rider_quote_config: RiderQuoteConfig) -> Self {
         self.rider_quote_config = Some(rider_quote_config);
+        self
+    }
+
+    /// Set driver decision configuration.
+    pub fn with_driver_decision_config(mut self, driver_decision_config: DriverDecisionConfig) -> Self {
+        self.driver_decision_config = Some(driver_decision_config);
         self
     }
 }
@@ -456,6 +498,10 @@ pub fn build_scenario(world: &mut World, params: ScenarioParams) {
         seed: seed.wrapping_add(0x711073_beef),
         max_willingness_to_pay: 100.0,
         max_acceptable_eta_ms: 600_000,
+    }));
+    world.insert_resource(params.driver_decision_config.unwrap_or_else(|| DriverDecisionConfig {
+        seed: seed.wrapping_add(0xdead_beef),
+        ..Default::default()
     }));
     world.insert_resource(SpeedModel::new(params.seed.map(|seed| seed ^ 0x5eed_cafe)));
     // Default to Hungarian (batch) matching with default ETA weight

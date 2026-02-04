@@ -8,7 +8,7 @@ use sim_core::pricing::PricingConfig;
 use sim_core::runner::{run_next_event, simulation_schedule};
 use sim_core::scenario::{
     build_scenario, create_cost_based_matching, create_hungarian_matching, create_simple_matching,
-    RiderQuoteConfig, ScenarioParams,
+    DriverDecisionConfig, RiderQuoteConfig, ScenarioParams,
 };
 
 use crate::ui::utils::{
@@ -67,6 +67,9 @@ pub struct SimUiApp {
     pub max_acceptable_eta_min: u64,
     pub accept_probability: f64,
     pub max_quote_rejections: u32,
+    pub driver_base_acceptance_score: f64,
+    pub driver_fare_weight: f64,
+    pub driver_pickup_distance_penalty: f64,
 }
 
 /// Type of matching algorithm to use.
@@ -118,6 +121,9 @@ impl SimUiApp {
         let max_acceptable_eta_min: u64 = 10;
         let accept_probability = 0.8;
         let max_quote_rejections = 3;
+        let driver_base_acceptance_score = 1.0;
+        let driver_fare_weight = 0.1;
+        let driver_pickup_distance_penalty = -2.0;
 
         // Default start time: 2026-02-03 06:30:00 UTC
         let year = 2026;
@@ -151,6 +157,13 @@ impl SimUiApp {
             seed: if seed_enabled { seed_value } else { 0u64 }.wrapping_add(0x711073_beef_u64),
             max_willingness_to_pay,
             max_acceptable_eta_ms: max_acceptable_eta_min.saturating_mul(60).saturating_mul(1000),
+        })
+        .with_driver_decision_config(DriverDecisionConfig {
+            seed: if seed_enabled { seed_value } else { 0u64 }.wrapping_add(0xdead_beef_u64),
+            base_acceptance_score: driver_base_acceptance_score,
+            fare_weight: driver_fare_weight,
+            pickup_distance_penalty: driver_pickup_distance_penalty,
+            ..Default::default()
         });
         if seed_enabled {
             params = params.with_seed(seed_value);
@@ -214,6 +227,9 @@ impl SimUiApp {
             max_acceptable_eta_min,
             accept_probability,
             max_quote_rejections,
+            driver_base_acceptance_score,
+            driver_fare_weight,
+            driver_pickup_distance_penalty,
         }
     }
 
@@ -323,6 +339,13 @@ impl SimUiApp {
                 seed: if self.seed_enabled { self.seed_value } else { 0u64 }.wrapping_add(0x711073_beef_u64),
                 max_willingness_to_pay: self.max_willingness_to_pay,
                 max_acceptable_eta_ms: self.max_acceptable_eta_min.saturating_mul(60).saturating_mul(1000),
+            })
+            .with_driver_decision_config(DriverDecisionConfig {
+                seed: if self.seed_enabled { self.seed_value } else { 0u64 }.wrapping_add(0xdead_beef_u64),
+                base_acceptance_score: self.driver_base_acceptance_score,
+                fare_weight: self.driver_fare_weight,
+                pickup_distance_penalty: self.driver_pickup_distance_penalty,
+                ..Default::default()
             });
 
         if self.seed_enabled {

@@ -609,6 +609,37 @@ fn render_scenario_parameters(ui: &mut egui::Ui, app: &mut SimUiApp) {
                     egui::DragValue::new(&mut app.driver_spread_hours).range(1..=24),
                 );
             });
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.label("Driver Decision");
+            });
+            ui.horizontal(|ui| {
+                ui.label("Base score");
+                ui.add_enabled(
+                    can_edit,
+                    egui::DragValue::new(&mut app.driver_base_acceptance_score)
+                        .range(-10.0..=10.0)
+                        .speed(0.1),
+                );
+            });
+            ui.horizontal(|ui| {
+                ui.label("Fare weight");
+                ui.add_enabled(
+                    can_edit,
+                    egui::DragValue::new(&mut app.driver_fare_weight)
+                        .range(0.0..=1.0)
+                        .speed(0.01),
+                );
+            });
+            ui.horizontal(|ui| {
+                ui.label("Pickup penalty");
+                ui.add_enabled(
+                    can_edit,
+                    egui::DragValue::new(&mut app.driver_pickup_distance_penalty)
+                        .range(-10.0..=0.0)
+                        .speed(0.1),
+                );
+            });
         });
 
         // Col 2: Demand (riders - initial, spawn count, spread, cancel)

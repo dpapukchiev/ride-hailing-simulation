@@ -297,6 +297,7 @@ Scenario setup: configure spawners for riders and drivers.
 - **`MatchingAlgorithm`** (ECS `Resource`, required): boxed trait object implementing the matching algorithm. Defaults to `HungarianMatching` with ETA weight 0.1. Can be swapped with `SimpleMatching`, `CostBasedMatching`, or `HungarianMatching`. Inserted by `build_scenario`. The resource can be updated dynamically during simulation execution (e.g., via UI), and changes take effect immediately for new matching attempts.
 - **`RiderCancelConfig`** (ECS `Resource`): configuration for rider cancellation with uniform distribution sampling. Contains `min_wait_secs` and `max_wait_secs` (bounds for the distribution, defaults to 120–2400 seconds) and `seed` (for reproducible RNG, set from scenario seed). Inserted by `build_scenario`. Cancellation times are sampled uniformly between min and max bounds, with each rider getting a different sample based on their entity ID for variety while maintaining reproducibility.
 - **`RiderQuoteConfig`** (ECS `Resource`): configuration for rider quote accept/reject and give-up. Contains `max_quote_rejections` (default 3), `re_quote_delay_secs` (default 10), `accept_probability` (0.0–1.0, default 0.8), `seed`, `max_willingness_to_pay` (default 100.0), and `max_acceptable_eta_ms` (default 600_000). Inserted by `build_scenario` from `ScenarioParams::rider_quote_config` or default. Riders reject the quote if fare > max_willingness_to_pay or eta_ms > max_acceptable_eta_ms; otherwise accept/reject is stochastic. After `max_quote_rejections` they give up and are counted in `riders_abandoned_quote_total`.
+- **`DriverDecisionConfig`** (ECS `Resource`): configuration for driver accept/reject decisions using a stochastic logit model. Contains `seed`, `fare_weight` (default 0.1), `pickup_distance_penalty` (default -2.0), `trip_distance_bonus` (default 0.5), `earnings_progress_weight` (default -0.5), `fatigue_penalty` (default -1.0), and `base_acceptance_score` (default 1.0). Inserted by `build_scenario` from `ScenarioParams::driver_decision_config` or default. Driver acceptance probability is calculated from a logit score based on fare, distances, earnings progress, and fatigue. See [CONFIG.md](./CONFIG.md#driver-behavior) for detailed formulas.
 - **`SpeedModel`** (ECS `Resource`): stochastic speed sampler (defaults to 20–60 km/h) seeded from `ScenarioParams::seed` to keep runs reproducible.
 - **`ScenarioParams`**: configurable scenario parameters (see [CONFIG.md](./CONFIG.md#spawner-configuration--patterns) for defaults and detailed descriptions).
 - **`build_scenario(world, params)`**: inserts all required resources and configures spawners. Rider spawner uses `TimeOfDayDistribution` with realistic demand patterns; driver spawner uses `TimeOfDayDistribution` with supply patterns. Scheduled riders/drivers spawn continuously over their respective time windows with time-varying rates. Initial entities are spawned immediately when `SimulationStarted` event is processed. The spawner `max_count` is set to `num_riders - initial_rider_count` (and similarly for drivers) so that total spawns match the configured counts.
@@ -443,7 +444,16 @@ System: `driver_decision_system`
 
 - Reacts to `CurrentEvent`.
 - On `EventKind::DriverDecision` with subject `Driver(driver_entity)`:
-  - Applies a logit accept rule:
+  - Calculates a logit score based on trip and driver characteristics:
+    - **Fare**: Higher fare increases acceptance probability
+    - **Pickup distance**: Longer pickup distance decreases acceptance probability
+    - **Trip distance**: Longer trips increase acceptance probability (more earnings)
+    - **Earnings progress**: Drivers closer to earnings target are less likely to accept (diminishing returns)
+    - **Fatigue**: More fatigued drivers are less likely to accept
+  - Score formula: `score = base_acceptance_score + (fare × fare_weight) + (pickup_distance_km × pickup_distance_penalty) + (trip_distance_km × trip_distance_bonus) + (earnings_progress × earnings_progress_weight) + (fatigue_ratio × fatigue_penalty)`
+  - Converts score to probability using logit function: `probability = 1 / (1 + exp(-score))`
+  - Samples stochastically using seeded RNG (seed: `driver_decision_config.seed + driver_entity_id`)
+  - Applies logit accept rule:
     - Accept: `Evaluating` → `EnRoute`, **spawns a `Trip` entity** with `pickup` =
       rider’s position, `dropoff` = rider’s `destination` or a neighbor of pickup,
       `requested_at` = rider’s `requested_at`, `matched_at` = clock.now(), `pickup_at` = None;

@@ -248,9 +248,53 @@ fatigue_threshold_ms = random_uniform(8_hours, 12_hours) × 3600 × 1000
 Sampled when driver spawns, using seed `scenario_seed + driver_entity_id + 0xbeef`.
 
 ### Driver Decision (Accept/Reject Match)
-**Deterministic** (logit accept rule)
+**Random** (stochastic logit model, seeded)
 
-Currently implemented as deterministic accept (all matches accepted). Future: logit model based on fare, distance, driver state.
+Driver acceptance uses a logit model that considers multiple factors:
+
+**Score Calculation**:
+```
+score = base_acceptance_score
+    + (fare × fare_weight)
+    + (pickup_distance_km × pickup_distance_penalty)
+    + (trip_distance_km × trip_distance_bonus)
+    + (earnings_progress × earnings_progress_weight)
+    + (fatigue_ratio × fatigue_penalty)
+```
+
+Where:
+- `fare` = agreed fare for the trip
+- `pickup_distance_km` = Haversine distance from driver to pickup location
+- `trip_distance_km` = Haversine distance from pickup to dropoff
+- `earnings_progress` = `daily_earnings / daily_earnings_target` (0.0 = just started, 1.0+ = target reached)
+- `fatigue_ratio` = `session_duration_ms / fatigue_threshold_ms` (0.0 = just started, 1.0+ = threshold exceeded)
+
+**Acceptance Probability**:
+```
+probability = 1 / (1 + exp(-score))
+accept = random() < probability
+```
+
+**Default Configuration Parameters**:
+
+| Parameter | Default | Type | Description |
+|-----------|---------|------|-------------|
+| `seed` | scenario seed + 0xdead_beef | u64 | Seed for RNG reproducibility |
+| `fare_weight` | 0.1 | f64 | Weight for fare attractiveness (higher fare increases acceptance) |
+| `pickup_distance_penalty` | -2.0 | f64 | Penalty per km of pickup distance (longer pickup distance decreases acceptance) |
+| `trip_distance_bonus` | 0.5 | f64 | Bonus per km of trip distance (longer trips increase acceptance) |
+| `earnings_progress_weight` | -0.5 | f64 | Weight for earnings progress (drivers closer to target are less likely to accept) |
+| `fatigue_penalty` | -1.0 | f64 | Penalty for fatigue (more fatigued drivers are less likely to accept) |
+| `base_acceptance_score` | 1.0 | f64 | Base score before factors are applied |
+
+**Seed**: `driver_decision_config.seed + driver_entity_id` (for reproducibility with variety)
+
+**Behavior**:
+- Higher fare → higher acceptance probability
+- Longer pickup distance → lower acceptance probability
+- Longer trip distance → higher acceptance probability (more earnings)
+- Drivers closer to earnings target → lower acceptance probability (diminishing returns)
+- More fatigued drivers → lower acceptance probability
 
 ### OffDuty Transitions
 **Deterministic** (threshold checks)
