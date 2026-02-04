@@ -7,7 +7,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::ui::constants::{H3_RES9_CELL_WIDTH_KM, METERS_PER_DEG_LAT};
 use bevy_ecs::prelude::World;
-use sim_core::scenario::{RiderCancelConfig, ScenarioParams};
+use sim_core::scenario::{BatchMatchingConfig, RiderCancelConfig, ScenarioParams};
 use sim_core::telemetry::SimSnapshotConfig;
 
 pub fn now_unix_ms() -> u64 {
@@ -219,4 +219,12 @@ pub fn apply_cancel_config(world: &mut World, min_mins: u64, max_mins: u64) {
         config.max_wait_secs = max_secs.max(min_secs);
         config.seed = seed;
     }
+}
+
+/// Apply batch matching configuration to the world (overwrites existing config).
+pub fn apply_batch_config(world: &mut World, enabled: bool, interval_secs: u64) {
+    world.insert_resource(BatchMatchingConfig {
+        enabled,
+        interval_secs,
+    });
 }

@@ -5,12 +5,13 @@
 //!
 //! - **Distance**: Minimize pickup distance
 //! - **ETA**: Minimize estimated time to pickup
-//! - **Global optimization**: Batch matching for better overall efficiency
+//! - **Global optimization**: Batch matching via `find_batch_matches` (e.g. Hungarian)
 //!
 //! ## Implementations
 //!
 //! - `SimpleMatching`: First available driver within radius
-//! - `CostBasedMatching`: Scores drivers by distance and ETA
+//! - `CostBasedMatching`: Scores drivers by distance and ETA (single-rider)
+//! - `HungarianMatching`: Kuhn–Munkres assignment for batch; minimizes total cost across riders/drivers
 //!
 //! ## Usage
 //!
@@ -21,6 +22,7 @@ pub mod algorithm;
 pub mod types;
 pub mod simple;
 pub mod cost_based;
+pub mod hungarian;
 
 use bevy_ecs::prelude::Resource;
 
@@ -28,6 +30,7 @@ pub use algorithm::MatchingAlgorithm;
 pub use types::{MatchCandidate, MatchResult};
 pub use simple::SimpleMatching;
 pub use cost_based::{CostBasedMatching, DEFAULT_ETA_WEIGHT};
+pub use hungarian::HungarianMatching;
 
 /// Resource wrapper for the matching algorithm trait object.
 #[derive(Resource)]

@@ -4,12 +4,13 @@ use rand::{Rng, SeedableRng};
 
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
 use crate::ecs::{Rider, RiderQuote, RiderState};
-use crate::scenario::RiderCancelConfig;
+use crate::scenario::{BatchMatchingConfig, RiderCancelConfig};
 
 pub fn quote_accepted_system(
     mut clock: ResMut<SimulationClock>,
     event: Res<CurrentEvent>,
     mut commands: Commands,
+    batch_config: Option<Res<BatchMatchingConfig>>,
     cancel_config: Option<Res<RiderCancelConfig>>,
     mut riders: Query<&mut Rider>,
 ) {
@@ -28,7 +29,11 @@ pub fn quote_accepted_system(
         commands.entity(rider_entity).remove::<RiderQuote>();
     }
 
-    clock.schedule_in_secs(1, EventKind::TryMatch, Some(EventSubject::Rider(rider_entity)));
+    // Only schedule per-rider TryMatch when batch matching is disabled
+    let batch_enabled = batch_config.as_deref().map_or(false, |c| c.enabled);
+    if !batch_enabled {
+        clock.schedule_in_secs(1, EventKind::TryMatch, Some(EventSubject::Rider(rider_entity)));
+    }
 
     let config = cancel_config.as_deref().copied().unwrap_or_default();
     let min_wait_secs = config.min_wait_secs;

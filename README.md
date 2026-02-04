@@ -25,7 +25,9 @@ The simulation supports hundreds of concurrent riders and drivers, realistic tim
 ### Matching Algorithms
 - **Simple Matching**: First-available driver within radius
 - **Cost-Based Matching**: Optimizes for pickup distance and estimated time of arrival (ETA)
-- **Extensible**: Trait-based design allows easy addition of new algorithms (e.g., bipartite matching)
+- **Hungarian (Batch)**: Global optimization via Kuhn–Munkres; minimizes total cost across a batch of riders and drivers
+- **Batch matching mode**: Optional scheduler runs a global matching pass every N seconds (configurable); when enabled, per-rider `TryMatch` is not used. Rejected riders re-enter the next batch automatically.
+- **Extensible**: Trait-based design allows additional algorithms (e.g., opportunity cost)
 
 ### Spatial Features
 - **H3 Grid System**: Resolution 9 (~240m cell size) for efficient spatial operations
@@ -103,9 +105,9 @@ agents within a single simulation.
 - Haversine distance calculations
 
 **Matching (`sim_core::matching`)**
-- Trait-based algorithm interface
-- Pluggable implementations
-- Batch matching support (for future global optimization)
+- Trait-based algorithm interface with `find_match` and `find_batch_matches`
+- Implementations: Simple, CostBased, Hungarian (batch global optimization)
+- Batch matching runs on a schedule; optional simulation end time bounds run length
 
 ## Usage
 
@@ -258,8 +260,7 @@ ride-hailing-simulation/
 ## Future Enhancements
 
 Potential improvements (not yet implemented):
-- Batch matching system with global optimization
-- Advanced matching algorithms (Hungarian algorithm, opportunity cost)
+- Opportunity cost and driver-value weighting in matching
 - Driver acceptance models and rider conversion
 - H3-based routing for realistic movement
 - Replay system for saved simulations

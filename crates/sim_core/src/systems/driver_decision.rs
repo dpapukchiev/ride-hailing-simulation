@@ -1,9 +1,10 @@
 use bevy_ecs::prelude::{Commands, Entity, Query, Res, ResMut};
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
 use crate::ecs::{Driver, DriverState, Position, Rider, RiderState, Trip, TripState};
+use crate::scenario::BatchMatchingConfig;
+use crate::spatial::distance_km_between_cells;
 
 const MATCH_RETRY_SECS: u64 = 30;
-use crate::spatial::distance_km_between_cells;
 
 fn logit_accepts(score: f64) -> bool {
     let probability = 1.0 / (1.0 + (-score).exp());
@@ -13,6 +14,7 @@ fn logit_accepts(score: f64) -> bool {
 pub fn driver_decision_system(
     mut clock: ResMut<SimulationClock>,
     event: Res<CurrentEvent>,
+    batch_config: Option<Res<BatchMatchingConfig>>,
     mut commands: Commands,
     mut drivers: Query<(&mut Driver, &Position)>,
     mut riders: Query<(Entity, &mut Rider, &Position)>,
@@ -91,7 +93,9 @@ pub fn driver_decision_system(
         if let Some(rider_entity) = rejected_rider {
             if let Ok((_entity, mut rider, _)) = riders.get_mut(rider_entity) {
                 rider.matched_driver = None;
-                if rider.state == RiderState::Waiting {
+                // Only schedule per-rider TryMatch when batch matching is disabled
+                let batch_enabled = batch_config.as_deref().map_or(false, |c| c.enabled);
+                if rider.state == RiderState::Waiting && !batch_enabled {
                     clock.schedule_in_secs(
                         MATCH_RETRY_SECS,
                         EventKind::TryMatch,

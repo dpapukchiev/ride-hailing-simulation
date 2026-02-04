@@ -29,6 +29,8 @@ minimal ECS-based agent model. It currently supports:
 - **Rider quote flow**: Riders receive an explicit quote (fare + ETA) before committing; they can
   accept (proceed to matching), reject and request another quote, or give up after a configurable
   number of rejections (tracked in telemetry as abandoned-quote).
+- **Batch matching**: Optional mode where a periodic `BatchMatchRun` event collects all unmatched waiting riders and idle drivers, runs a global matching algorithm (e.g. Hungarian), and applies matches; when enabled, per-rider `TryMatch` is not scheduled. Rejected riders re-enter the next batch.
+- **Simulation end time**: Optional `SimulationEndTimeMs` resource stops the runner when the next event is at or after that time, so runs with recurring events (e.g. batch matching) finish in bounded time.
 
 This is a "crawl/walk" foundation aligned with the research plan.
 
@@ -68,7 +70,7 @@ reacting to `SimulationStarted` and spawn events. Spawners use inter-arrival tim
 distributions to control spawn rates, enabling variable supply and demand patterns.
 The default distributions vary rates based on time of day (hour) and day of week,
 creating realistic patterns with rush hours (7-9 AM, 5-7 PM) and lower demand at night.
-Riders spawn in `Browsing` state. One second after spawn, `ShowQuote` runs: the sim computes a quote (fare from trip distance, ETA from nearest idle driver or a default), attaches a `RiderQuote` component, and schedules `QuoteDecision` 1s later. On `QuoteDecision`, the rider stochastically accepts or rejects (configurable probability). If the rider **accepts** (`QuoteAccepted`), they transition to `Waiting`, `TryMatch` and pickup-timeout cancellation are scheduled, and matching proceeds as before. If the rider **rejects** (`QuoteRejected`), their quote rejection count increments; if under the configured max, `ShowQuote` is rescheduled after a delay (re-quote); otherwise the rider gives up (marked cancelled, despawned, and counted in `riders_abandoned_quote_total`). Drivers spawn
+Riders spawn in `Browsing` state. One second after spawn, `ShowQuote` runs: the sim computes a quote (fare from trip distance, ETA from nearest idle driver or a default), attaches a `RiderQuote` component, and schedules `QuoteDecision` 1s later. On `QuoteDecision`, the rider stochastically accepts or rejects (configurable probability). If the rider **accepts** (`QuoteAccepted`), they transition to `Waiting` and pickup-timeout cancellation is scheduled. When batch matching is **disabled**, `TryMatch` is scheduled 1s later for that rider; when batch matching is **enabled**, the rider remains waiting until the next `BatchMatchRun`. If the rider **rejects** (`QuoteRejected`), their quote rejection count increments; if under the configured max, `ShowQuote` is rescheduled after a delay (re-quote); otherwise the rider gives up (marked cancelled, despawned, and counted in `riders_abandoned_quote_total`). Drivers spawn
 in `Idle` state continuously over the simulation window with earnings targets ($100-$300)
 and fatigue thresholds (8-12 hours), evaluate a match offer, drive en route to pickup, and then move into
 an on-trip state. If
@@ -207,7 +209,7 @@ All time is in **milliseconds** (simulation ms). Time 0 maps to a real-world dat
 - **Constants**: `ONE_SEC_MS = 1000`, `ONE_MIN_MS = 60_000`, `ONE_HOUR_MS = 3_600_000`.
 - **`Event`**: `timestamp` (u64, ms), `kind`, `subject`.
 - **`CurrentEvent`** (ECS `Resource`): the event currently being handled.
-- **`EventKind`** / **`EventSubject`**: includes `SimulationStarted` (at time 0), `SpawnRider`, `SpawnDriver`, `ShowQuote`, `QuoteDecision`, `QuoteAccepted`, `QuoteRejected` for the rider quote flow, `TryMatch`, `MatchAccepted`, `DriverDecision`, `MoveStep`, `PickupEtaUpdated`, `TripStarted`, `TripCompleted`, `RiderCancel` for pickup timeout events, and `CheckDriverOffDuty` for periodic earnings/fatigue checks.
+- **`EventKind`** / **`EventSubject`**: includes `SimulationStarted` (at time 0), `SpawnRider`, `SpawnDriver`, `ShowQuote`, `QuoteDecision`, `QuoteAccepted`, `QuoteRejected` for the rider quote flow, `TryMatch`, `BatchMatchRun` (global batch matching when batch mode is enabled), `MatchAccepted`, `DriverDecision`, `MoveStep`, `PickupEtaUpdated`, `TripStarted`, `TripCompleted`, `RiderCancel` for pickup timeout events, and `CheckDriverOffDuty` for periodic earnings/fatigue checks.
 - **`pending_event_count()`**: returns the number of events in the queue (for tests and scenario validation).
 
 ### `sim_core::ecs`
@@ -240,7 +242,8 @@ Clock progression and event routing are implemented here (outside systems):
 
 - **`run_next_event(world, schedule)`**: Pops the next event from `SimulationClock`,
   inserts it as `CurrentEvent`, runs the schedule. Returns `true` if an event was
-  processed, `false` if the clock was empty. **Executes sequentially**—one event
+  processed, `false` if the clock was empty or if the next event is at or past
+  `SimulationEndTimeMs` (when that resource is present). **Executes sequentially**—one event
   at a time.
 - **`run_until_empty(world, schedule, max_steps)`**: Repeatedly calls
   `run_next_event` until the event queue is empty or `max_steps` is reached.
@@ -285,7 +288,9 @@ Entity spawners: dynamically spawn riders and drivers based on distributions.
 Scenario setup: configure spawners for riders and drivers.
 
 - **`MatchRadius`** (ECS `Resource`, default 0): max H3 grid distance for matching rider to driver. 0 = same cell only; larger values allow matching to idle drivers within that many cells. Inserted by `build_scenario` from `ScenarioParams::match_radius`.
-- **`MatchingAlgorithm`** (ECS `Resource`, required): boxed trait object implementing the matching algorithm. Defaults to `CostBasedMatching` with ETA weight 0.1. Can be swapped with `SimpleMatching` or custom implementations. Inserted by `build_scenario`. The resource can be updated dynamically during simulation execution (e.g., via UI), and changes take effect immediately for new matching attempts.
+- **`SimulationEndTimeMs`** (ECS `Resource`, optional): when present, the runner stops processing events once the next event would be at or after this timestamp (simulation time in ms). Inserted by `build_scenario` when `ScenarioParams::simulation_end_time_ms` is set. Used so simulations with recurring events (e.g. batch matching) can finish in bounded time.
+- **`BatchMatchingConfig`** (ECS `Resource`): `enabled` (bool) and `interval_secs` (u64). When enabled, `BatchMatchRun` events are scheduled and per-rider `TryMatch` is not used. Default: enabled true, interval 5s. Inserted by `build_scenario`.
+- **`MatchingAlgorithm`** (ECS `Resource`, required): boxed trait object implementing the matching algorithm. Defaults to `HungarianMatching` with ETA weight 0.1. Can be swapped with `SimpleMatching`, `CostBasedMatching`, or `HungarianMatching`. Inserted by `build_scenario`. The resource can be updated dynamically during simulation execution (e.g., via UI), and changes take effect immediately for new matching attempts.
 - **`RiderCancelConfig`** (ECS `Resource`): configuration for rider cancellation with uniform distribution sampling. Contains `min_wait_secs` and `max_wait_secs` (bounds for the distribution, defaults to 120–2400 seconds) and `seed` (for reproducible RNG, set from scenario seed). Inserted by `build_scenario`. Cancellation times are sampled uniformly between min and max bounds, with each rider getting a different sample based on their entity ID for variety while maintaining reproducibility.
 - **`RiderQuoteConfig`** (ECS `Resource`): configuration for rider quote accept/reject and give-up. Contains `max_quote_rejections` (default 3), `re_quote_delay_secs` (default 10), `accept_probability` (0.0–1.0, default 0.8), and `seed` for reproducible RNG. Inserted by `build_scenario`. Riders who reject a quote can request another after `re_quote_delay_secs`; after `max_quote_rejections` they give up and are counted in `riders_abandoned_quote_total`.
 - **`SpeedModel`** (ECS `Resource`): stochastic speed sampler (defaults to 20–60 km/h) seeded from `ScenarioParams::seed` to keep runs reproducible.
@@ -300,12 +305,13 @@ Scenario setup: configure spawners for riders and drivers.
   - `min_trip_cells`, `max_trip_cells`: trip length in H3 cells; rider destinations are chosen at random distance in this range from pickup. Travel time depends on per-trip speeds (20–60 km/h).
   - `epoch_ms`: optional epoch in milliseconds (real-world time corresponding to simulation time 0). Used by time-of-day distributions to convert simulation time to real datetime. If `None`, defaults to 0.
   - `pricing_config`: optional `PricingConfig` for pricing parameters. If `None`, uses default `PricingConfig` (base_fare 2.50, per_km_rate 1.50, commission_rate 0.0).
-  - Builders: `with_seed(seed)`, `with_request_window_hours(hours)`, `with_driver_spread_hours(hours)`, `with_match_radius(radius)`, `with_trip_duration_cells(min, max)`, `with_epoch_ms(epoch_ms)`, `with_pricing_config(config)`.
-- **`build_scenario(world, params)`**: inserts `SimulationClock` (with epoch set from `params.epoch_ms`), `SimTelemetry`, `MatchRadius`, `MatchingAlgorithm` (defaults to `CostBasedMatching`), `RiderCancelConfig` (with seed derived from scenario seed), `RiderQuoteConfig` (max_quote_rejections 3, re_quote_delay_secs 10, accept_probability 0.8), `PricingConfig` (from `params.pricing_config` or default), `RiderSpawner`, and `DriverSpawner`. Rider spawner uses `TimeOfDayDistribution` with realistic demand patterns (rush hours: 7-9 AM and 5-7 PM have 2.5-3.2x multipliers, night: 2-5 AM has 0.3-0.4x multipliers, Friday/Saturday evenings have higher multipliers). Driver spawner uses `TimeOfDayDistribution` with supply patterns (more consistent than demand, higher availability during rush hours with 1.5-2.0x multipliers, lower at night with 0.6-0.8x multipliers). Scheduled riders spawn continuously over `request_window_ms` with time-varying rates; scheduled drivers spawn continuously over `driver_spread_ms` with time-varying rates. Initial entities (specified by `initial_rider_count` and `initial_driver_count`) are spawned immediately when `SimulationStarted` event is processed. The spawner `max_count` is set to `num_riders - initial_rider_count` (and similarly for drivers) so that total spawns match the configured counts.
+  - `simulation_end_time_ms`: optional; when set, runner stops when next event is at or after this time (ms).
+  - Builders: `with_seed(seed)`, `with_request_window_hours(hours)`, `with_driver_spread_hours(hours)`, `with_match_radius(radius)`, `with_trip_duration_cells(min, max)`, `with_epoch_ms(epoch_ms)`, `with_pricing_config(config)`, `with_simulation_end_time_ms(end_ms)`.
+- **`build_scenario(world, params)`**: inserts `SimulationClock` (with epoch set from `params.epoch_ms`), `SimTelemetry`, `MatchRadius`, `MatchingAlgorithm` (defaults to `HungarianMatching`), `BatchMatchingConfig` (default enabled, 5s interval), optionally `SimulationEndTimeMs` when `params.simulation_end_time_ms` is set, `RiderCancelConfig` (with seed derived from scenario seed), `RiderQuoteConfig` (max_quote_rejections 3, re_quote_delay_secs 10, accept_probability 0.8), `PricingConfig` (from `params.pricing_config` or default), `RiderSpawner`, and `DriverSpawner`. Rider spawner uses `TimeOfDayDistribution` with realistic demand patterns (rush hours: 7-9 AM and 5-7 PM have 2.5-3.2x multipliers, night: 2-5 AM has 0.3-0.4x multipliers, Friday/Saturday evenings have higher multipliers). Driver spawner uses `TimeOfDayDistribution` with supply patterns (more consistent than demand, higher availability during rush hours with 1.5-2.0x multipliers, lower at night with 0.6-0.8x multipliers). Scheduled riders spawn continuously over `request_window_ms` with time-varying rates; scheduled drivers spawn continuously over `driver_spread_ms` with time-varying rates. Initial entities (specified by `initial_rider_count` and `initial_driver_count`) are spawned immediately when `SimulationStarted` event is processed. The spawner `max_count` is set to `num_riders - initial_rider_count` (and similarly for drivers) so that total spawns match the configured counts.
 - **`random_destination()`**: Optimized destination selection function that uses different strategies based on trip distance:
   - **Small radii (≤20 cells)**: Uses `grid_disk()` to generate all candidate cells and filters by distance/bounds (more accurate, efficient for small distances).
   - **Large radii (>20 cells)**: Uses rejection sampling - randomly samples cells within bounds and checks if distance matches the target range. This avoids generating huge grid disks (e.g., ~33k cells for k=105) which dramatically improves reset performance for scenarios with large trip distances (e.g., 600 riders with 25km max trips). Falls back to a smaller `grid_disk()` if rejection sampling fails.
-- Helper functions: `create_simple_matching()` returns a `SimpleMatching` algorithm, `create_cost_based_matching(eta_weight)` returns a `CostBasedMatching` algorithm with the given ETA weight.
+- Helper functions: `create_simple_matching()`, `create_cost_based_matching(eta_weight)`, `create_hungarian_matching(eta_weight)` return the corresponding algorithm. Default algorithm in `build_scenario` is Hungarian.
 - Also inserts `SimSnapshotConfig` and `SimSnapshots` for periodic snapshot capture (used by the UI/export).
 
 Large scenarios (e.g. 500 riders, 100 drivers) are run via the **example** only, not in automated tests. The `random_destination()` optimization ensures fast reset times even for large scenarios with long trip distances (e.g., 600 riders over 6 hours with 25km max trips).
@@ -340,7 +346,7 @@ Large scenarios (e.g. 500 riders, 100 drivers) are run via the **example** only,
 
 Spawner systems: react to spawn events and create riders/drivers dynamically.
 
-- **`simulation_started_system`**: Reacts to `EventKind::SimulationStarted` (scheduled at time 0). Initializes `RiderSpawner` and `DriverSpawner` resources if present. Spawns initial entities immediately (`initial_rider_count` riders and `initial_driver_count` drivers) at time 0, then schedules their first `SpawnRider`/`SpawnDriver` events if scheduled spawning should continue.
+- **`simulation_started_system`**: Reacts to `EventKind::SimulationStarted` (scheduled at time 0). When `BatchMatchingConfig` is present and enabled, schedules the first `BatchMatchRun` at time 0. Initializes `RiderSpawner` and `DriverSpawner` resources if present. Spawns initial entities immediately (`initial_rider_count` riders and `initial_driver_count` drivers) at time 0, then schedules their first `SpawnRider`/`SpawnDriver` events if scheduled spawning should continue.
 - **`rider_spawner_system`**: Reacts to `EventKind::SpawnRider`. If the spawner should spawn at current time:
   - Generates random position and destination using seeded RNG (deterministic based on current time and spawn count).
   - Spawns rider entity in `Browsing` state with position, destination, `requested_at = Some(clock.now())`, and `quote_rejections = 0`.
@@ -376,7 +382,7 @@ System: `quote_accepted_system`
 - Reacts to `CurrentEvent`.
 - On `EventKind::QuoteAccepted` with subject `Rider(rider_entity)`:
   - Rider: `Browsing` → `Waiting`; removes `RiderQuote` component.
-  - Schedules `TryMatch` 1 second from now (`schedule_in_secs(1, ...)`) for the same rider.
+  - If batch matching is **disabled**, schedules `TryMatch` 1 second from now for the same rider.
   - Samples cancellation time from uniform distribution between `min_wait_secs` and `max_wait_secs` in `RiderCancelConfig` (using seed + rider entity ID for reproducibility with variety), then schedules `RiderCancel` at that sampled time.
 
 ### `sim_core::systems::quote_rejected`
@@ -403,6 +409,7 @@ Matching algorithm trait and implementations for driver-rider pairing.
   - Score formula: `-pickup_distance_km - (pickup_eta_ms / 1000.0) * eta_weight`
   - Selects the driver with the highest score (lowest cost)
   - Configurable `eta_weight` parameter (default 0.1) controls ETA importance vs distance
+- **`HungarianMatching`**: Global batch optimization using Kuhn–Munkres (Hungarian) algorithm. Uses the same score formula as CostBasedMatching; overrides `find_batch_matches` to solve the assignment problem (minimize total cost). Single-rider `find_match` delegates to CostBasedMatching. Default algorithm when batch matching is enabled.
 - **`MatchResult`**: Represents a successful match with `rider_entity` and `driver_entity`.
 - **`MatchCandidate`**: Represents a potential pairing with scoring information (used internally by algorithms).
 
@@ -410,8 +417,8 @@ Matching algorithm trait and implementations for driver-rider pairing.
 
 System: `matching_system`
 
-- Reacts to `CurrentEvent`.
-- On `EventKind::TryMatch` with subject `Rider(rider_entity)`:
+- Reacts to `CurrentEvent`. When **batch matching is enabled** (via `BatchMatchingConfig`), this system does nothing (per-rider matching is not used).
+- On `EventKind::TryMatch` with subject `Rider(rider_entity)` (only when batch matching disabled):
   - If that rider is `Waiting`, queries the `MatchingAlgorithm` resource (required) to find a match.
   - Collects all `Idle` drivers with their positions as candidates (excludes `OffDuty` drivers).
   - Calls `find_match()` on the algorithm with the rider and available drivers.
@@ -420,6 +427,14 @@ System: `matching_system`
     - Driver: `Idle` → `Evaluating` and stores `matched_rider = Some(rider_entity)`
     - Schedules `MatchAccepted` 1 second from now (`schedule_in_secs(1, ...)`) with subject `Driver(driver_entity)`.
   - If no driver is found, reschedules `TryMatch` after a short delay (30s).
+
+### `sim_core::systems::batch_matching`
+
+System: `batch_matching_system`
+
+- Reacts to `CurrentEvent`.
+- On `EventKind::BatchMatchRun` (no subject; global event):
+  - When `BatchMatchingConfig` is present and enabled: collects all riders in `Waiting` with `matched_driver == None`, and all `Idle` drivers; calls `find_batch_matches()` on the matching algorithm; for each `MatchResult`, sets rider `matched_driver`, driver `matched_rider`, driver state to `Evaluating`, and schedules `MatchAccepted` 1s later for the driver. Schedules the next `BatchMatchRun` at `now + interval_secs`. Unmatched riders remain waiting for the next batch.
 
 ### `sim_core::systems::match_accepted`
 
@@ -440,8 +455,8 @@ System: `driver_decision_system`
       rider’s position, `dropoff` = rider’s `destination` or a neighbor of pickup,
       `requested_at` = rider’s `requested_at`, `matched_at` = clock.now(), `pickup_at` = None;
       schedules `MoveStep` 1 second from now (`schedule_in_secs(1, ...)`) for that trip (`subject: Trip(trip_entity)`).
-    - Reject: `Evaluating` → `Idle`, clears `matched_rider`, clears the rider’s `matched_driver`,
-      and reschedules `TryMatch` after a short delay (30s) if the rider is still `Waiting`.
+    - Reject: `Evaluating` → `Idle`, clears `matched_rider`, clears the rider’s `matched_driver`.
+      If batch matching is **disabled**, reschedules `TryMatch` after 30s for that rider; if batch matching is enabled, the rider remains waiting and is included in the next `BatchMatchRun`.
 
 ### `sim_core::systems::rider_cancel`
 
@@ -598,7 +613,7 @@ All per-system unit tests emulate the runner by popping one event, inserting
   driver acceptance (km), pickup-to-dropoff distance (km), and full timestamp columns (requested, matched, started, completed, cancelled),
   with timestamps shown as simulation datetimes sorted by last updated time (descending, most recent first). Controls include
   **Start** button (enabled only before simulation starts), **Step** button (advances 1 event), **Step 100** button (advances 100 events),
-  **Run/Pause** toggle (auto-advances simulation at configured clock speed), **Run to end** button (runs until event queue is empty),
+  **Run/Pause** toggle (auto-advances simulation at configured clock speed), **Run to end** button (runs until event queue is empty or simulation end time is reached),
   and **Reset** button (resets simulation with current parameters). Match radius, trip length, and map size inputs are
   configured in kilometers and converted to H3 cell distances (resolution 9, ~0.24 km per cell);
   the map size defines the scenario bounds used for spawning and destination sampling, so it is
@@ -624,9 +639,9 @@ All per-system unit tests emulate the runner by popping one event, inserting
   - **Scenario parameters**: Organized in a five-column layout:
     - **Supply (Drivers)**: Initial count, spawn count, spread (hours)
     - **Demand (Riders)**: Initial count, spawn count, spread (hours), cancel wait (min/max minutes)
-    - **Pricing & Matching**: Base fare, per km rate, commission rate (displayed as percentage), matching algorithm (Simple or Cost-based), match radius (km)
+    - **Pricing & Matching**: Base fare, per km rate, commission rate (displayed as percentage), matching algorithm (Simple, Cost-based, or Hungarian (batch)), match radius (km), batch matching checkbox (default on), batch interval (seconds)
     - **Map & Trips**: Map size (km), trip length range (km, min–max)
-    - **Timing**: Simulation start time (year/month/day/hour/minute UTC with "Now" button), seed (optional)
+    - **Timing**: Simulation start time (year/month/day/hour/minute UTC with "Now" button), sim duration (hours; simulation stops when clock reaches this time), seed (optional)
     All parameters except matching algorithm are only editable before simulation starts. Platform revenue is displayed in the Run outcomes section.
   - **Run outcomes**: Shows outcome counters (riders completed, riders cancelled, abandoned quote, trips completed, total resolved, conversion %, platform revenue),
     current state breakdowns (riders now: browsing/waiting/in transit, drivers now: idle/evaluating/en route/on trip/off duty, trips now: en route/on trip),
@@ -643,8 +658,7 @@ All per-system unit tests emulate the runner by popping one event, inserting
 
 ## Known Gaps (Not Implemented Yet)
 
-- Batch matching system: periodic event that collects all waiting riders and calls `find_batch_matches()` for global optimization.
-- Advanced matching algorithms: bipartite matching (Hungarian algorithm) for batch optimization, opportunity cost factoring, driver value weighting.
+- Opportunity cost and driver-value weighting in matching.
 - Driver acceptance models and rider conversion.
 - Event scheduling after match beyond fixed delays (e.g. variable trip duration).
 - H3-based movement or routing.

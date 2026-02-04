@@ -3,19 +3,24 @@ use bevy_ecs::prelude::{Entity, Query, Res, ResMut};
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
 use crate::ecs::{Driver, DriverState, Position, Rider, RiderState};
 use crate::matching::MatchingAlgorithmResource;
-use crate::scenario::MatchRadius;
+use crate::scenario::{BatchMatchingConfig, MatchRadius};
 
 const MATCH_RETRY_SECS: u64 = 30;
 
 pub fn matching_system(
     mut clock: ResMut<SimulationClock>,
     event: Res<CurrentEvent>,
+    batch_config: Option<Res<BatchMatchingConfig>>,
     match_radius: Option<Res<MatchRadius>>,
     matching_algorithm: Res<MatchingAlgorithmResource>,
     mut riders: Query<(Entity, &mut Rider, &Position)>,
     mut drivers: Query<(Entity, &mut Driver, &Position)>,
 ) {
     if event.0.kind != EventKind::TryMatch {
+        return;
+    }
+    // When batch matching is enabled, per-rider matching is not used
+    if batch_config.as_deref().map_or(false, |c| c.enabled) {
         return;
     }
 

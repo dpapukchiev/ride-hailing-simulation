@@ -6,7 +6,7 @@ use rand::{Rng, SeedableRng};
 
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock, ONE_HOUR_MS};
 use crate::ecs::{Driver, DriverFatigue, DriverEarnings, DriverState, Position, Rider, RiderState};
-use crate::scenario::random_destination;
+use crate::scenario::{random_destination, BatchMatchingConfig};
 use crate::spatial::GeoIndex;
 use crate::spawner::{random_cell_in_bounds, DriverSpawner, RiderSpawner};
 use h3o::CellIndex;
@@ -253,6 +253,7 @@ fn process_driver_spawner_event(
 pub fn simulation_started_system(
     mut commands: Commands,
     mut clock: ResMut<SimulationClock>,
+    batch_config: Option<Res<BatchMatchingConfig>>,
     rider_spawner: Option<ResMut<RiderSpawner>>,
     driver_spawner: Option<ResMut<DriverSpawner>>,
     event: Res<CurrentEvent>,
@@ -262,6 +263,13 @@ pub fn simulation_started_system(
     }
 
     let current_time_ms = clock.now();
+
+    // When batch matching is enabled, schedule the first BatchMatchRun at time 0
+    if let Some(cfg) = batch_config.as_deref() {
+        if cfg.enabled {
+            clock.schedule_at(0, EventKind::BatchMatchRun, None);
+        }
+    }
 
     // Initialize rider spawner and spawn initial riders
     if let Some(mut spawner) = rider_spawner {

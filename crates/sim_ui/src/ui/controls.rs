@@ -629,6 +629,7 @@ fn render_scenario_parameters(ui: &mut egui::Ui, app: &mut SimUiApp) {
                     .selected_text(match app.matching_algorithm {
                         MatchingAlgorithmType::Simple => "Simple",
                         MatchingAlgorithmType::CostBased => "Cost-based",
+                        MatchingAlgorithmType::Hungarian => "Hungarian (batch)",
                     })
                     .show_ui(ui, |ui| {
                         ui.selectable_value(
@@ -641,10 +642,27 @@ fn render_scenario_parameters(ui: &mut egui::Ui, app: &mut SimUiApp) {
                             MatchingAlgorithmType::CostBased,
                             "Cost-based (best match)",
                         );
+                        ui.selectable_value(
+                            &mut app.matching_algorithm,
+                            MatchingAlgorithmType::Hungarian,
+                            "Hungarian (batch)",
+                        );
                     });
                 if app.matching_algorithm != old_algorithm {
                     app.matching_algorithm_changed = true;
                 }
+            });
+            ui.horizontal(|ui| {
+                ui.add_enabled(can_edit, egui::Checkbox::new(&mut app.batch_matching_enabled, "Batch matching"));
+            });
+            ui.horizontal(|ui| {
+                ui.label("Batch interval (s)");
+                ui.add_enabled(
+                    can_edit,
+                    egui::DragValue::new(&mut app.batch_interval_secs)
+                        .range(1..=120)
+                        .speed(1),
+                );
             });
             ui.horizontal(|ui| {
                 ui.label("Match radius (km)");
@@ -728,6 +746,15 @@ fn render_scenario_parameters(ui: &mut egui::Ui, app: &mut SimUiApp) {
                     app.start_hour = hour;
                     app.start_minute = minute;
                 }
+            });
+            ui.horizontal(|ui| {
+                ui.label("Sim duration (h)");
+                ui.add_enabled(
+                    can_edit,
+                    egui::DragValue::new(&mut app.simulation_duration_hours)
+                        .range(1..=168)
+                        .speed(1),
+                );
             });
             ui.add_space(4.0);
             ui.horizontal(|ui| {

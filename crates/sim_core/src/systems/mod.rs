@@ -18,6 +18,7 @@ pub mod quote_decision;
 pub mod quote_accepted;
 pub mod quote_rejected;
 pub mod matching;
+pub mod batch_matching;
 pub mod match_accepted;
 pub mod driver_decision;
 pub mod movement;

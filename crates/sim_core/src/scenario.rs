@@ -7,7 +7,7 @@ use bevy_ecs::prelude::{Resource, World};
 
 use crate::clock::SimulationClock;
 use crate::distributions::TimeOfDayDistribution;
-use crate::matching::{CostBasedMatching, MatchingAlgorithmResource, SimpleMatching};
+use crate::matching::{CostBasedMatching, HungarianMatching, MatchingAlgorithmResource, SimpleMatching};
 use crate::patterns::{apply_driver_patterns, apply_rider_patterns};
 use crate::pricing::PricingConfig;
 use crate::spawner::{DriverSpawner, DriverSpawnerConfig, RiderSpawner, RiderSpawnerConfig};
@@ -39,6 +39,29 @@ const DRIVER_SUPPLY_AVERAGE_MULTIPLIER: f64 = 1.2;
 /// Max H3 grid distance (cells) for matching rider to driver. 0 = same cell only.
 #[derive(Debug, Clone, Copy, Default, Resource)]
 pub struct MatchRadius(pub u32);
+
+/// Simulation end time in milliseconds. When set, the runner stops processing events
+/// once the next event would be at or after this timestamp (so the simulation "ends" at this time).
+#[derive(Debug, Clone, Copy, Resource)]
+pub struct SimulationEndTimeMs(pub u64);
+
+/// Batch matching: run a global matching pass every N seconds instead of per-rider TryMatch.
+#[derive(Debug, Clone, Copy, Resource)]
+pub struct BatchMatchingConfig {
+    /// When true, BatchMatchRun events are scheduled and per-rider TryMatch is not used.
+    pub enabled: bool,
+    /// Interval in seconds between batch matching runs.
+    pub interval_secs: u64,
+}
+
+impl Default for BatchMatchingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            interval_secs: 5,
+        }
+    }
+}
 
 /// Rider cancel window while waiting for pickup (seconds).
 /// Uses a uniform distribution between min_wait_secs and max_wait_secs.
@@ -114,6 +137,8 @@ pub struct ScenarioParams {
     pub epoch_ms: Option<i64>,
     /// Pricing configuration. If None, uses default PricingConfig.
     pub pricing_config: Option<PricingConfig>,
+    /// Simulation end time in ms. When set, the runner stops when the next event is at or after this time.
+    pub simulation_end_time_ms: Option<u64>,
 }
 
 impl Default for ScenarioParams {
@@ -135,6 +160,7 @@ impl Default for ScenarioParams {
             max_trip_cells: 60,
             epoch_ms: None,
             pricing_config: None,
+            simulation_end_time_ms: None,
         }
     }
 }
@@ -179,6 +205,12 @@ impl ScenarioParams {
     /// Set pricing configuration.
     pub fn with_pricing_config(mut self, pricing_config: PricingConfig) -> Self {
         self.pricing_config = Some(pricing_config);
+        self
+    }
+
+    /// Set simulation end time in ms. Runner stops when the next event is at or after this time.
+    pub fn with_simulation_end_time_ms(mut self, end_ms: u64) -> Self {
+        self.simulation_end_time_ms = Some(end_ms);
         self
     }
 }
@@ -360,6 +392,11 @@ pub fn create_cost_based_matching(eta_weight: f64) -> MatchingAlgorithmResource 
     MatchingAlgorithmResource::new(Box::new(CostBasedMatching::new(eta_weight)))
 }
 
+/// Create a Hungarian (global batch) matching algorithm with the given ETA weight.
+pub fn create_hungarian_matching(eta_weight: f64) -> MatchingAlgorithmResource {
+    MatchingAlgorithmResource::new(Box::new(HungarianMatching::new(eta_weight)))
+}
+
 /// Create a realistic time-of-day pattern for rider demand.
 /// Uses patterns from the patterns module.
 fn create_rider_time_of_day_pattern(base_rate_per_sec: f64, epoch_ms: i64, seed: u64) -> TimeOfDayDistribution {
@@ -387,6 +424,10 @@ pub fn build_scenario(world: &mut World, params: ScenarioParams) {
     world.insert_resource(SimSnapshotConfig::default());
     world.insert_resource(SimSnapshots::default());
     world.insert_resource(MatchRadius(params.match_radius));
+    world.insert_resource(BatchMatchingConfig::default());
+    if let Some(end_ms) = params.simulation_end_time_ms {
+        world.insert_resource(SimulationEndTimeMs(end_ms));
+    }
     let seed = params.seed.unwrap_or(0);
     world.insert_resource(RiderCancelConfig {
         min_wait_secs: 120,
@@ -400,8 +441,8 @@ pub fn build_scenario(world: &mut World, params: ScenarioParams) {
         seed: seed.wrapping_add(0x711073_beef), // Use a different seed offset for quote decisions
     });
     world.insert_resource(SpeedModel::new(params.seed.map(|seed| seed ^ 0x5eed_cafe)));
-    // Default to cost-based matching with default ETA weight
-    world.insert_resource(create_cost_based_matching(crate::matching::DEFAULT_ETA_WEIGHT));
+    // Default to Hungarian (batch) matching with default ETA weight
+    world.insert_resource(create_hungarian_matching(crate::matching::DEFAULT_ETA_WEIGHT));
     // Insert pricing config (use provided or default)
     world.insert_resource(params.pricing_config.unwrap_or_default());
 

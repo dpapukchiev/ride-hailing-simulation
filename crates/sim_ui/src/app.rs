@@ -6,9 +6,15 @@ use std::time::Instant;
 use sim_core::matching::{DEFAULT_ETA_WEIGHT, MatchingAlgorithmResource};
 use sim_core::pricing::PricingConfig;
 use sim_core::runner::{run_next_event, simulation_schedule};
-use sim_core::scenario::{build_scenario, create_cost_based_matching, create_simple_matching, ScenarioParams};
+use sim_core::scenario::{
+    build_scenario, create_cost_based_matching, create_hungarian_matching, create_simple_matching,
+    ScenarioParams,
+};
 
-use crate::ui::utils::{apply_cancel_config, apply_snapshot_interval, bounds_from_km, datetime_to_unix_ms, km_to_cells};
+use crate::ui::utils::{
+    apply_batch_config, apply_cancel_config, apply_snapshot_interval, bounds_from_km,
+    datetime_to_unix_ms, km_to_cells,
+};
 
 /// Main application state for the simulation UI.
 pub struct SimUiApp {
@@ -27,6 +33,8 @@ pub struct SimUiApp {
     pub initial_driver_count: usize,
     pub request_window_hours: u64,
     pub driver_spread_hours: u64,
+    /// Simulation stops when clock reaches this time (hours of sim time).
+    pub simulation_duration_hours: u64,
     pub match_radius_km: f64,
     pub min_trip_km: f64,
     pub max_trip_km: f64,
@@ -42,6 +50,8 @@ pub struct SimUiApp {
     pub hide_off_duty_drivers: bool,
     pub matching_algorithm: MatchingAlgorithmType,
     pub matching_algorithm_changed: bool,
+    pub batch_matching_enabled: bool,
+    pub batch_interval_secs: u64,
     pub start_year: i32,
     pub start_month: u32,
     pub start_day: u32,
@@ -57,6 +67,7 @@ pub struct SimUiApp {
 pub enum MatchingAlgorithmType {
     Simple,
     CostBased,
+    Hungarian,
 }
 
 impl MatchingAlgorithmType {
@@ -64,6 +75,7 @@ impl MatchingAlgorithmType {
         match self {
             MatchingAlgorithmType::Simple => create_simple_matching(),
             MatchingAlgorithmType::CostBased => create_cost_based_matching(DEFAULT_ETA_WEIGHT),
+            MatchingAlgorithmType::Hungarian => create_hungarian_matching(DEFAULT_ETA_WEIGHT),
         }
     }
 }
@@ -77,6 +89,7 @@ impl SimUiApp {
         let initial_driver_count = 10;
         let request_window_hours = 21;
         let driver_spread_hours = 21;
+        let simulation_duration_hours = 24;
         let match_radius_km = 11.0;
         let min_trip_km = 1.0;
         let max_trip_km = 25.0;
@@ -85,7 +98,9 @@ impl SimUiApp {
         let rider_cancel_max_mins = 40;
         let seed_enabled = true;
         let seed_value = 123;
-        let matching_algorithm = MatchingAlgorithmType::CostBased;
+        let matching_algorithm = MatchingAlgorithmType::Hungarian;
+        let batch_matching_enabled = true;
+        let batch_interval_secs = 5;
         let base_fare = 2.50;
         let per_km_rate = 1.50;
         let commission_rate = 0.175;
@@ -118,8 +133,9 @@ impl SimUiApp {
 
         let mut world = World::new();
         build_scenario(&mut world, params);
-        // Override the default algorithm with the selected one
+        // Override the default algorithm and batch config with the selected ones
         world.insert_resource(matching_algorithm.create_matching_algorithm());
+        apply_batch_config(&mut world, batch_matching_enabled, batch_interval_secs);
         // Clock epoch is already set in build_scenario from params.epoch_ms
         sim_core::runner::initialize_simulation(&mut world);
         let schedule = simulation_schedule();
@@ -140,6 +156,7 @@ impl SimUiApp {
             initial_driver_count,
             request_window_hours,
             driver_spread_hours,
+            simulation_duration_hours,
             match_radius_km,
             min_trip_km,
             max_trip_km,
@@ -155,6 +172,8 @@ impl SimUiApp {
             hide_off_duty_drivers: true,
             matching_algorithm,
             matching_algorithm_changed: false,
+            batch_matching_enabled,
+            batch_interval_secs,
             start_year: year,
             start_month: month,
             start_day: day,
@@ -170,8 +189,13 @@ impl SimUiApp {
     pub fn reset(&mut self) {
         let mut world = World::new();
         build_scenario(&mut world, self.current_params());
-        // Override the default algorithm with the selected one
+        // Override the default algorithm and batch config with the selected ones
         world.insert_resource(self.create_matching_algorithm());
+        apply_batch_config(
+            &mut world,
+            self.batch_matching_enabled,
+            self.batch_interval_secs,
+        );
         apply_cancel_config(
             &mut world,
             self.rider_cancel_min_mins,
@@ -196,8 +220,13 @@ impl SimUiApp {
     pub fn start_simulation(&mut self) {
         let mut world = World::new();
         build_scenario(&mut world, self.current_params());
-        // Override the default algorithm with the selected one
+        // Override the default algorithm and batch config with the selected ones
         world.insert_resource(self.create_matching_algorithm());
+        apply_batch_config(
+            &mut world,
+            self.batch_matching_enabled,
+            self.batch_interval_secs,
+        );
         apply_cancel_config(
             &mut world,
             self.rider_cancel_min_mins,
@@ -220,6 +249,7 @@ impl SimUiApp {
         match self.matching_algorithm {
             MatchingAlgorithmType::Simple => create_simple_matching(),
             MatchingAlgorithmType::CostBased => create_cost_based_matching(DEFAULT_ETA_WEIGHT),
+            MatchingAlgorithmType::Hungarian => create_hungarian_matching(DEFAULT_ETA_WEIGHT),
         }
     }
 
@@ -235,6 +265,7 @@ impl SimUiApp {
         }
         .with_request_window_hours(self.request_window_hours)
         .with_driver_spread_hours(self.driver_spread_hours)
+        .with_simulation_end_time_ms(self.simulation_duration_hours * 3600 * 1000)
         .with_match_radius(km_to_cells(self.match_radius_km))
         .with_trip_duration_cells(km_to_cells(self.min_trip_km), km_to_cells(self.max_trip_km))
         .with_epoch_ms(start_epoch_ms);

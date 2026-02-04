@@ -8,7 +8,9 @@ use bevy_ecs::prelude::{Schedule, World};
 use bevy_ecs::schedule::apply_deferred;
 
 use crate::clock::{CurrentEvent, Event, EventKind, SimulationClock};
+use crate::scenario::SimulationEndTimeMs;
 use crate::systems::{
+    batch_matching::batch_matching_system,
     driver_decision::driver_decision_system, driver_offduty::driver_offduty_check_system,
     match_accepted::match_accepted_system,
     movement::movement_system, pickup_eta_updated::pickup_eta_updated_system,
@@ -22,8 +24,19 @@ use crate::systems::{
 };
 
 /// Runs one simulation step: pops the next event, inserts it as [CurrentEvent], then runs the schedule.
-/// Returns `true` if an event was processed, `false` if the clock was empty.
+/// Returns `true` if an event was processed, `false` if the clock was empty or if the next event
+/// is at or past [SimulationEndTimeMs] (when that resource is present).
 pub fn run_next_event(world: &mut World, schedule: &mut Schedule) -> bool {
+    let stop_at = world.get_resource::<SimulationEndTimeMs>().map(|e| e.0);
+    let next_ts = world
+        .get_resource::<SimulationClock>()
+        .and_then(|c| c.next_event_time());
+    if let (Some(end_ms), Some(ts)) = (stop_at, next_ts) {
+        if ts >= end_ms {
+            return false;
+        }
+    }
+
     let event = match world.resource_mut::<SimulationClock>().pop_next() {
         Some(e) => e,
         None => return false,
@@ -38,6 +51,16 @@ pub fn run_next_event_with_hook<F>(world: &mut World, schedule: &mut Schedule, m
 where
     F: FnMut(&World, &Event),
 {
+    let stop_at = world.get_resource::<SimulationEndTimeMs>().map(|e| e.0);
+    let next_ts = world
+        .get_resource::<SimulationClock>()
+        .and_then(|c| c.next_event_time());
+    if let (Some(end_ms), Some(ts)) = (stop_at, next_ts) {
+        if ts >= end_ms {
+            return false;
+        }
+    }
+
     let event = match world.resource_mut::<SimulationClock>().pop_next() {
         Some(e) => e,
         None => return false,
@@ -88,6 +111,7 @@ pub fn simulation_schedule() -> Schedule {
         quote_accepted_system,
         quote_rejected_system,
         matching_system,
+        batch_matching_system,
         match_accepted_system,
         driver_decision_system,
         rider_cancel_system,

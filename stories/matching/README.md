@@ -10,12 +10,12 @@
 
 - Story: As a dispatcher, I can batch pending requests every N seconds and run
   a global matching pass to reduce total ETA.
-  Status: Backlog
+  Status: Done (BatchMatchRun event, configurable interval; batch mode toggle in UI)
 
 - Story: As a dispatcher, I can use a bipartite matching algorithm (e.g., Hungarian
   algorithm) to optimize driver-rider pairings globally when processing batches
   of waiting riders.
-  Status: Backlog
+  Status: Done (HungarianMatching uses Kuhn–Munkres in find_batch_matches; default when batch enabled)
 
 - Story: As a dispatcher, I can factor in opportunity cost when matching drivers,
   considering their potential earnings from other matches to maximize overall
@@ -29,4 +29,4 @@
 
 - Story: As a dispatcher, I can minimize total ETA across all riders in a batch
   by solving a global optimization problem rather than matching riders sequentially.
-  Status: Backlog
+  Status: Done (Hungarian algorithm minimizes total cost in each batch run)
