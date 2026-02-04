@@ -37,14 +37,22 @@ This is a "crawl/walk" foundation aligned with the research plan.
 The simulation uses a **millisecond-scale timeline**: all timestamps and `clock.now()` are in ms. Time 0 maps to a real-world datetime via `epoch_ms` (e.g. Unix epoch or a fixed start time), so it is easy to convert simulation time ↔ real datetime. Events are scheduled at specific timestamps (`schedule_at`) or at a delta from current time (`schedule_in`). The timeline advances by popping the next scheduled event; when multiple events share the same ms, they are ordered by `EventKind` for determinism.
 
 The system is a discrete-event loop where **clock progression and event routing
-happen outside ECS systems**:
+happen outside ECS systems**. **The simulation executes sequentially**—one event
+at a time, with systems running in a fixed order:
 
 - The runner pops the next `Event` from `SimulationClock`, which advances time
   (`clock.now`) to that event’s timestamp.
 - The runner inserts that event into the ECS world as a `CurrentEvent` resource.
 - The ECS schedule is run, and **systems react to that concrete `CurrentEvent`**
-  (and only mutate the targeted rider/driver).
+  (and only mutate the targeted rider/driver). Systems execute sequentially in a
+  fixed order (see `simulation_schedule()`).
 - Systems may schedule follow-up events back onto `SimulationClock`.
+- The process repeats: pop next event → run schedule → repeat.
+
+This sequential execution model ensures deterministic behavior and makes the
+simulation easier to reason about. Parallelism is intended for running multiple
+simulation runs simultaneously (e.g., Monte Carlo experiments), not for
+parallelizing agents within a single simulation.
 
 Events are **targeted** via an optional subject (e.g. `EventSubject::Rider(Entity)`,
 `EventSubject::Driver(Entity)`, or `EventSubject::Trip(Entity)`), which allows
@@ -232,13 +240,16 @@ Clock progression and event routing are implemented here (outside systems):
 
 - **`run_next_event(world, schedule)`**: Pops the next event from `SimulationClock`,
   inserts it as `CurrentEvent`, runs the schedule. Returns `true` if an event was
-  processed, `false` if the clock was empty.
+  processed, `false` if the clock was empty. **Executes sequentially**—one event
+  at a time.
 - **`run_until_empty(world, schedule, max_steps)`**: Repeatedly calls
   `run_next_event` until the event queue is empty or `max_steps` is reached.
   Returns the number of steps executed.
 - **`simulation_schedule()`**: Builds the default schedule with all event-reacting
   systems (including spawner systems) plus `apply_deferred` so that spawned entities (e.g. `Trip`) are
-  applied before the next step.
+  applied before the next step. Systems are added in a specific order and **execute
+  sequentially** for each event. While bevy_ecs may parallelize queries within a
+  system, the systems themselves run one after another in the defined order.
 - **`initialize_simulation(world)`**: Schedules `SimulationStarted` event at time 0. Call this after building the scenario and before running events.
 
 Callers (tests or a binary) use the runner to drive the sim without

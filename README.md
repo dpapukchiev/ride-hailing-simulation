@@ -55,12 +55,13 @@ The simulation supports hundreds of concurrent riders and drivers, realistic tim
          │
          ▼
 ┌─────────────────┐
-│  Event Router   │ ← Pops events, inserts CurrentEvent
+│  Event Router   │ ← Pops events sequentially, inserts CurrentEvent
 └────────┬────────┘
          │
          ▼
 ┌─────────────────┐
 │   ECS Systems   │ ← React to CurrentEvent, mutate entities
+│                 │   (execute sequentially in fixed order)
 └────────┬────────┘
          │
          ▼
@@ -69,6 +70,13 @@ The simulation supports hundreds of concurrent riders and drivers, realistic tim
 │    Export       │
 └─────────────────┘
 ```
+
+**Execution Model**: The simulation executes **sequentially**—one event at a time.
+The runner pops the next event from the clock, sets it as `CurrentEvent`, then runs
+all systems in a fixed order. This ensures deterministic behavior and makes the
+simulation easier to reason about. Parallelism is intended for running multiple
+simulation runs simultaneously (Monte Carlo experiments), not for parallelizing
+agents within a single simulation.
 
 ### Key Components
 
@@ -87,6 +95,7 @@ The simulation supports hundreds of concurrent riders and drivers, realistic tim
 - Event-driven: React to `CurrentEvent` resource
 - Targeted: Use `EventSubject` to target specific entities
 - Modular: Each system handles one aspect (matching, movement, etc.)
+- **Sequential execution**: Systems run one after another in a fixed order for each event
 
 **Spatial (`sim_core::spatial`)**
 - H3 resolution 9 wrapper
