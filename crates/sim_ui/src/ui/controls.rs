@@ -54,7 +54,7 @@ pub fn render_control_panel(ui: &mut egui::Ui, app: &mut SimUiApp) {
         egui::ComboBox::from_id_salt("clock_speed")
             .selected_text(format!("{}x", app.speed_multiplier as u32))
             .show_ui(ui, |ui| {
-                for speed in [10.0, 20.0, 50.0, 100.0, 200.0] {
+                for speed in [10.0, 20.0, 50.0, 100.0, 200.0, 400.0, 1000.0, 2000.0] {
                     ui.selectable_value(
                         &mut app.speed_multiplier,
                         speed,
@@ -68,6 +68,7 @@ pub fn render_control_panel(ui: &mut egui::Ui, app: &mut SimUiApp) {
         ui.checkbox(&mut app.show_riders, "Riders");
         ui.checkbox(&mut app.show_drivers, "Drivers");
         ui.checkbox(&mut app.show_driver_stats, "Driver stats (earnings/fatigue)");
+        ui.checkbox(&mut app.hide_off_duty_drivers, "Hide off-duty drivers");
         ui.checkbox(&mut app.grid_enabled, "Grid");
         ui.label(format!("Steps executed: {}", app.steps_executed));
     });
@@ -100,13 +101,13 @@ pub fn render_control_panel(ui: &mut egui::Ui, app: &mut SimUiApp) {
         });
 
     egui::CollapsingHeader::new("Run outcomes")
-        .default_open(true)
+        .default_open(false)
         .show(ui, |ui| {
             render_run_outcomes(ui, app);
         });
 
     egui::CollapsingHeader::new("Fleet")
-        .default_open(true)
+        .default_open(false)
         .show(ui, |ui| {
             render_fleet(ui, app);
         });

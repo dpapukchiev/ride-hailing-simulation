@@ -39,6 +39,7 @@ pub struct SimUiApp {
     pub show_riders: bool,
     pub show_drivers: bool,
     pub show_driver_stats: bool,
+    pub hide_off_duty_drivers: bool,
     pub matching_algorithm: MatchingAlgorithmType,
     pub matching_algorithm_changed: bool,
     pub start_year: i32,
@@ -87,14 +88,14 @@ impl SimUiApp {
         let matching_algorithm = MatchingAlgorithmType::CostBased;
         let base_fare = 2.50;
         let per_km_rate = 1.50;
-        let commission_rate = 0.0;
+        let commission_rate = 0.175;
         
-        // Default start time: 2026-02-03 20:12:00 UTC
+        // Default start time: 2026-02-03 06:30:00 UTC
         let year = 2026;
         let month = 2;
         let day = 3;
-        let hour = 20;
-        let minute = 12;
+        let hour = 6;
+        let minute = 30;
         let start_epoch_ms = datetime_to_unix_ms(year, month, day, hour, minute);
 
         let mut params = ScenarioParams {
@@ -130,7 +131,7 @@ impl SimUiApp {
             auto_run: false,
             started: false,
             snapshot_interval_ms: 1000,
-            speed_multiplier: 200.0,
+            speed_multiplier: 1000.0,
             sim_budget_ms: 0.0,
             last_frame_instant: None,
             num_riders,
@@ -151,6 +152,7 @@ impl SimUiApp {
             show_riders: true,
             show_drivers: true,
             show_driver_stats: true,
+            hide_off_duty_drivers: true,
             matching_algorithm,
             matching_algorithm_changed: false,
             start_year: year,
