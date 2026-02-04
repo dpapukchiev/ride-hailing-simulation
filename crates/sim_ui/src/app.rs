@@ -104,26 +104,26 @@ impl SimUiApp {
         let min_trip_km = 1.0;
         let max_trip_km = 25.0;
         let map_size_km = 25.0;
-        let rider_cancel_min_mins = 10;
+        let rider_cancel_min_mins = 6;
         let rider_cancel_max_mins = 40;
         let seed_enabled = true;
         let seed_value = 123;
         let matching_algorithm = MatchingAlgorithmType::Hungarian;
         let batch_matching_enabled = true;
-        let batch_interval_secs = 5;
-        let base_fare = 2.50;
-        let per_km_rate = 1.50;
+        let batch_interval_secs = 20;
+        let base_fare = 1.20;
+        let per_km_rate = 1.00;
         let commission_rate = 0.175;
-        let surge_enabled = false;
-        let surge_radius_k = 1;
+        let surge_enabled = true;
+        let surge_radius_k = 2;
         let surge_max_multiplier = 2.0;
         let max_willingness_to_pay = 50.0;
-        let max_acceptable_eta_min: u64 = 10;
+        let max_acceptable_eta_min: u64 = 20;
         let accept_probability = 0.8;
         let max_quote_rejections = 3;
         let driver_base_acceptance_score = 1.0;
-        let driver_fare_weight = 0.1;
-        let driver_pickup_distance_penalty = -2.0;
+        let driver_fare_weight = 0.37;
+        let driver_pickup_distance_penalty = -0.7;
 
         // Default start time: 2026-02-03 06:30:00 UTC
         let year = 2026;

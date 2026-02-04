@@ -589,21 +589,21 @@ fn render_scenario_parameters(ui: &mut egui::Ui, app: &mut SimUiApp) {
                 ui.label("Supply (Drivers)");
             });
             ui.horizontal(|ui| {
-                ui.label("Initial");
+                ui.label("Initial").on_hover_text("Number of drivers spawned immediately at simulation start (before scheduled spawning)");
                 ui.add_enabled(
                     can_edit,
                     egui::DragValue::new(&mut app.initial_driver_count).range(0..=10_000),
                 );
             });
             ui.horizontal(|ui| {
-                ui.label("Spawn count");
+                ui.label("Spawn count").on_hover_text("Total number of drivers to spawn over the simulation window");
                 ui.add_enabled(
                     can_edit,
                     egui::DragValue::new(&mut app.num_drivers).range(1..=10_000),
                 );
             });
             ui.horizontal(|ui| {
-                ui.label("Spread (h)");
+                ui.label("Spread (h)").on_hover_text("Time window (hours) over which scheduled drivers spawn. Drivers spawn continuously with time-of-day variations (rush hours have higher rates)");
                 ui.add_enabled(
                     can_edit,
                     egui::DragValue::new(&mut app.driver_spread_hours).range(1..=24),
@@ -614,7 +614,7 @@ fn render_scenario_parameters(ui: &mut egui::Ui, app: &mut SimUiApp) {
                 ui.label("Driver Decision");
             });
             ui.horizontal(|ui| {
-                ui.label("Base score");
+                ui.label("Base score").on_hover_text("Base acceptance score before factors are applied. Higher values make drivers more likely to accept matches. Used in logit model: score = base + (fare × fare_weight) + (pickup_distance × pickup_penalty) + ...");
                 ui.add_enabled(
                     can_edit,
                     egui::DragValue::new(&mut app.driver_base_acceptance_score)
@@ -623,7 +623,7 @@ fn render_scenario_parameters(ui: &mut egui::Ui, app: &mut SimUiApp) {
                 );
             });
             ui.horizontal(|ui| {
-                ui.label("Fare weight");
+                ui.label("Fare weight").on_hover_text("Weight for fare attractiveness in driver acceptance. Higher fare increases acceptance probability. Typical range: 0.0-1.0");
                 ui.add_enabled(
                     can_edit,
                     egui::DragValue::new(&mut app.driver_fare_weight)
@@ -632,7 +632,7 @@ fn render_scenario_parameters(ui: &mut egui::Ui, app: &mut SimUiApp) {
                 );
             });
             ui.horizontal(|ui| {
-                ui.label("Pickup penalty");
+                ui.label("Pickup penalty").on_hover_text("Penalty per km of pickup distance. Longer pickup distances decrease acceptance probability. Typically negative (e.g., -2.0 means each km reduces score by 2.0)");
                 ui.add_enabled(
                     can_edit,
                     egui::DragValue::new(&mut app.driver_pickup_distance_penalty)
@@ -648,28 +648,28 @@ fn render_scenario_parameters(ui: &mut egui::Ui, app: &mut SimUiApp) {
                 ui.label("Demand (Riders)");
             });
             ui.horizontal(|ui| {
-                ui.label("Initial");
+                ui.label("Initial").on_hover_text("Number of riders spawned immediately at simulation start (before scheduled spawning)");
                 ui.add_enabled(
                     can_edit,
                     egui::DragValue::new(&mut app.initial_rider_count).range(0..=10_000),
                 );
             });
             ui.horizontal(|ui| {
-                ui.label("Spawn count");
+                ui.label("Spawn count").on_hover_text("Total number of riders to spawn over the simulation window");
                 ui.add_enabled(
                     can_edit,
                     egui::DragValue::new(&mut app.num_riders).range(1..=10_000),
                 );
             });
             ui.horizontal(|ui| {
-                ui.label("Spread (h)");
+                ui.label("Spread (h)").on_hover_text("Time window (hours) over which scheduled riders spawn. Riders spawn with time-of-day variations (rush hours have higher demand rates)");
                 ui.add_enabled(
                     can_edit,
                     egui::DragValue::new(&mut app.request_window_hours).range(1..=24),
                 );
             });
             ui.horizontal(|ui| {
-                ui.label("Cancel wait (m)");
+                ui.label("Cancel wait (m)").on_hover_text("Random wait time range (minutes) before rider cancels while waiting for pickup. Uniform distribution between min and max");
                 ui.add_enabled(
                     can_edit,
                     egui::DragValue::new(&mut app.rider_cancel_min_mins)
@@ -690,7 +690,7 @@ fn render_scenario_parameters(ui: &mut egui::Ui, app: &mut SimUiApp) {
                 ui.label("Pricing");
             });
             ui.horizontal(|ui| {
-                ui.label("Base fare");
+                ui.label("Base fare").on_hover_text("Base fare in currency units (e.g., dollars). Formula: fare = base_fare + (distance_km × per_km_rate)");
                 ui.add_enabled(
                     can_edit,
                     egui::DragValue::new(&mut app.base_fare)
@@ -699,7 +699,7 @@ fn render_scenario_parameters(ui: &mut egui::Ui, app: &mut SimUiApp) {
                 );
             });
             ui.horizontal(|ui| {
-                ui.label("Per km");
+                ui.label("Per km").on_hover_text("Per-kilometer rate in currency units. Multiplied by trip distance and added to base fare");
                 ui.add_enabled(
                     can_edit,
                     egui::DragValue::new(&mut app.per_km_rate)
@@ -708,7 +708,7 @@ fn render_scenario_parameters(ui: &mut egui::Ui, app: &mut SimUiApp) {
                 );
             });
             ui.horizontal(|ui| {
-                ui.label("Commission");
+                ui.label("Commission").on_hover_text("Commission rate as fraction (0.0-1.0). 0.15 = 15% commission. Driver earnings = fare × (1 - commission_rate), platform revenue = fare × commission_rate");
                 ui.add_enabled(
                     can_edit,
                     egui::DragValue::new(&mut app.commission_rate)
@@ -719,15 +719,15 @@ fn render_scenario_parameters(ui: &mut egui::Ui, app: &mut SimUiApp) {
             });
             ui.add_space(4.0);
             ui.horizontal(|ui| {
-                ui.add_enabled(can_edit, egui::Checkbox::new(&mut app.surge_enabled, "Surge pricing"));
+                ui.add_enabled(can_edit, egui::Checkbox::new(&mut app.surge_enabled, "Surge pricing")).on_hover_text("When enabled, applies dynamic surge multipliers when demand exceeds supply in local H3 clusters around pickup location");
             });
             ui.horizontal(|ui| {
-                ui.label("Surge radius (k)");
+                ui.label("Surge radius (k)").on_hover_text("H3 grid disk radius (k) for surge cluster calculation around pickup. Larger radius considers more drivers/riders in the area");
                 ui.add_enabled(
                     can_edit && app.surge_enabled,
                     egui::DragValue::new(&mut app.surge_radius_k).range(1..=5).speed(1),
                 );
-                ui.label("Max mult");
+                ui.label("Max mult").on_hover_text("Maximum surge multiplier cap (e.g., 2.0 = 2x base fare). Surge = min(1.0 + (demand - supply) / supply, max_multiplier)");
                 ui.add_enabled(
                     can_edit && app.surge_enabled,
                     egui::DragValue::new(&mut app.surge_max_multiplier)
@@ -743,7 +743,7 @@ fn render_scenario_parameters(ui: &mut egui::Ui, app: &mut SimUiApp) {
                 ui.label("Rider quote");
             });
             ui.horizontal(|ui| {
-                ui.label("Max WTP ($)");
+                ui.label("Max WTP ($)").on_hover_text("Maximum willingness to pay. Rider will reject quote if fare exceeds this amount (deterministic rejection)");
                 ui.add_enabled(
                     can_edit,
                     egui::DragValue::new(&mut app.max_willingness_to_pay)
@@ -752,7 +752,7 @@ fn render_scenario_parameters(ui: &mut egui::Ui, app: &mut SimUiApp) {
                 );
             });
             ui.horizontal(|ui| {
-                ui.label("Max ETA (min)");
+                ui.label("Max ETA (min)").on_hover_text("Maximum acceptable ETA to pickup (minutes). Rider will reject quote if ETA exceeds this (deterministic rejection)");
                 ui.add_enabled(
                     can_edit,
                     egui::DragValue::new(&mut app.max_acceptable_eta_min)
@@ -761,7 +761,7 @@ fn render_scenario_parameters(ui: &mut egui::Ui, app: &mut SimUiApp) {
                 );
             });
             ui.horizontal(|ui| {
-                ui.label("Accept %");
+                ui.label("Accept %").on_hover_text("Probability (0.0-1.0) that rider accepts quote when within price/ETA limits. If rejected, rider may request another quote (up to max rejections)");
                 ui.add_enabled(
                     can_edit,
                     egui::DragValue::new(&mut app.accept_probability)
@@ -770,7 +770,7 @@ fn render_scenario_parameters(ui: &mut egui::Ui, app: &mut SimUiApp) {
                 );
             });
             ui.horizontal(|ui| {
-                ui.label("Max quote rejections");
+                ui.label("Max quote rejections").on_hover_text("Maximum number of quote rejections before rider gives up. After this, rider is marked as abandoned-quote and despawned");
                 ui.add_enabled(
                     can_edit,
                     egui::DragValue::new(&mut app.max_quote_rejections).range(1..=10).speed(1),
@@ -785,7 +785,7 @@ fn render_scenario_parameters(ui: &mut egui::Ui, app: &mut SimUiApp) {
             });
             ui.horizontal(|ui| {
                 let old_algorithm = app.matching_algorithm;
-                egui::ComboBox::from_id_salt("matching_algorithm")
+                let combo_response = egui::ComboBox::from_id_salt("matching_algorithm")
                     .selected_text(match app.matching_algorithm {
                         MatchingAlgorithmType::Simple => "Simple",
                         MatchingAlgorithmType::CostBased => "Cost-based",
@@ -808,15 +808,16 @@ fn render_scenario_parameters(ui: &mut egui::Ui, app: &mut SimUiApp) {
                             "Hungarian (batch)",
                         );
                     });
+                combo_response.response.on_hover_text("Matching algorithm: Simple = first match within radius; Cost-based = best match by distance+ETA score; Hungarian = global batch optimization (requires batch matching enabled)");
                 if app.matching_algorithm != old_algorithm {
                     app.matching_algorithm_changed = true;
                 }
             });
             ui.horizontal(|ui| {
-                ui.add_enabled(can_edit, egui::Checkbox::new(&mut app.batch_matching_enabled, "Batch matching"));
+                ui.add_enabled(can_edit, egui::Checkbox::new(&mut app.batch_matching_enabled, "Batch matching")).on_hover_text("When enabled, collects all waiting riders and idle drivers periodically and runs global matching. When disabled, each rider triggers TryMatch individually");
             });
             ui.horizontal(|ui| {
-                ui.label("Batch interval (s)");
+                ui.label("Batch interval (s)").on_hover_text("Interval (seconds) between batch matching runs. Only applies when batch matching is enabled");
                 ui.add_enabled(
                     can_edit,
                     egui::DragValue::new(&mut app.batch_interval_secs)
@@ -825,7 +826,7 @@ fn render_scenario_parameters(ui: &mut egui::Ui, app: &mut SimUiApp) {
                 );
             });
             ui.horizontal(|ui| {
-                ui.label("Match radius (km)");
+                ui.label("Match radius (km)").on_hover_text("Maximum H3 grid distance for matching rider to driver. Converted to H3 cells internally. 0 = same cell only. Larger radius allows matching to drivers further away");
                 ui.add_enabled(
                     can_edit,
                     egui::DragValue::new(&mut app.match_radius_km)
@@ -841,7 +842,7 @@ fn render_scenario_parameters(ui: &mut egui::Ui, app: &mut SimUiApp) {
                 ui.label("Map & Trips");
             });
             ui.horizontal(|ui| {
-                ui.label("Map size (km)");
+                ui.label("Map size (km)").on_hover_text("Geographic bounds for spawn positions (lat/lng degrees). Default: San Francisco Bay Area. Larger size = larger playable area");
                 ui.add_enabled(
                     can_edit,
                     egui::DragValue::new(&mut app.map_size_km)
@@ -850,7 +851,7 @@ fn render_scenario_parameters(ui: &mut egui::Ui, app: &mut SimUiApp) {
                 );
             });
             ui.horizontal(|ui| {
-                ui.label("Trip (km)");
+                ui.label("Trip (km)").on_hover_text("Trip length range (km). Converted to H3 cells internally. Random destination is selected within this range from pickup location");
                 ui.add_enabled(
                     can_edit,
                     egui::DragValue::new(&mut app.min_trip_km)
@@ -873,7 +874,7 @@ fn render_scenario_parameters(ui: &mut egui::Ui, app: &mut SimUiApp) {
                 ui.label("Timing");
             });
             ui.horizontal(|ui| {
-                ui.label("Start (UTC)");
+                ui.label("Start (UTC)").on_hover_text("Real-world datetime (UTC) corresponding to simulation time 0. Affects time-of-day patterns (rush hours, day/night variations)");
             });
             ui.horizontal(|ui| {
                 ui.add_enabled(
@@ -908,7 +909,7 @@ fn render_scenario_parameters(ui: &mut egui::Ui, app: &mut SimUiApp) {
                 }
             });
             ui.horizontal(|ui| {
-                ui.label("Sim duration (h)");
+                ui.label("Sim duration (h)").on_hover_text("Simulation stops when clock reaches this time (hours of sim time). Runner stops processing events once next event would be at or after this time");
                 ui.add_enabled(
                     can_edit,
                     egui::DragValue::new(&mut app.simulation_duration_hours)
@@ -918,7 +919,7 @@ fn render_scenario_parameters(ui: &mut egui::Ui, app: &mut SimUiApp) {
             });
             ui.add_space(4.0);
             ui.horizontal(|ui| {
-                ui.add_enabled(can_edit, egui::Checkbox::new(&mut app.seed_enabled, "Seed"));
+                ui.add_enabled(can_edit, egui::Checkbox::new(&mut app.seed_enabled, "Seed")).on_hover_text("When enabled, uses the seed value for reproducible random number generation. Same seed = same simulation results");
                 ui.add_enabled(
                     can_edit && app.seed_enabled,
                     egui::DragValue::new(&mut app.seed_value).range(0..=u64::MAX),
