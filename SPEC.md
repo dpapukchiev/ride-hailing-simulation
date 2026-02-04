@@ -526,12 +526,11 @@ System: `driver_offduty_check_system`
 
 - Reacts to `CurrentEvent`.
 - On `EventKind::CheckDriverOffDuty`:
-  - Periodically checks all active drivers (not already OffDuty) for earnings targets and fatigue thresholds.
-  - Skips drivers currently on a trip (`EnRoute` or `OnTrip`); they are checked after trip completion.
-  - For each eligible driver:
+  - Periodically checks all active drivers (not already OffDuty) for earnings targets and fatigue thresholds, including drivers in `EnRoute` or `OnTrip`, so that limits are enforced on the 5-minute tick and drivers cannot exceed them by staying in back-to-back trips between checks.
+  - For each driver (excluding only those already OffDuty):
     - Checks if `daily_earnings >= daily_earnings_target` (earnings target reached).
     - Checks if `session_duration_ms >= fatigue_threshold_ms` (fatigue threshold exceeded).
-  - Transitions drivers to `OffDuty` if either threshold is exceeded.
+  - Transitions drivers to `OffDuty` if either threshold is exceeded. A driver marked OffDuty while `EnRoute` or `OnTrip` still finishes the current trip (movement and trip completion are unchanged); they simply receive no new matches afterward.
   - Schedules next check in 5 minutes (`CHECK_INTERVAL_MS`) if there are active drivers remaining.
   - Stops scheduling periodic checks when no active drivers remain (prevents infinite event queue).
 - On `EventKind::SimulationStarted`:

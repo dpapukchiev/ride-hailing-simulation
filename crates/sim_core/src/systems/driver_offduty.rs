@@ -28,11 +28,8 @@ pub fn driver_offduty_check_system(
             
             has_active_drivers = true;
             
-            // Skip drivers currently on a trip (check after trip completion)
-            if driver.state == DriverState::EnRoute || driver.state == DriverState::OnTrip {
-                continue;
-            }
-            
+            // Enforce earnings and fatigue for all active drivers, including EnRoute/OnTrip,
+            // so drivers cannot exceed limits by staying in back-to-back trips between checks.
             let mut should_go_offduty = false;
             
             // Check earnings target
@@ -165,5 +162,50 @@ mod tests {
         
         let driver = world.entity(driver_entity).get::<Driver>().expect("driver");
         assert_eq!(driver.state, DriverState::OffDuty);
+    }
+
+    #[test]
+    fn driver_goes_offduty_when_fatigue_exceeded_while_en_route() {
+        let mut world = World::new();
+        world.insert_resource(SimulationClock::default());
+
+        let target_time = 9 * 60 * 60 * 1000; // 9 hours
+        let driver_entity = world
+            .spawn((
+                Driver {
+                    state: DriverState::EnRoute,
+                    matched_rider: None,
+                },
+                DriverEarnings {
+                    daily_earnings: 50.0,
+                    daily_earnings_target: 200.0,
+                    session_start_time_ms: 0,
+                },
+                DriverFatigue {
+                    fatigue_threshold_ms: 8 * 60 * 60 * 1000, // 8 hours
+                },
+            ))
+            .id();
+
+        world
+            .resource_mut::<SimulationClock>()
+            .schedule_at(target_time, EventKind::CheckDriverOffDuty, None);
+
+        let event = world
+            .resource_mut::<SimulationClock>()
+            .pop_next()
+            .expect("check driver offduty event");
+        world.insert_resource(CurrentEvent(event));
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(driver_offduty_check_system);
+        schedule.run(&mut world);
+
+        let driver = world.entity(driver_entity).get::<Driver>().expect("driver");
+        assert_eq!(
+            driver.state,
+            DriverState::OffDuty,
+            "driver over fatigue threshold should go OffDuty even when EnRoute"
+        );
     }
 }
