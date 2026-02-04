@@ -88,6 +88,7 @@ fn spawn_rider(
                 requested_at: Some(current_time_ms),
                 quote_rejections: 0,
                 accepted_fare: None,
+                last_rejection_reason: None,
             },
             Position(position),
         ))

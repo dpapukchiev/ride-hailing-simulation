@@ -175,6 +175,7 @@ mod tests {
                     requested_at: None,
                     quote_rejections: 0,
                     accepted_fare: Some(15.0),
+                    last_rejection_reason: None,
                 },
                 Position(cell),
             ))
@@ -256,6 +257,7 @@ mod tests {
                     requested_at: None,
                     quote_rejections: 0,
                     accepted_fare: Some(5.0), // Low fare
+                    last_rejection_reason: None,
                 },
                 Position(cell),
             ))
@@ -329,6 +331,7 @@ mod tests {
                     requested_at: None,
                     quote_rejections: 0,
                     accepted_fare: Some(10.0),
+                    last_rejection_reason: None,
                 },
                 Position(cell),
             ))
@@ -360,6 +363,7 @@ mod tests {
                     requested_at: None,
                     quote_rejections: 0,
                     accepted_fare: Some(10.0),
+                    last_rejection_reason: None,
                 },
                 Position(cell),
             ))

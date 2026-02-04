@@ -109,6 +109,7 @@ mod tests {
                     requested_at: None,
                     quote_rejections: 0,
                     accepted_fare: None,
+                    last_rejection_reason: None,
                 },
                 Position(cell),
             ))

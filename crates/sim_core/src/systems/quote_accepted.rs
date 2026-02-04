@@ -72,6 +72,7 @@ mod tests {
                     requested_at: None,
                     quote_rejections: 0,
                     accepted_fare: None,
+                    last_rejection_reason: None,
                 },
                 RiderQuote { fare: 12.5, eta_ms: 60_000 },
             ))

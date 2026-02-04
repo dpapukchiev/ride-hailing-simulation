@@ -11,6 +11,8 @@
 use bevy_ecs::prelude::{Component, Entity};
 use h3o::CellIndex;
 
+use crate::telemetry::RiderAbandonmentReason;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RiderState {
     Browsing,
@@ -32,6 +34,8 @@ pub struct Rider {
     pub quote_rejections: u32,
     /// Fare the rider accepted when they transitioned to Waiting; used for driver earnings and trip completion.
     pub accepted_fare: Option<f64>,
+    /// Last reason this rider rejected a quote (used to track abandonment reason when they give up).
+    pub last_rejection_reason: Option<RiderAbandonmentReason>,
 }
 
 /// Current quote shown to a rider (fare + ETA). Attached while rider is viewing a quote; used for UI/telemetry.

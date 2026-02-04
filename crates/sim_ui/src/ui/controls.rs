@@ -144,10 +144,27 @@ fn render_run_outcomes(ui: &mut egui::Ui, app: &SimUiApp) {
         columns[1].vertical(|ui| {
             ui.label("Riders cancelled");
             ui.label(telemetry.riders_cancelled_total.to_string());
+            if telemetry.riders_cancelled_total > 0 {
+                let timeout_pct = (telemetry.riders_cancelled_pickup_timeout as f64 / telemetry.riders_cancelled_total as f64) * 100.0;
+                ui.add_space(2.0);
+                ui.label(format!("  Timeout: {} ({:.1}%)", 
+                    telemetry.riders_cancelled_pickup_timeout,
+                    timeout_pct));
+            }
         });
         columns[2].vertical(|ui| {
             ui.label("Abandoned (quote)");
             ui.label(telemetry.riders_abandoned_quote_total.to_string());
+            let total_quote_abandoned = telemetry.riders_abandoned_quote_total;
+            if total_quote_abandoned > 0 {
+                let price_pct = (telemetry.riders_abandoned_price as f64 / total_quote_abandoned as f64) * 100.0;
+                let eta_pct = (telemetry.riders_abandoned_eta as f64 / total_quote_abandoned as f64) * 100.0;
+                let stochastic_pct = (telemetry.riders_abandoned_stochastic as f64 / total_quote_abandoned as f64) * 100.0;
+                ui.add_space(2.0);
+                ui.label(format!("  Price: {} ({:.1}%)", telemetry.riders_abandoned_price, price_pct));
+                ui.label(format!("  ETA: {} ({:.1}%)", telemetry.riders_abandoned_eta, eta_pct));
+                ui.label(format!("  Stochastic: {} ({:.1}%)", telemetry.riders_abandoned_stochastic, stochastic_pct));
+            }
         });
         columns[3].vertical(|ui| {
             ui.label("Trips completed");

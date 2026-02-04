@@ -7,12 +7,13 @@ use rand::{Rng, SeedableRng};
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
 use crate::ecs::{Rider, RiderQuote, RiderState};
 use crate::scenario::RiderQuoteConfig;
+use crate::telemetry::RiderAbandonmentReason;
 
 pub fn quote_decision_system(
     mut clock: ResMut<SimulationClock>,
     event: Res<CurrentEvent>,
     quote_config: Option<Res<RiderQuoteConfig>>,
-    riders: Query<(Entity, &Rider, &RiderQuote)>,
+    mut riders: Query<(Entity, &mut Rider, &RiderQuote)>,
 ) {
     if event.0.kind != EventKind::QuoteDecision {
         return;
@@ -22,7 +23,7 @@ pub fn quote_decision_system(
         return;
     };
 
-    let Ok((_, rider, quote)) = riders.get(rider_entity) else {
+    let Ok((_, mut rider, quote)) = riders.get_mut(rider_entity) else {
         return;
     };
     if rider.state != RiderState::Browsing {
@@ -33,6 +34,12 @@ pub fn quote_decision_system(
     let over_price = quote.fare > config.max_willingness_to_pay;
     let over_eta = quote.eta_ms > config.max_acceptable_eta_ms;
     if over_price || over_eta {
+        // Set rejection reason before scheduling rejection event
+        rider.last_rejection_reason = Some(if over_price {
+            RiderAbandonmentReason::QuotePriceTooHigh
+        } else {
+            RiderAbandonmentReason::QuoteEtaTooLong
+        });
         clock.schedule_in_secs(
             0,
             EventKind::QuoteRejected,
@@ -51,6 +58,8 @@ pub fn quote_decision_system(
             Some(EventSubject::Rider(rider_entity)),
         );
     } else {
+        // Set rejection reason for stochastic rejection
+        rider.last_rejection_reason = Some(RiderAbandonmentReason::QuoteStochasticRejection);
         clock.schedule_in_secs(
             0,
             EventKind::QuoteRejected,
@@ -91,6 +100,7 @@ mod tests {
                     requested_at: None,
                     quote_rejections: 0,
                     accepted_fare: None,
+                    last_rejection_reason: None,
                 },
                 Position(cell),
                 RiderQuote {
@@ -150,6 +160,7 @@ mod tests {
                     requested_at: None,
                     quote_rejections: 0,
                     accepted_fare: None,
+                    last_rejection_reason: None,
                 },
                 Position(cell),
                 RiderQuote {

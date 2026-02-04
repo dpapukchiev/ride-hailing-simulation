@@ -49,6 +49,8 @@ pub fn rider_cancel_system(
     rider.state = RiderState::Cancelled;
     rider.matched_driver = None;
     telemetry.riders_cancelled_total = telemetry.riders_cancelled_total.saturating_add(1);
+    // Track pickup timeout cancellation
+    telemetry.riders_cancelled_pickup_timeout = telemetry.riders_cancelled_pickup_timeout.saturating_add(1);
     commands.entity(rider_entity).despawn();
 }
 
@@ -82,6 +84,7 @@ mod tests {
                     requested_at: None,
                     quote_rejections: 0,
                     accepted_fare: None,
+                    last_rejection_reason: None,
                 },
                 Position(cell),
             ))
@@ -164,6 +167,7 @@ mod tests {
                     requested_at: None,
                     quote_rejections: 0,
                     accepted_fare: None,
+                    last_rejection_reason: None,
                 },
                 Position(cell),
             ))

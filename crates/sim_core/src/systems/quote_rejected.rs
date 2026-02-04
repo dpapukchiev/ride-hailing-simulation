@@ -5,7 +5,7 @@ use bevy_ecs::prelude::{Commands, Query, Res, ResMut};
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
 use crate::ecs::{Rider, RiderState};
 use crate::scenario::RiderQuoteConfig;
-use crate::telemetry::SimTelemetry;
+use crate::telemetry::{RiderAbandonmentReason, SimTelemetry};
 
 pub fn quote_rejected_system(
     mut clock: ResMut<SimulationClock>,
@@ -40,8 +40,27 @@ pub fn quote_rejected_system(
             Some(EventSubject::Rider(rider_entity)),
         );
     } else {
+        // Rider gives up - record abandonment reason
         rider.state = RiderState::Cancelled;
         telemetry.riders_abandoned_quote_total = telemetry.riders_abandoned_quote_total.saturating_add(1);
+        
+        // Track breakdown by reason
+        match rider.last_rejection_reason {
+            Some(RiderAbandonmentReason::QuotePriceTooHigh) => {
+                telemetry.riders_abandoned_price = telemetry.riders_abandoned_price.saturating_add(1);
+            }
+            Some(RiderAbandonmentReason::QuoteEtaTooLong) => {
+                telemetry.riders_abandoned_eta = telemetry.riders_abandoned_eta.saturating_add(1);
+            }
+            Some(RiderAbandonmentReason::QuoteStochasticRejection) => {
+                telemetry.riders_abandoned_stochastic = telemetry.riders_abandoned_stochastic.saturating_add(1);
+            }
+            _ => {
+                // Fallback: if no reason recorded, count as stochastic (shouldn't happen in normal flow)
+                telemetry.riders_abandoned_stochastic = telemetry.riders_abandoned_stochastic.saturating_add(1);
+            }
+        }
+        
         commands.entity(rider_entity).despawn();
     }
 }
@@ -79,6 +98,7 @@ mod tests {
                     requested_at: None,
                     quote_rejections: 1,
                     accepted_fare: None,
+                    last_rejection_reason: None,
                 },
                 Position(cell),
             ))
@@ -142,6 +162,7 @@ mod tests {
                     requested_at: None,
                     quote_rejections: 2, // Already at limit
                     accepted_fare: None,
+                    last_rejection_reason: None,
                 },
                 Position(cell),
             ))

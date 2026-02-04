@@ -7,6 +7,19 @@ use h3o::CellIndex;
 
 use crate::ecs::{DriverState, RiderState, TripState};
 
+/// Reason why a rider abandoned their ride request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RiderAbandonmentReason {
+    /// Rider gave up after rejecting too many quotes due to price being too high.
+    QuotePriceTooHigh,
+    /// Rider gave up after rejecting too many quotes due to ETA being too long.
+    QuoteEtaTooLong,
+    /// Rider gave up after rejecting too many quotes due to stochastic rejection (accept_probability).
+    QuoteStochasticRejection,
+    /// Rider cancelled while waiting for pickup (timeout).
+    PickupTimeout,
+}
+
 /// One completed trip, recorded when the driver reaches dropoff.
 /// Timestamps are simulation ticks; use the helper methods for derived KPIs.
 #[derive(Debug, Clone)]
@@ -47,6 +60,12 @@ pub struct SimTelemetry {
     pub riders_completed_total: u64,
     /// Riders who gave up after rejecting too many quotes (distinct from pickup-timeout cancels).
     pub riders_abandoned_quote_total: u64,
+    /// Breakdown of abandonment reasons for quote abandonments.
+    pub riders_abandoned_price: u64,
+    pub riders_abandoned_eta: u64,
+    pub riders_abandoned_stochastic: u64,
+    /// Breakdown of pickup cancellations.
+    pub riders_cancelled_pickup_timeout: u64,
     /// Cumulative platform revenue from commission on completed trips.
     pub platform_revenue_total: f64,
     /// Total fares collected from riders (sum of agreed fares for completed trips).

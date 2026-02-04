@@ -217,11 +217,12 @@ All time is in **milliseconds** (simulation ms). Time 0 maps to a real-world dat
 Components and state enums:
 
 - `RiderState`: `Browsing`, `Waiting`, `InTransit`, `Completed`, `Cancelled`
-- `Rider` component: `{ state, matched_driver, destination: Option<CellIndex>, requested_at: Option<u64>, quote_rejections: u32, accepted_fare: Option<f64> }`
+- `Rider` component: `{ state, matched_driver, destination: Option<CellIndex>, requested_at: Option<u64>, quote_rejections: u32, accepted_fare: Option<f64>, last_rejection_reason: Option<RiderAbandonmentReason> }`
   - `destination`: requested dropoff cell. Must be set; riders without a destination will be rejected by the driver decision system.
   - `requested_at`: simulation time (ms) when the rider was spawned (set by spawner when spawning).
   - `quote_rejections`: number of times this rider has rejected a quote; used for give-up after `max_quote_rejections`.
   - `accepted_fare`: fare the rider accepted when transitioning to Waiting; used for driver earnings and trip completion.
+  - `last_rejection_reason`: tracks the reason for the most recent quote rejection (`QuotePriceTooHigh`, `QuoteEtaTooLong`, `QuoteStochasticRejection`); used to record abandonment reason when rider gives up.
 - `RiderQuote` component (optional, attached while viewing a quote): `{ fare: f64, eta_ms: u64 }` — current quote shown to the rider (for UI/telemetry).
 - `DriverState`: `Idle`, `Evaluating`, `EnRoute`, `OnTrip`, `OffDuty`
 - `Driver` component: `{ state: DriverState, matched_rider: Option<Entity> }`
@@ -313,7 +314,8 @@ See [CONFIG.md](./CONFIG.md) for detailed configuration parameters, formulas, ti
 
 ### `sim_core::telemetry`
 
-- **`SimTelemetry`** (ECS `Resource`, default): holds `completed_trips: Vec<CompletedTripRecord>` plus cumulative rider totals (`riders_cancelled_total`, `riders_completed_total`, `riders_abandoned_quote_total`), `platform_revenue_total: f64`, and `total_fares_collected: f64`. `riders_abandoned_quote_total` counts riders who gave up after rejecting too many quotes (distinct from pickup-timeout cancels). `platform_revenue_total` accumulates commission revenue from completed trips. `total_fares_collected` is the sum of agreed fares for completed trips.
+- **`RiderAbandonmentReason`** enum: `QuotePriceTooHigh`, `QuoteEtaTooLong`, `QuoteStochasticRejection`, `PickupTimeout`. Used to track why riders abandoned their ride requests. Stored in `Rider.last_rejection_reason` when quotes are rejected, and used to increment the appropriate breakdown counter in `SimTelemetry` when riders give up.
+- **`SimTelemetry`** (ECS `Resource`, default): holds `completed_trips: Vec<CompletedTripRecord>` plus cumulative rider totals (`riders_cancelled_total`, `riders_completed_total`, `riders_abandoned_quote_total`), breakdown fields for abandonment reasons (`riders_abandoned_price`, `riders_abandoned_eta`, `riders_abandoned_stochastic`, `riders_cancelled_pickup_timeout`), `platform_revenue_total: f64`, and `total_fares_collected: f64`. `riders_abandoned_quote_total` counts riders who gave up after rejecting too many quotes (distinct from pickup-timeout cancels), with breakdown by reason: `riders_abandoned_price` (rejected due to price too high), `riders_abandoned_eta` (rejected due to ETA too long), `riders_abandoned_stochastic` (stochastic rejection). `riders_cancelled_pickup_timeout` counts riders who cancelled while waiting for pickup. `platform_revenue_total` accumulates commission revenue from completed trips. `total_fares_collected` is the sum of agreed fares for completed trips.
 - **`CompletedTripRecord`**: `{ trip_entity, rider_entity, driver_entity, completed_at, requested_at, matched_at, pickup_at, fare }` (timestamps in **simulation ms**, `fare` is agreed fare paid). Helper methods: **`time_to_match()`**, **`time_to_pickup()`**, **`trip_duration()`** (all in ms).
 - Insert `SimTelemetry::default()` when building the world to record completed trips; `trip_completed_system` pushes one record per completed trip with timestamps from the Trip and clock, and accumulates platform revenue.
 - **`PricingConfig`** (ECS `Resource`): `{ base_fare, per_km_rate, commission_rate, surge_enabled, surge_radius_k, surge_max_multiplier }` controls pricing and optional surge. Inserted by `build_scenario` (from `ScenarioParams.pricing_config` or default). Required by `show_quote_system` and `trip_completed_system`.
@@ -369,6 +371,10 @@ System: `quote_decision_system`
 
 - Reacts to `CurrentEvent`.
 - On `EventKind::QuoteDecision` with subject `Rider(rider_entity)`:
+  - Rider must be in `Browsing` with a `RiderQuote` component.
+  - If `quote.fare > max_willingness_to_pay`: sets `rider.last_rejection_reason = QuotePriceTooHigh` and schedules `QuoteRejected`.
+  - Else if `quote.eta_ms > max_acceptable_eta_ms`: sets `rider.last_rejection_reason = QuoteEtaTooLong` and schedules `QuoteRejected`.
+  - Else: stochastically accepts/rejects based on `accept_probability`; if rejected, sets `rider.last_rejection_reason = QuoteStochasticRejection` and schedules `QuoteRejected`; if accepted, schedules `QuoteAccepted`.
   - Rider must be in `Browsing` with `RiderQuote`. If quote fare > `max_willingness_to_pay` or quote eta_ms > `max_acceptable_eta_ms`, schedules `QuoteRejected`. Otherwise samples accept/reject using `RiderQuoteConfig::accept_probability` (seed + rider entity ID for reproducibility).
   - If accept: schedules `QuoteAccepted` at current time. If reject: schedules `QuoteRejected` at current time.
 
@@ -390,7 +396,7 @@ System: `quote_rejected_system`
 - On `EventKind::QuoteRejected` with subject `Rider(rider_entity)`:
   - Rider must be in `Browsing`. Increments `rider.quote_rejections`.
   - If `quote_rejections < max_quote_rejections`: schedules `ShowQuote` at `now + re_quote_delay_secs` (rider requests another quote).
-  - Else: rider gives up — state set to `Cancelled`, entity despawned, `SimTelemetry::riders_abandoned_quote_total` incremented.
+  - Else: rider gives up — state set to `Cancelled`, entity despawned, `SimTelemetry::riders_abandoned_quote_total` incremented, and the appropriate breakdown counter is incremented based on `rider.last_rejection_reason` (`riders_abandoned_price`, `riders_abandoned_eta`, or `riders_abandoned_stochastic`).
 
 ### `sim_core::matching`
 
@@ -467,6 +473,7 @@ System: `rider_cancel_system`
 
 - Reacts to `CurrentEvent`.
 - On `EventKind::RiderCancel` with subject `Rider(rider_entity)`:
+  - Rider must be in `Waiting`. Sets rider state to `Cancelled`, increments `SimTelemetry::riders_cancelled_total` and `SimTelemetry::riders_cancelled_pickup_timeout`, despawns rider entity. If rider has a matched driver, cancels the associated trip and resets driver state.
   - If the rider is still `Waiting`:
     - Rider: `Waiting` → `Cancelled`, clears `matched_driver`, then the rider entity is despawned
     - If a matched driver exists, clears `matched_rider` and returns the driver to `Idle`
@@ -639,7 +646,7 @@ All per-system unit tests emulate the runner by popping one event, inserting
   drivers show only "D" or "D(R)" without the earnings and fatigue brackets. The font size is 8.5pt monospace
   for compact display. **Matching algorithm** can be changed at any time (even while simulation is running) via a dropdown
   selector; changes take effect immediately for new matching attempts (riders already waiting continue with their current
-  matching attempts, but new `TryMatch` events will use the updated algorithm). The metrics chart includes an **Abandoned (quote)** series for riders who gave up after rejecting too many quotes.
+  matching attempts, but new `TryMatch` events will use the updated algorithm). The metrics chart includes an **Abandoned (quote)** series for riders who gave up after rejecting too many quotes. The Run outcomes section displays breakdowns of abandonment reasons (price too high, ETA too long, stochastic rejection) and pickup cancellation reasons (timeout) with counts and percentages.
   
   The UI is organized into collapsible sections:
   - **Scenario parameters**: Organized in a seven-column layout:
@@ -651,7 +658,7 @@ All per-system unit tests emulate the runner by popping one event, inserting
     - **Map & Trips**: Map size (km), trip length range (km, min–max)
     - **Timing**: Simulation start time (year/month/day/hour/minute UTC with "Now" button), sim duration (hours; simulation stops when clock reaches this time), seed (optional)
     All parameters except matching algorithm are only editable before simulation starts. Platform revenue is displayed in the Run outcomes section.
-  - **Run outcomes**: Shows outcome counters (riders completed, riders cancelled, abandoned quote, trips completed, total resolved, conversion %, platform revenue, total rider pay, avg fare),
+  - **Run outcomes**: Shows outcome counters (riders completed, riders cancelled with pickup timeout breakdown, abandoned quote with breakdown by reason: price too high, ETA too long, stochastic rejection, trips completed, total resolved, conversion %, platform revenue, total rider pay, avg fare),
     current state breakdowns (riders now: browsing/waiting/in transit, drivers now: idle/evaluating/en route/on trip/off duty, trips now: en route/on trip, fare distribution: to riders (total/min/avg/max/p50/p90) and to drivers (total/min/avg/max/p50/p90) from completed trips),
     and timing distributions for completed trips (time to match, time to pickup, trip duration) with min, max, average, and percentiles (p50, p90, p95, p99).
   - **Fleet**: Shows driver utilization metrics (busy %, total drivers, active drivers), state breakdown with percentages,
