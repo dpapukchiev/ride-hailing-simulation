@@ -4,6 +4,9 @@ This spec documents the code that exists today in this repository. It is the
 single source of truth for the current implementation and should be updated
 whenever code or spec changes are made.
 
+**For configuration parameters, formulas, and detailed rules, see [CONFIG.md](./CONFIG.md).**
+CONFIG.md provides a comprehensive reference for all configurable parameters, formulas, and clearly distinguishes between random/stochastic elements and deterministic/hard-coded rules.
+
 ## Overview
 
 The project is a Rust-based discrete event simulation (DES) scaffold with a
@@ -176,29 +179,15 @@ crates/
 
 Configurable pricing system with commission support and surge pricing for marketplace analysis.
 
-- **`BASE_FARE`**: Base fare constant (default $2.50).
-- **`PER_KM_RATE`**: Per-kilometer rate (default $1.50/km).
-- **`PricingConfig`** (ECS Resource): Configurable pricing parameters:
-  - `base_fare: f64` - Base fare in currency units (default: 2.50)
-  - `per_km_rate: f64` - Per-kilometer rate (default: 1.50)
-  - `commission_rate: f64` - Commission rate as fraction 0.0-1.0 (default: 0.0, meaning no commission)
-  - `surge_enabled: bool` - When true, apply surge multiplier when demand exceeds supply in pickup H3 cluster (default: false)
-  - `surge_radius_k: u32` - H3 grid disk radius for surge cluster (default: 1)
-  - `surge_max_multiplier: f64` - Cap on surge multiplier (default: 2.0)
-- **`calculate_trip_fare(pickup, dropoff)`**: Calculates base fare using default constants (backward compatibility).
-  Formula: `fare = BASE_FARE + (distance_km * PER_KM_RATE)`. Note: This does not include surge pricing; surge is applied separately in `show_quote_system`.
+- **`PricingConfig`** (ECS Resource): Configurable pricing parameters (see [CONFIG.md](./CONFIG.md#pricing-configuration) for defaults and formulas).
+- **`calculate_trip_fare(pickup, dropoff)`**: Calculates base fare using default constants (backward compatibility). Formula: `fare = BASE_FARE + (distance_km * PER_KM_RATE)`. Note: This does not include surge pricing; surge is applied separately in `show_quote_system`.
 - **`calculate_trip_fare_with_config(pickup, dropoff, config)`**: Calculates base fare using provided `PricingConfig`. Note: This does not include surge pricing; surge is applied separately in `show_quote_system`.
-- **Surge pricing**: When `surge_enabled` is true, surge multipliers are calculated dynamically in `show_quote_system` based on local supply and demand:
-  - Demand = count of riders in `Browsing` or `Waiting` state within `grid_disk(pickup, surge_radius_k)`
-  - Supply = count of drivers in `Idle` state within the same cluster
-  - Surge multiplier formula:
-    - If `demand > supply` and `supply > 0`: `multiplier = min(1.0 + (demand - supply) / supply, surge_max_multiplier)`
-    - If `demand > supply` and `supply == 0`: `multiplier = surge_max_multiplier` (maximum surge when no drivers available)
-    - Otherwise: `multiplier = 1.0` (no surge)
-  - Final fare = base fare × surge multiplier
+- **Surge pricing**: When `surge_enabled` is true, surge multipliers are calculated dynamically in `show_quote_system` based on local supply and demand (see [CONFIG.md](./CONFIG.md#pricing-configuration) for formula).
 - **`calculate_commission(fare, commission_rate)`**: Calculates commission amount (`fare * commission_rate`).
 - **`calculate_driver_earnings(fare, commission_rate)`**: Calculates driver net earnings (`fare * (1 - commission_rate)`).
 - **`calculate_platform_revenue(fare, commission_rate)`**: Calculates platform revenue (same as commission).
+
+See [CONFIG.md](./CONFIG.md#pricing-configuration) for detailed pricing formulas, defaults, and surge calculation logic.
 
 ### `sim_core::clock`
 
@@ -280,6 +269,8 @@ Probability distributions for spawner inter-arrival times, enabling variable sup
 - **`ExponentialInterArrival`**: Exponential distribution for Poisson process (constant rate, random inter-arrival times). `new(rate_per_sec, seed)` creates with rate parameter (lambda) and seed for reproducibility.
 - **`TimeOfDayDistribution`**: Time-of-day and day-of-week aware distribution that varies spawn rates based on hour of day (0-23) and day of week (0=Monday, 6=Sunday). Uses a base rate multiplied by time-specific factors. `new(base_rate_per_sec, epoch_ms, seed)` creates with base rate, epoch (real-world ms corresponding to simulation time 0), and seed. `set_multiplier(day_of_week, hour, multiplier)` sets multiplier for specific time; `set_day_multipliers(day_of_week, multipliers)` sets multipliers for all hours of a day. The distribution converts simulation time to real-world datetime using the epoch to determine the current hour and day of week, then applies the appropriate multiplier to the base rate before sampling from an exponential distribution.
 
+See [CONFIG.md](./CONFIG.md#spawner-configuration--patterns) for time-of-day multiplier patterns, spawn rate calculations, and inter-arrival sampling formulas.
+
 ### `sim_core::spawner`
 
 Entity spawners: dynamically spawn riders and drivers based on distributions.
@@ -307,21 +298,8 @@ Scenario setup: configure spawners for riders and drivers.
 - **`RiderCancelConfig`** (ECS `Resource`): configuration for rider cancellation with uniform distribution sampling. Contains `min_wait_secs` and `max_wait_secs` (bounds for the distribution, defaults to 120–2400 seconds) and `seed` (for reproducible RNG, set from scenario seed). Inserted by `build_scenario`. Cancellation times are sampled uniformly between min and max bounds, with each rider getting a different sample based on their entity ID for variety while maintaining reproducibility.
 - **`RiderQuoteConfig`** (ECS `Resource`): configuration for rider quote accept/reject and give-up. Contains `max_quote_rejections` (default 3), `re_quote_delay_secs` (default 10), `accept_probability` (0.0–1.0, default 0.8), `seed`, `max_willingness_to_pay` (default 100.0), and `max_acceptable_eta_ms` (default 600_000). Inserted by `build_scenario` from `ScenarioParams::rider_quote_config` or default. Riders reject the quote if fare > max_willingness_to_pay or eta_ms > max_acceptable_eta_ms; otherwise accept/reject is stochastic. After `max_quote_rejections` they give up and are counted in `riders_abandoned_quote_total`.
 - **`SpeedModel`** (ECS `Resource`): stochastic speed sampler (defaults to 20–60 km/h) seeded from `ScenarioParams::seed` to keep runs reproducible.
-- **`ScenarioParams`**: configurable scenario parameters:
-  - `num_riders`, `num_drivers`: total counts (includes both initial and scheduled spawns).
-  - `initial_rider_count`, `initial_driver_count`: number of entities to spawn immediately at simulation start (before scheduled spawning). Defaults to 0. These are spawned at time 0 when `SimulationStarted` event is processed.
-  - `seed`: optional RNG seed for reproducibility (used for spawner distributions).
-  - `lat_min`, `lat_max`, `lng_min`, `lng_max`: bounding box (degrees) for random positions; default San Francisco Bay Area.
-  - `request_window_ms`: time window over which riders spawn (used to calculate rider spawn rates). Scheduled riders spawn over this window; initial riders spawn immediately at start.
-  - `driver_spread_ms`: time window over which drivers spawn (used to calculate driver spawn rates). Scheduled drivers spawn over this window; initial drivers spawn immediately at start. Defaults to same value as `request_window_ms`.
-  - `match_radius`: max H3 grid distance for matching (0 = same cell only).
-  - `min_trip_cells`, `max_trip_cells`: trip length in H3 cells; rider destinations are chosen at random distance in this range from pickup. Travel time depends on per-trip speeds (20–60 km/h).
-  - `epoch_ms`: optional epoch in milliseconds (real-world time corresponding to simulation time 0). Used by time-of-day distributions to convert simulation time to real datetime. If `None`, defaults to 0.
-  - `pricing_config`: optional `PricingConfig` for pricing parameters. If `None`, uses default `PricingConfig` (base_fare 2.50, per_km_rate 1.50, commission_rate 0.0, surge_enabled false).
-  - `rider_quote_config`: optional `RiderQuoteConfig`. If `None`, uses default (max_willingness_to_pay 100.0, max_acceptable_eta_ms 600_000).
-  - `simulation_end_time_ms`: optional; when set, runner stops when next event is at or after this time (ms).
-  - Builders: `with_seed(seed)`, `with_request_window_hours(hours)`, `with_driver_spread_hours(hours)`, `with_match_radius(radius)`, `with_trip_duration_cells(min, max)`, `with_epoch_ms(epoch_ms)`, `with_pricing_config(config)`, `with_rider_quote_config(config)`, `with_simulation_end_time_ms(end_ms)`.
-- **`build_scenario(world, params)`**: inserts `SimulationClock` (with epoch set from `params.epoch_ms`), `SimTelemetry`, `MatchRadius`, `MatchingAlgorithm` (defaults to `HungarianMatching`), `BatchMatchingConfig` (default enabled, 5s interval), optionally `SimulationEndTimeMs` when `params.simulation_end_time_ms` is set, `RiderCancelConfig` (with seed derived from scenario seed), `RiderQuoteConfig` (max_quote_rejections 3, re_quote_delay_secs 10, accept_probability 0.8), `PricingConfig` (from `params.pricing_config` or default), `RiderSpawner`, and `DriverSpawner`. Rider spawner uses `TimeOfDayDistribution` with realistic demand patterns (rush hours: 7-9 AM and 5-7 PM have 2.5-3.2x multipliers, night: 2-5 AM has 0.3-0.4x multipliers, Friday/Saturday evenings have higher multipliers). Driver spawner uses `TimeOfDayDistribution` with supply patterns (more consistent than demand, higher availability during rush hours with 1.5-2.0x multipliers, lower at night with 0.6-0.8x multipliers). Scheduled riders spawn continuously over `request_window_ms` with time-varying rates; scheduled drivers spawn continuously over `driver_spread_ms` with time-varying rates. Initial entities (specified by `initial_rider_count` and `initial_driver_count`) are spawned immediately when `SimulationStarted` event is processed. The spawner `max_count` is set to `num_riders - initial_rider_count` (and similarly for drivers) so that total spawns match the configured counts.
+- **`ScenarioParams`**: configurable scenario parameters (see [CONFIG.md](./CONFIG.md#spawner-configuration--patterns) for defaults and detailed descriptions).
+- **`build_scenario(world, params)`**: inserts all required resources and configures spawners. Rider spawner uses `TimeOfDayDistribution` with realistic demand patterns; driver spawner uses `TimeOfDayDistribution` with supply patterns. Scheduled riders/drivers spawn continuously over their respective time windows with time-varying rates. Initial entities are spawned immediately when `SimulationStarted` event is processed. The spawner `max_count` is set to `num_riders - initial_rider_count` (and similarly for drivers) so that total spawns match the configured counts.
 - **`random_destination()`**: Optimized destination selection function that uses different strategies based on trip distance:
   - **Small radii (≤20 cells)**: Uses `grid_disk()` to generate all candidate cells and filters by distance/bounds (more accurate, efficient for small distances).
   - **Large radii (>20 cells)**: Uses rejection sampling - randomly samples cells within bounds and checks if distance matches the target range. This avoids generating huge grid disks (e.g., ~33k cells for k=105) which dramatically improves reset performance for scenarios with large trip distances (e.g., 600 riders with 25km max trips). Falls back to a smaller `grid_disk()` if rejection sampling fails.
@@ -329,6 +307,8 @@ Scenario setup: configure spawners for riders and drivers.
 - Also inserts `SimSnapshotConfig` and `SimSnapshots` for periodic snapshot capture (used by the UI/export).
 
 Large scenarios (e.g. 500 riders, 100 drivers) are run via the **example** only, not in automated tests. The `random_destination()` optimization ensures fast reset times even for large scenarios with long trip distances (e.g., 600 riders over 6 hours with 25km max trips).
+
+See [CONFIG.md](./CONFIG.md) for detailed configuration parameters, formulas, time-of-day patterns, and spawn rate calculations.
 
 ### `sim_core::telemetry`
 
@@ -370,6 +350,8 @@ Spawner systems: react to spawn events and create riders/drivers dynamically.
 - **`driver_spawner_system`**: Reacts to `EventKind::SpawnDriver`. Similar to `rider_spawner_system` but spawns drivers in `Idle` state (no destination needed). Drivers spawn with random positions within configured bounds. Each driver is initialized with:
   - `DriverEarnings` component: `daily_earnings = 0.0`, `daily_earnings_target` sampled from $100-$300 range, `session_start_time_ms = current_time_ms`.
   - `DriverFatigue` component: `fatigue_threshold_ms` sampled from 8-12 hours range.
+
+See [CONFIG.md](./CONFIG.md#driver-behavior) for driver earnings target and fatigue threshold sampling formulas.
 
 ### `sim_core::systems::show_quote`
 
@@ -417,15 +399,12 @@ Matching algorithm trait and implementations for driver-rider pairing.
   - `find_match(rider_entity, rider_pos, rider_destination, available_drivers, match_radius, clock_now_ms) -> Option<Entity>`: Finds a match for a single rider, returns the best driver entity or `None`.
   - `find_batch_matches(riders, available_drivers, match_radius, clock_now_ms) -> Vec<MatchResult>`: Finds matches for multiple riders (batch optimization). Default implementation calls `find_match` sequentially; algorithms can override for global optimization.
 - **`SimpleMatching`**: First-match-within-radius algorithm. Finds the first available driver within `MatchRadius` H3 grid distance. Preserves original "first match wins" behavior.
-- **`CostBasedMatching`**: Cost-based algorithm that scores driver-rider pairings by:
-  - Pickup distance (km) - lower is better
-  - Estimated pickup time (ms) - lower is better
-  - Score formula: `-pickup_distance_km - (pickup_eta_ms / 1000.0) * eta_weight`
-  - Selects the driver with the highest score (lowest cost)
-  - Configurable `eta_weight` parameter (default 0.1) controls ETA importance vs distance
+- **`CostBasedMatching`**: Cost-based algorithm that scores driver-rider pairings by pickup distance and estimated pickup time. Selects the driver with the highest score (lowest cost). Configurable `eta_weight` parameter (default 0.1) controls ETA importance vs distance.
 - **`HungarianMatching`**: Global batch optimization using Kuhn–Munkres (Hungarian) algorithm. Uses the same score formula as CostBasedMatching; overrides `find_batch_matches` to solve the assignment problem (minimize total cost). Single-rider `find_match` delegates to CostBasedMatching. Default algorithm when batch matching is enabled.
 - **`MatchResult`**: Represents a successful match with `rider_entity` and `driver_entity`.
 - **`MatchCandidate`**: Represents a potential pairing with scoring information (used internally by algorithms).
+
+See [CONFIG.md](./CONFIG.md#matching-algorithms) for detailed scoring formulas, ETA weight tuning, and algorithm selection guidance.
 
 ### `sim_core::systems::matching`
 
@@ -513,6 +492,8 @@ System: `pickup_eta_updated_system`
 - ETA in ms: derived from haversine distance and a stochastic speed sample
   (default 20–60 km/h), with a 1 second minimum (`ONE_SEC_MS`).
 
+See [CONFIG.md](./CONFIG.md#movement--speed) for speed sampling formulas and movement time calculations.
+
 This is a deterministic, FCFS-style placeholder. No distance or cost logic
 is implemented yet beyond H3 grid distance and simple stochastic speeds.
 
@@ -561,6 +542,8 @@ System: `driver_offduty_check_system`
   - Transitions drivers to `OffDuty` if either threshold is exceeded. A driver marked OffDuty while `EnRoute` or `OnTrip` still finishes the current trip (movement and trip completion are unchanged); they simply receive no new matches afterward.
   - Schedules next check in 5 minutes (`CHECK_INTERVAL_MS`) if there are active drivers remaining.
   - Stops scheduling periodic checks when no active drivers remain (prevents infinite event queue).
+
+See [CONFIG.md](./CONFIG.md#driver-behavior) for OffDuty transition rules and threshold formulas.
 - On `EventKind::SimulationStarted`:
   - Initializes periodic checks by scheduling the first `CheckDriverOffDuty` event 5 minutes from simulation start.
 
