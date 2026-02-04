@@ -271,10 +271,29 @@ This project is for demonstration purposes.
 
 ## Screenshots
 
-*Note: Add screenshots of the UI showing:*
-- *Map visualization with riders and drivers*
-- *Time-series charts*
-- *Trip detail table*
+### Configuration Panel
+
+![Configuration Panel](ui-screenshots/config.png)
+
+The configuration panel shows interactive parameter controls organized in five columns: Supply (driver spawn settings), Demand (rider spawn settings), Pricing & Matching (fare rates, commission, matching algorithm selection), Map & Trips (map size and trip length ranges), and Timing (simulation start time and seed). The panel also includes playback controls (start, step, run/pause, reset) and clock speed multipliers.
+
+### Map Visualization with Time-Series Metrics
+
+![Map with Metrics](ui-screenshots/map-metrics.png)
+
+Real-time map visualization showing riders and drivers with state-based coloring. The H3 grid overlay is visible, and time-series charts track key metrics including active trips, waiting riders, idle drivers, cancellations, and completed trips over time.
+
+### Map with Fleet Metrics
+
+![Map with Metrics 2](ui-screenshots/map-metrics-2.png)
+
+Another view of the simulation map displaying fleet metrics including driver utilization percentages, state breakdowns (idle, evaluating, en route, on trip, off duty), earnings distributions, and fatigue tracking. The metrics panel shows real-time statistics about driver performance and earnings.
+
+### Map with Trip Detail Table
+
+![Map with Trip Table](ui-screenshots/map-table.png)
+
+The map visualization paired with a comprehensive trip detail table showing all trips with timestamps, distances, states, and other trip information. This view allows for detailed inspection of individual trip data while maintaining spatial context on the map.
 
 ## Acknowledgments
 
