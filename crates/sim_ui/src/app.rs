@@ -4,6 +4,7 @@ use bevy_ecs::prelude::World;
 use std::time::Instant;
 
 use sim_core::matching::{DEFAULT_ETA_WEIGHT, MatchingAlgorithmResource};
+use sim_core::pricing::PricingConfig;
 use sim_core::runner::{run_next_event, simulation_schedule};
 use sim_core::scenario::{build_scenario, create_cost_based_matching, create_simple_matching, ScenarioParams};
 
@@ -45,6 +46,9 @@ pub struct SimUiApp {
     pub start_day: u32,
     pub start_hour: u32,
     pub start_minute: u32,
+    pub base_fare: f64,
+    pub per_km_rate: f64,
+    pub commission_rate: f64,
 }
 
 /// Type of matching algorithm to use.
@@ -81,6 +85,9 @@ impl SimUiApp {
         let seed_enabled = true;
         let seed_value = 123;
         let matching_algorithm = MatchingAlgorithmType::CostBased;
+        let base_fare = 2.50;
+        let per_km_rate = 1.50;
+        let commission_rate = 0.0;
         
         // Default start time: 2026-02-03 20:12:00 UTC
         let year = 2026;
@@ -98,7 +105,12 @@ impl SimUiApp {
         .with_request_window_hours(request_window_hours)
         .with_match_radius(km_to_cells(match_radius_km))
         .with_trip_duration_cells(km_to_cells(min_trip_km), km_to_cells(max_trip_km))
-        .with_epoch_ms(start_epoch_ms);
+        .with_epoch_ms(start_epoch_ms)
+        .with_pricing_config(PricingConfig {
+            base_fare,
+            per_km_rate,
+            commission_rate,
+        });
         if seed_enabled {
             params = params.with_seed(seed_value);
         }
@@ -146,6 +158,9 @@ impl SimUiApp {
             start_day: day,
             start_hour: hour,
             start_minute: minute,
+            base_fare,
+            per_km_rate,
+            commission_rate,
         }
     }
 
@@ -226,6 +241,12 @@ impl SimUiApp {
         params.lat_max = lat_max;
         params.lng_min = lng_min;
         params.lng_max = lng_max;
+
+        params = params.with_pricing_config(PricingConfig {
+            base_fare: self.base_fare,
+            per_km_rate: self.per_km_rate,
+            commission_rate: self.commission_rate,
+        });
 
         if self.seed_enabled {
             params = params.with_seed(self.seed_value);

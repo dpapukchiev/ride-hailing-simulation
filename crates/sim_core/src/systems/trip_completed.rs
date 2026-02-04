@@ -2,12 +2,13 @@ use bevy_ecs::prelude::{Commands, Query, Res, ResMut};
 
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
 use crate::ecs::{Driver, DriverEarnings, DriverFatigue, DriverState, Rider, RiderState, Trip, TripState};
-use crate::pricing::calculate_trip_fare;
+use crate::pricing::{calculate_driver_earnings, calculate_platform_revenue, calculate_trip_fare_with_config, PricingConfig};
 use crate::telemetry::{CompletedTripRecord, SimTelemetry};
 
 pub fn trip_completed_system(
     event: Res<CurrentEvent>,
     clock: Res<SimulationClock>,
+    pricing_config: Res<PricingConfig>,
     mut telemetry: ResMut<SimTelemetry>,
     mut commands: Commands,
     mut trips: Query<&mut Trip>,
@@ -34,8 +35,10 @@ pub fn trip_completed_system(
     let driver_entity = trip.driver;
     let rider_entity = trip.rider;
 
-    // Calculate fare and update driver earnings
-    let fare = calculate_trip_fare(trip.pickup, trip.dropoff);
+    // Calculate fare, commission, and driver earnings
+    let fare = calculate_trip_fare_with_config(trip.pickup, trip.dropoff, *pricing_config);
+    let commission = calculate_platform_revenue(fare, pricing_config.commission_rate);
+    let driver_earnings_amount = calculate_driver_earnings(fare, pricing_config.commission_rate);
     let mut should_go_offduty = false;
     
     // Update driver state
@@ -48,7 +51,7 @@ pub fn trip_completed_system(
     
     // Update earnings and check thresholds
     if let Ok(mut earnings) = driver_earnings.get_mut(driver_entity) {
-        earnings.daily_earnings += fare;
+        earnings.daily_earnings += driver_earnings_amount;
         
         // Check if earnings target reached
         if earnings.daily_earnings >= earnings.daily_earnings_target {
@@ -93,6 +96,7 @@ pub fn trip_completed_system(
         pickup_at,
     });
     telemetry.riders_completed_total = telemetry.riders_completed_total.saturating_add(1);
+    telemetry.platform_revenue_total += commission;
 
     commands.entity(rider_entity).despawn();
 }
@@ -107,9 +111,12 @@ mod tests {
 
     #[test]
     fn trip_completed_transitions_driver_and_rider() {
+        use crate::pricing::PricingConfig;
+
         let mut world = World::new();
         world.insert_resource(SimulationClock::default());
         world.insert_resource(crate::telemetry::SimTelemetry::default());
+        world.insert_resource(PricingConfig::default());
         let cell = h3o::CellIndex::try_from(0x8a1fb46622dffff).expect("cell");
         let destination = cell
             .grid_disk::<Vec<_>>(1)

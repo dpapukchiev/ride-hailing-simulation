@@ -45,6 +45,8 @@ pub struct SimTelemetry {
     pub riders_completed_total: u64,
     /// Riders who gave up after rejecting too many quotes (distinct from pickup-timeout cancels).
     pub riders_abandoned_quote_total: u64,
+    /// Cumulative platform revenue from commission on completed trips.
+    pub platform_revenue_total: f64,
 }
 
 /// Snapshot of one rider for visualization/export.

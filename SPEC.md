@@ -24,8 +24,8 @@ minimal ECS-based agent model. It currently supports:
 - **Driver earnings and fatigue tracking**: Drivers accumulate earnings from completed trips
   and transition to `OffDuty` when they reach their daily earnings target or exceed their
   fatigue threshold. OffDuty drivers are excluded from matching.
-- **Simple pricing system**: Distance-based fare calculation (base fare + per-kilometer rate)
-  for trip earnings.
+- **Configurable pricing system**: Distance-based fare calculation (base fare + per-kilometer rate)
+  with configurable commission rates. Driver earnings and platform revenue are tracked separately.
 - **Rider quote flow**: Riders receive an explicit quote (fare + ETA) before committing; they can
   accept (proceed to matching), reject and request another quote, or give up after a configurable
   number of rejections (tracked in telemetry as abandoned-quote).
@@ -164,13 +164,20 @@ crates/
 
 ### `sim_core::pricing`
 
-Simple distance-based fare calculation for trip earnings.
+Configurable pricing system with commission support for marketplace analysis.
 
 - **`BASE_FARE`**: Base fare constant (default $2.50).
 - **`PER_KM_RATE`**: Per-kilometer rate (default $1.50/km).
-- **`calculate_trip_fare(pickup, dropoff)`**: Calculates fare for a trip based on distance.
+- **`PricingConfig`** (ECS Resource): Configurable pricing parameters:
+  - `base_fare: f64` - Base fare in currency units (default: 2.50)
+  - `per_km_rate: f64` - Per-kilometer rate (default: 1.50)
+  - `commission_rate: f64` - Commission rate as fraction 0.0-1.0 (default: 0.0, meaning no commission)
+- **`calculate_trip_fare(pickup, dropoff)`**: Calculates fare using default constants (backward compatibility).
   Formula: `fare = BASE_FARE + (distance_km * PER_KM_RATE)`.
-  Returns driver earnings (fare amount; commission can be deducted later if needed).
+- **`calculate_trip_fare_with_config(pickup, dropoff, config)`**: Calculates fare using provided `PricingConfig`.
+- **`calculate_commission(fare, commission_rate)`**: Calculates commission amount (`fare * commission_rate`).
+- **`calculate_driver_earnings(fare, commission_rate)`**: Calculates driver net earnings (`fare * (1 - commission_rate)`).
+- **`calculate_platform_revenue(fare, commission_rate)`**: Calculates platform revenue (same as commission).
 
 ### `sim_core::clock`
 
@@ -281,8 +288,9 @@ Scenario setup: configure spawners for riders and drivers.
   - `match_radius`: max H3 grid distance for matching (0 = same cell only).
   - `min_trip_cells`, `max_trip_cells`: trip length in H3 cells; rider destinations are chosen at random distance in this range from pickup. Travel time depends on per-trip speeds (20–60 km/h).
   - `epoch_ms`: optional epoch in milliseconds (real-world time corresponding to simulation time 0). Used by time-of-day distributions to convert simulation time to real datetime. If `None`, defaults to 0.
-  - Builders: `with_seed(seed)`, `with_request_window_hours(hours)`, `with_driver_spread_hours(hours)`, `with_match_radius(radius)`, `with_trip_duration_cells(min, max)`, `with_epoch_ms(epoch_ms)`.
-- **`build_scenario(world, params)`**: inserts `SimulationClock` (with epoch set from `params.epoch_ms`), `SimTelemetry`, `MatchRadius`, `MatchingAlgorithm` (defaults to `CostBasedMatching`), `RiderCancelConfig` (with seed derived from scenario seed), `RiderQuoteConfig` (max_quote_rejections 3, re_quote_delay_secs 10, accept_probability 0.8), `RiderSpawner`, and `DriverSpawner`. Rider spawner uses `TimeOfDayDistribution` with realistic demand patterns (rush hours: 7-9 AM and 5-7 PM have 2.5-3.2x multipliers, night: 2-5 AM has 0.3-0.4x multipliers, Friday/Saturday evenings have higher multipliers). Driver spawner uses `TimeOfDayDistribution` with supply patterns (more consistent than demand, higher availability during rush hours with 1.5-2.0x multipliers, lower at night with 0.6-0.8x multipliers). Scheduled riders spawn continuously over `request_window_ms` with time-varying rates; scheduled drivers spawn continuously over `driver_spread_ms` with time-varying rates. Initial entities (specified by `initial_rider_count` and `initial_driver_count`) are spawned immediately when `SimulationStarted` event is processed. The spawner `max_count` is set to `num_riders - initial_rider_count` (and similarly for drivers) so that total spawns match the configured counts.
+  - `pricing_config`: optional `PricingConfig` for pricing parameters. If `None`, uses default `PricingConfig` (base_fare 2.50, per_km_rate 1.50, commission_rate 0.0).
+  - Builders: `with_seed(seed)`, `with_request_window_hours(hours)`, `with_driver_spread_hours(hours)`, `with_match_radius(radius)`, `with_trip_duration_cells(min, max)`, `with_epoch_ms(epoch_ms)`, `with_pricing_config(config)`.
+- **`build_scenario(world, params)`**: inserts `SimulationClock` (with epoch set from `params.epoch_ms`), `SimTelemetry`, `MatchRadius`, `MatchingAlgorithm` (defaults to `CostBasedMatching`), `RiderCancelConfig` (with seed derived from scenario seed), `RiderQuoteConfig` (max_quote_rejections 3, re_quote_delay_secs 10, accept_probability 0.8), `PricingConfig` (from `params.pricing_config` or default), `RiderSpawner`, and `DriverSpawner`. Rider spawner uses `TimeOfDayDistribution` with realistic demand patterns (rush hours: 7-9 AM and 5-7 PM have 2.5-3.2x multipliers, night: 2-5 AM has 0.3-0.4x multipliers, Friday/Saturday evenings have higher multipliers). Driver spawner uses `TimeOfDayDistribution` with supply patterns (more consistent than demand, higher availability during rush hours with 1.5-2.0x multipliers, lower at night with 0.6-0.8x multipliers). Scheduled riders spawn continuously over `request_window_ms` with time-varying rates; scheduled drivers spawn continuously over `driver_spread_ms` with time-varying rates. Initial entities (specified by `initial_rider_count` and `initial_driver_count`) are spawned immediately when `SimulationStarted` event is processed. The spawner `max_count` is set to `num_riders - initial_rider_count` (and similarly for drivers) so that total spawns match the configured counts.
 - **`random_destination()`**: Optimized destination selection function that uses different strategies based on trip distance:
   - **Small radii (≤20 cells)**: Uses `grid_disk()` to generate all candidate cells and filters by distance/bounds (more accurate, efficient for small distances).
   - **Large radii (>20 cells)**: Uses rejection sampling - randomly samples cells within bounds and checks if distance matches the target range. This avoids generating huge grid disks (e.g., ~33k cells for k=105) which dramatically improves reset performance for scenarios with large trip distances (e.g., 600 riders with 25km max trips). Falls back to a smaller `grid_disk()` if rejection sampling fails.
@@ -293,9 +301,10 @@ Large scenarios (e.g. 500 riders, 100 drivers) are run via the **example** only,
 
 ### `sim_core::telemetry`
 
-- **`SimTelemetry`** (ECS `Resource`, default): holds `completed_trips: Vec<CompletedTripRecord>` plus cumulative rider totals (`riders_cancelled_total`, `riders_completed_total`, `riders_abandoned_quote_total`). `riders_abandoned_quote_total` counts riders who gave up after rejecting too many quotes (distinct from pickup-timeout cancels).
+- **`SimTelemetry`** (ECS `Resource`, default): holds `completed_trips: Vec<CompletedTripRecord>` plus cumulative rider totals (`riders_cancelled_total`, `riders_completed_total`, `riders_abandoned_quote_total`) and `platform_revenue_total: f64`. `riders_abandoned_quote_total` counts riders who gave up after rejecting too many quotes (distinct from pickup-timeout cancels). `platform_revenue_total` accumulates commission revenue from completed trips.
 - **`CompletedTripRecord`**: `{ trip_entity, rider_entity, driver_entity, completed_at, requested_at, matched_at, pickup_at }` (all timestamps in **simulation ms**). Helper methods: **`time_to_match()`**, **`time_to_pickup()`**, **`trip_duration()`** (all in ms).
-- Insert `SimTelemetry::default()` when building the world to record completed trips; `trip_completed_system` pushes one record per completed trip with timestamps from the Trip and clock.
+- Insert `SimTelemetry::default()` when building the world to record completed trips; `trip_completed_system` pushes one record per completed trip with timestamps from the Trip and clock, and accumulates platform revenue.
+- **`PricingConfig`** (ECS `Resource`): `{ base_fare, per_km_rate, commission_rate }` controls pricing parameters. Inserted by `build_scenario` (from `ScenarioParams.pricing_config` or default). Required by `show_quote_system` and `trip_completed_system`.
 - **`SimSnapshotConfig`** (ECS `Resource`): `{ interval_ms, max_snapshots }` controls snapshot cadence and buffer size.
 - **`SimSnapshots`** (ECS `Resource`): rolling `VecDeque<SimSnapshot>` plus `last_snapshot_at`; populated by the snapshot system.
 - **`SimSnapshot`**: `{ timestamp_ms, counts, riders, drivers, trips }` with state-aware position snapshots plus trip state snapshots for visualization/export; counts include cumulative rider totals (including `riders_abandoned_quote_total`) to account for despawns.
@@ -337,7 +346,7 @@ System: `show_quote_system`
 
 - Reacts to `CurrentEvent`.
 - On `EventKind::ShowQuote` with subject `Rider(rider_entity)`:
-  - Rider must be in `Browsing`. Computes **fare** via `calculate_trip_fare(pickup, dropoff)` and **ETA** (nearest idle driver distance/speed, or default 300s). Inserts `RiderQuote { fare, eta_ms }` on the rider entity.
+  - Rider must be in `Browsing`. Reads `PricingConfig` from resources. Computes **fare** via `calculate_trip_fare_with_config(pickup, dropoff, config)` and **ETA** (nearest idle driver distance/speed, or default 300s). Inserts `RiderQuote { fare, eta_ms }` on the rider entity.
   - Schedules `QuoteDecision` 1 second from now for the same rider.
 
 ### `sim_core::systems::quote_decision`
@@ -487,7 +496,11 @@ System: `trip_completed_system`
 
 - Reacts to `CurrentEvent`.
 - On `EventKind::TripCompleted` with subject `Trip(trip_entity)`:
-  - Calculates trip fare using `calculate_trip_fare(trip.pickup, trip.dropoff)` and adds earnings to driver's `daily_earnings`.
+  - Reads `PricingConfig` from resources.
+  - Calculates total fare using `calculate_trip_fare_with_config(trip.pickup, trip.dropoff, config)`.
+  - Calculates commission and driver net earnings (fare minus commission).
+  - Adds driver net earnings to driver's `daily_earnings`.
+  - Accumulates commission to `telemetry.platform_revenue_total`.
   - Checks if driver should go OffDuty:
     - Earnings target: if `daily_earnings >= daily_earnings_target`, driver goes OffDuty.
     - Fatigue threshold: if `session_duration_ms >= fatigue_threshold_ms`, driver goes OffDuty.
@@ -598,11 +611,14 @@ All per-system unit tests emulate the runner by popping one event, inserting
   matching attempts, but new `TryMatch` events will use the updated algorithm). The metrics chart includes an **Abandoned (quote)** series for riders who gave up after rejecting too many quotes.
   
   The UI is organized into collapsible sections:
-  - **Scenario parameters**: Configurable inputs for riders (total count, initial count), drivers (total count, initial count),
-    rider spread (hours), driver spread (hours), match radius (km), map size (km), trip length range (km), rider cancellation wait windows (min/max minutes),
-    seed (optional), simulation start time (year/month/day/hour/minute UTC), and matching algorithm (Simple or Cost-based).
-    All parameters except matching algorithm are only editable before simulation starts.
-  - **Run outcomes**: Shows outcome counters (riders completed, riders cancelled, abandoned quote, trips completed, total resolved, conversion %),
+  - **Scenario parameters**: Organized in a five-column layout:
+    - **Supply (Drivers)**: Initial count, spawn count, spread (hours)
+    - **Demand (Riders)**: Initial count, spawn count, spread (hours), cancel wait (min/max minutes)
+    - **Pricing & Matching**: Base fare, per km rate, commission rate (displayed as percentage), matching algorithm (Simple or Cost-based), match radius (km)
+    - **Map & Trips**: Map size (km), trip length range (km, min–max)
+    - **Timing**: Simulation start time (year/month/day/hour/minute UTC with "Now" button), seed (optional)
+    All parameters except matching algorithm are only editable before simulation starts. Platform revenue is displayed in the Run outcomes section.
+  - **Run outcomes**: Shows outcome counters (riders completed, riders cancelled, abandoned quote, trips completed, total resolved, conversion %, platform revenue),
     current state breakdowns (riders now: browsing/waiting/in transit, drivers now: idle/evaluating/en route/on trip/off duty, trips now: en route/on trip),
     and timing distributions for completed trips (time to match, time to pickup, trip duration) with min, max, average, and percentiles (p50, p90, p95, p99).
   - **Fleet**: Shows driver utilization metrics (busy %, total drivers, active drivers), state breakdown with percentages,

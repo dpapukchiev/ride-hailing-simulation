@@ -132,7 +132,7 @@ fn render_run_outcomes(ui: &mut egui::Ui, app: &SimUiApp) {
         0.0
     };
 
-    ui.columns(5, |columns| {
+    ui.columns(6, |columns| {
         columns[0].vertical(|ui| {
             ui.label("Riders completed");
             ui.label(telemetry.riders_completed_total.to_string());
@@ -154,6 +154,10 @@ fn render_run_outcomes(ui: &mut egui::Ui, app: &SimUiApp) {
             ui.label(total_resolved.to_string());
             ui.label("Conversion %");
             ui.label(format!("{:.1}%", conversion_pct));
+        });
+        columns[5].vertical(|ui| {
+            ui.label("Platform revenue");
+            ui.label(format!("{:.2}", telemetry.platform_revenue_total));
         });
     });
 
@@ -503,66 +507,32 @@ fn timing_distribution(trips: &[CompletedTripRecord], f: fn(&CompletedTripRecord
     }
 }
 
-/// Render scenario parameter inputs in an eight-column layout to use horizontal space.
+/// Render scenario parameter inputs in a five-column layout organized by category.
 fn render_scenario_parameters(ui: &mut egui::Ui, app: &mut SimUiApp) {
     let can_edit = !app.started;
 
-    ui.columns(8, |columns| {
-        // Col 1: Riders
+    ui.columns(5, |columns| {
+        // Col 1: Supply (drivers - initial, spawn count, spread)
         columns[0].vertical(|ui| {
             ui.horizontal(|ui| {
-                ui.label("Riders");
-                ui.add_enabled(
-                    can_edit,
-                    egui::DragValue::new(&mut app.num_riders).range(1..=10_000),
-                );
+                ui.label("Supply (Drivers)");
             });
-        });
-
-        // Col 2: Drivers
-        columns[1].vertical(|ui| {
             ui.horizontal(|ui| {
-                ui.label("Drivers");
-                ui.add_enabled(
-                    can_edit,
-                    egui::DragValue::new(&mut app.num_drivers).range(1..=10_000),
-                );
-            });
-        });
-
-        // Col 3: Initial riders
-        columns[2].vertical(|ui| {
-            ui.horizontal(|ui| {
-                ui.label("Initial riders");
-                ui.add_enabled(
-                    can_edit,
-                    egui::DragValue::new(&mut app.initial_rider_count).range(0..=10_000),
-                );
-            });
-        });
-
-        // Col 4: Initial drivers
-        columns[3].vertical(|ui| {
-            ui.horizontal(|ui| {
-                ui.label("Initial drivers");
+                ui.label("Initial");
                 ui.add_enabled(
                     can_edit,
                     egui::DragValue::new(&mut app.initial_driver_count).range(0..=10_000),
                 );
             });
-        });
-
-        // Col 5: Rider spread, Driver spread
-        columns[4].vertical(|ui| {
             ui.horizontal(|ui| {
-                ui.label("Rider spread (h)");
+                ui.label("Spawn count");
                 ui.add_enabled(
                     can_edit,
-                    egui::DragValue::new(&mut app.request_window_hours).range(1..=24),
+                    egui::DragValue::new(&mut app.num_drivers).range(1..=10_000),
                 );
             });
             ui.horizontal(|ui| {
-                ui.label("Driver spread (h)");
+                ui.label("Spread (h)");
                 ui.add_enabled(
                     can_edit,
                     egui::DragValue::new(&mut app.driver_spread_hours).range(1..=24),
@@ -570,8 +540,106 @@ fn render_scenario_parameters(ui: &mut egui::Ui, app: &mut SimUiApp) {
             });
         });
 
-        // Col 6: Match radius, Map size, Trip length
-        columns[5].vertical(|ui| {
+        // Col 2: Demand (riders - initial, spawn count, spread, cancel)
+        columns[1].vertical(|ui| {
+            ui.horizontal(|ui| {
+                ui.label("Demand (Riders)");
+            });
+            ui.horizontal(|ui| {
+                ui.label("Initial");
+                ui.add_enabled(
+                    can_edit,
+                    egui::DragValue::new(&mut app.initial_rider_count).range(0..=10_000),
+                );
+            });
+            ui.horizontal(|ui| {
+                ui.label("Spawn count");
+                ui.add_enabled(
+                    can_edit,
+                    egui::DragValue::new(&mut app.num_riders).range(1..=10_000),
+                );
+            });
+            ui.horizontal(|ui| {
+                ui.label("Spread (h)");
+                ui.add_enabled(
+                    can_edit,
+                    egui::DragValue::new(&mut app.request_window_hours).range(1..=24),
+                );
+            });
+            ui.horizontal(|ui| {
+                ui.label("Cancel wait (m)");
+                ui.add_enabled(
+                    can_edit,
+                    egui::DragValue::new(&mut app.rider_cancel_min_mins)
+                        .range(1..=600),
+                );
+                ui.label("–");
+                ui.add_enabled(
+                    can_edit,
+                    egui::DragValue::new(&mut app.rider_cancel_max_mins)
+                        .range(1..=600),
+                );
+            });
+        });
+
+        // Col 3: Pricing and matching
+        columns[2].vertical(|ui| {
+            ui.horizontal(|ui| {
+                ui.label("Pricing & Matching");
+            });
+            ui.horizontal(|ui| {
+                ui.label("Base fare");
+                ui.add_enabled(
+                    can_edit,
+                    egui::DragValue::new(&mut app.base_fare)
+                        .range(0.0..=100.0)
+                        .speed(0.1),
+                );
+            });
+            ui.horizontal(|ui| {
+                ui.label("Per km");
+                ui.add_enabled(
+                    can_edit,
+                    egui::DragValue::new(&mut app.per_km_rate)
+                        .range(0.0..=100.0)
+                        .speed(0.1),
+                );
+            });
+            ui.horizontal(|ui| {
+                ui.label("Commission");
+                ui.add_enabled(
+                    can_edit,
+                    egui::DragValue::new(&mut app.commission_rate)
+                        .range(0.0..=1.0)
+                        .speed(0.01)
+                        .custom_formatter(|n, _| format!("{:.1}%", n * 100.0)),
+                );
+            });
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.label("Matching");
+                let old_algorithm = app.matching_algorithm;
+                egui::ComboBox::from_id_salt("matching_algorithm")
+                    .selected_text(match app.matching_algorithm {
+                        MatchingAlgorithmType::Simple => "Simple",
+                        MatchingAlgorithmType::CostBased => "Cost-based",
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut app.matching_algorithm,
+                            MatchingAlgorithmType::Simple,
+                            "Simple (first match)",
+                        );
+                        ui.selectable_value(
+                            &mut app.matching_algorithm,
+                            MatchingAlgorithmType::CostBased,
+                            "Cost-based (best match)",
+                        );
+                    });
+                if app.matching_algorithm != old_algorithm {
+                    app.matching_algorithm_changed = true;
+                }
+            });
             ui.horizontal(|ui| {
                 ui.label("Match radius (km)");
                 ui.add_enabled(
@@ -580,6 +648,13 @@ fn render_scenario_parameters(ui: &mut egui::Ui, app: &mut SimUiApp) {
                         .range(0.0..=20.0)
                         .speed(0.1),
                 );
+            });
+        });
+
+        // Col 4: Map and trips
+        columns[3].vertical(|ui| {
+            ui.horizontal(|ui| {
+                ui.label("Map & Trips");
             });
             ui.horizontal(|ui| {
                 ui.label("Map size (km)");
@@ -608,33 +683,11 @@ fn render_scenario_parameters(ui: &mut egui::Ui, app: &mut SimUiApp) {
             });
         });
 
-        // Col 7: Cancel wait, Seed
-        columns[6].vertical(|ui| {
+        // Col 5: Timing
+        columns[4].vertical(|ui| {
             ui.horizontal(|ui| {
-                ui.label("Cancel wait (m)");
-                ui.add_enabled(
-                    can_edit,
-                    egui::DragValue::new(&mut app.rider_cancel_min_mins)
-                        .range(1..=600),
-                );
-                ui.label("–");
-                ui.add_enabled(
-                    can_edit,
-                    egui::DragValue::new(&mut app.rider_cancel_max_mins)
-                        .range(1..=600),
-                );
+                ui.label("Timing");
             });
-            ui.horizontal(|ui| {
-                ui.add_enabled(can_edit, egui::Checkbox::new(&mut app.seed_enabled, "Seed"));
-                ui.add_enabled(
-                    can_edit && app.seed_enabled,
-                    egui::DragValue::new(&mut app.seed_value).range(0..=u64::MAX),
-                );
-            });
-        });
-
-        // Col 8: Start time, Matching algorithm
-        columns[7].vertical(|ui| {
             ui.horizontal(|ui| {
                 ui.label("Start (UTC)");
             });
@@ -670,29 +723,13 @@ fn render_scenario_parameters(ui: &mut egui::Ui, app: &mut SimUiApp) {
                     app.start_minute = minute;
                 }
             });
+            ui.add_space(4.0);
             ui.horizontal(|ui| {
-                ui.label("Matching");
-                let old_algorithm = app.matching_algorithm;
-                egui::ComboBox::from_id_salt("matching_algorithm")
-                    .selected_text(match app.matching_algorithm {
-                        MatchingAlgorithmType::Simple => "Simple",
-                        MatchingAlgorithmType::CostBased => "Cost-based",
-                    })
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(
-                            &mut app.matching_algorithm,
-                            MatchingAlgorithmType::Simple,
-                            "Simple (first match)",
-                        );
-                        ui.selectable_value(
-                            &mut app.matching_algorithm,
-                            MatchingAlgorithmType::CostBased,
-                            "Cost-based (best match)",
-                        );
-                    });
-                if app.matching_algorithm != old_algorithm {
-                    app.matching_algorithm_changed = true;
-                }
+                ui.add_enabled(can_edit, egui::Checkbox::new(&mut app.seed_enabled, "Seed"));
+                ui.add_enabled(
+                    can_edit && app.seed_enabled,
+                    egui::DragValue::new(&mut app.seed_value).range(0..=u64::MAX),
+                );
             });
         });
     });

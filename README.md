@@ -20,7 +20,7 @@ The simulation supports hundreds of concurrent riders and drivers, realistic tim
 - **Dynamic Spawning**: Time-of-day aware spawners for riders and drivers with configurable distributions
 - **State Machine**: Complete lifecycle modeling (browsing → quote accept/reject → waiting → matched → en route → completed/cancelled). Riders can reject quotes and request another, or give up after N rejections.
 - **Driver Behavior**: Earnings targets, fatigue thresholds, and off-duty transitions
-- **Pricing System**: Distance-based fare calculation with configurable rates
+- **Pricing System**: Distance-based fare calculation with configurable base fare, per-km rate, and commission rates. Tracks driver earnings and platform revenue separately.
 
 ### Matching Algorithms
 - **Simple Matching**: First-available driver within radius
@@ -134,16 +134,22 @@ cargo run -p sim_ui
 
 The UI provides:
 - Real-time map visualization with state-based coloring and optional grid overlay
-- Interactive parameter adjustment (riders, drivers, match radius, trip length, cancellation windows, start time, matching algorithm)
+- Interactive parameter adjustment organized in five columns:
+  - Supply (drivers: initial, spawn count, spread)
+  - Demand (riders: initial, spawn count, spread, cancel wait)
+  - Pricing & Matching (base fare, per km rate, commission rate, matching algorithm, match radius)
+  - Map & Trips (map size, trip length range)
+  - Timing (simulation start time, seed)
 - Time-series charts (active trips, waiting riders, idle drivers, cancellations, abandoned quotes, completed/cancelled trips)
 - Trip detail table (all trips with timestamps, distances, and states)
 - Playback controls (start, step, step 100, run/pause, run to end, reset, speed multiplier 10x-200x)
 - Fleet metrics (utilization, earnings distributions, fatigue tracking)
-- Run outcomes (conversion rates, timing distributions with percentiles)
+- Run outcomes (conversion rates, timing distributions with percentiles, platform revenue)
 
 ### Example: Custom Scenario
 
 ```rust
+use sim_core::pricing::PricingConfig;
 use sim_core::scenario::{build_scenario, ScenarioParams};
 use sim_core::runner::{initialize_simulation, run_until_empty, simulation_schedule};
 
@@ -155,7 +161,12 @@ build_scenario(
         .with_request_window_hours(6)
         .with_match_radius(5)
         .with_trip_duration_cells(5, 60)
-        .with_epoch_ms(1700000000000), // Custom start time
+        .with_epoch_ms(1700000000000) // Custom start time
+        .with_pricing_config(PricingConfig {
+            base_fare: 2.50,
+            per_km_rate: 1.50,
+            commission_rate: 0.15, // 15% commission
+        }),
 );
 
 initialize_simulation(&mut world);

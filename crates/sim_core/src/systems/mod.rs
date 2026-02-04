@@ -35,6 +35,7 @@ mod end_to_end_tests {
     use crate::clock::{SimulationClock, ONE_SEC_MS};
     use crate::distributions::UniformInterArrival;
     use crate::ecs::{Driver, DriverState, Trip, TripState};
+    use crate::pricing::PricingConfig;
     use crate::runner::{initialize_simulation, run_until_empty, simulation_schedule};
     use crate::scenario::{create_simple_matching, MatchRadius, RiderCancelConfig, RiderQuoteConfig};
     use crate::spawner::{DriverSpawner, DriverSpawnerConfig, RiderSpawner, RiderSpawnerConfig};
@@ -56,6 +57,7 @@ mod end_to_end_tests {
             accept_probability: 1.0,
             ..Default::default()
         });
+        world.insert_resource(PricingConfig::default());
 
         let cell = h3o::CellIndex::try_from(0x8a1fb46622dffff).expect("cell");
 
@@ -151,6 +153,7 @@ mod end_to_end_tests {
             accept_probability: 1.0,
             ..Default::default()
         });
+        world.insert_resource(PricingConfig::default());
 
         let cell = h3o::CellIndex::try_from(0x8a1fb46622dffff).expect("cell");
 

@@ -4,7 +4,7 @@ use bevy_ecs::prelude::{Commands, Entity, Query, Res, ResMut};
 
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
 use crate::ecs::{Driver, DriverState, Position, Rider, RiderQuote, RiderState};
-use crate::pricing::calculate_trip_fare;
+use crate::pricing::{calculate_trip_fare_with_config, PricingConfig};
 use crate::spatial::distance_km_between_cells;
 
 /// Default ETA in ms when no idle drivers are available (5 minutes).
@@ -16,6 +16,7 @@ pub fn show_quote_system(
     mut commands: Commands,
     mut clock: ResMut<SimulationClock>,
     event: Res<CurrentEvent>,
+    pricing_config: Res<PricingConfig>,
     riders: Query<(Entity, &Rider, &Position)>,
     drivers: Query<(&Driver, &Position)>,
 ) {
@@ -38,7 +39,7 @@ pub fn show_quote_system(
     };
 
     let pickup = position.0;
-    let fare = calculate_trip_fare(pickup, dropoff);
+    let fare = calculate_trip_fare_with_config(pickup, dropoff, *pricing_config);
 
     let eta_ms = drivers
         .iter()
@@ -73,10 +74,12 @@ mod tests {
 
     #[test]
     fn show_quote_computes_quote_and_schedules_quote_decision() {
+        use crate::pricing::PricingConfig;
         use crate::test_helpers::test_neighbor_cell;
 
         let mut world = World::new();
         world.insert_resource(SimulationClock::default());
+        world.insert_resource(PricingConfig::default());
         let destination = test_neighbor_cell();
         let cell = h3o::CellIndex::try_from(0x8a1fb46622dffff).expect("cell");
 

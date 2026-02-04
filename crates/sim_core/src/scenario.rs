@@ -9,6 +9,7 @@ use crate::clock::SimulationClock;
 use crate::distributions::TimeOfDayDistribution;
 use crate::matching::{CostBasedMatching, MatchingAlgorithmResource, SimpleMatching};
 use crate::patterns::{apply_driver_patterns, apply_rider_patterns};
+use crate::pricing::PricingConfig;
 use crate::spawner::{DriverSpawner, DriverSpawnerConfig, RiderSpawner, RiderSpawnerConfig};
 use crate::speed::SpeedModel;
 use crate::telemetry::{SimSnapshotConfig, SimSnapshots, SimTelemetry};
@@ -111,6 +112,8 @@ pub struct ScenarioParams {
     /// Epoch in milliseconds (real-world time corresponding to simulation time 0).
     /// Used for time-of-day distributions. If None, defaults to 0.
     pub epoch_ms: Option<i64>,
+    /// Pricing configuration. If None, uses default PricingConfig.
+    pub pricing_config: Option<PricingConfig>,
 }
 
 impl Default for ScenarioParams {
@@ -131,6 +134,7 @@ impl Default for ScenarioParams {
             min_trip_cells: 5,
             max_trip_cells: 60,
             epoch_ms: None,
+            pricing_config: None,
         }
     }
 }
@@ -169,6 +173,12 @@ impl ScenarioParams {
     /// Set the epoch in milliseconds (real-world time corresponding to simulation time 0).
     pub fn with_epoch_ms(mut self, epoch_ms: i64) -> Self {
         self.epoch_ms = Some(epoch_ms);
+        self
+    }
+
+    /// Set pricing configuration.
+    pub fn with_pricing_config(mut self, pricing_config: PricingConfig) -> Self {
+        self.pricing_config = Some(pricing_config);
         self
     }
 }
@@ -392,6 +402,8 @@ pub fn build_scenario(world: &mut World, params: ScenarioParams) {
     world.insert_resource(SpeedModel::new(params.seed.map(|seed| seed ^ 0x5eed_cafe)));
     // Default to cost-based matching with default ETA weight
     world.insert_resource(create_cost_based_matching(crate::matching::DEFAULT_ETA_WEIGHT));
+    // Insert pricing config (use provided or default)
+    world.insert_resource(params.pricing_config.unwrap_or_default());
 
     let seed = params.seed.unwrap_or(0);
     let request_window_ms = params.request_window_ms;
