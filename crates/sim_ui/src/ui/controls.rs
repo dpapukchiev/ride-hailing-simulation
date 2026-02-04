@@ -116,6 +116,8 @@ pub fn render_control_panel(ui: &mut egui::Ui, app: &mut SimUiApp) {
 
 /// Render run outcome counters and optional completed-trip timing stats from SimTelemetry.
 fn render_run_outcomes(ui: &mut egui::Ui, app: &SimUiApp) {
+    const PERCENTILES: &[(u8, &str)] = &[(50, "p50"), (90, "p90"), (95, "p95"), (99, "p99")];
+    
     let telemetry = match app.world.get_resource::<SimTelemetry>() {
         Some(t) => t,
         None => {
@@ -160,14 +162,22 @@ fn render_run_outcomes(ui: &mut egui::Ui, app: &SimUiApp) {
         columns[5].vertical(|ui| {
             ui.label("Platform revenue");
             ui.label(format!("{:.2}", telemetry.platform_revenue_total));
+            ui.label("Total rider pay");
+            ui.label(format!("{:.2}", telemetry.total_fares_collected));
+            let n = telemetry.completed_trips.len();
+            if n > 0 {
+                let avg_fare = telemetry.total_fares_collected / n as f64;
+                ui.label("Avg fare");
+                ui.label(format!("{:.2}", avg_fare));
+            }
         });
     });
 
-    // Current state (from latest snapshot): 5 columns
+    // Current state (from latest snapshot): 3 columns (riders, drivers, trips)
     if let Some(snapshots) = app.world.get_resource::<SimSnapshots>() {
         if let Some(latest) = snapshots.snapshots.back() {
             let c = &latest.counts;
-            ui.columns(5, |columns| {
+            ui.columns(3, |columns| {
                 columns[0].vertical(|ui| {
                     ui.label("Riders now:");
                     ui.label(format!("browsing {} waiting {} in transit {}", c.riders_browsing, c.riders_waiting, c.riders_in_transit));
@@ -184,14 +194,26 @@ fn render_run_outcomes(ui: &mut egui::Ui, app: &SimUiApp) {
         }
     }
 
-    // Timing distribution: 5 columns (time to match | time to pickup | trip duration)
+    ui.add_space(8.0);
+
+    // Timing and fare distributions: 5 columns (time to match | time to pickup | trip duration | fare to riders | fare to drivers)
     if !telemetry.completed_trips.is_empty() {
-        const PERCENTILES: &[(u8, &str)] = &[(50, "p50"), (90, "p90"), (95, "p95"), (99, "p99")];
         let n = telemetry.completed_trips.len();
 
         let match_dist = timing_distribution(telemetry.completed_trips.as_slice(), CompletedTripRecord::time_to_match);
         let pickup_dist = timing_distribution(telemetry.completed_trips.as_slice(), CompletedTripRecord::time_to_pickup);
         let trip_dist = timing_distribution(telemetry.completed_trips.as_slice(), CompletedTripRecord::trip_duration);
+
+        let rider_fares: Vec<f64> = telemetry.completed_trips.iter().map(|t| t.fare).collect();
+        let driver_takes: Vec<f64> = telemetry
+            .completed_trips
+            .iter()
+            .map(|t| t.fare * (1.0 - app.commission_rate))
+            .collect();
+        let (rider_min, rider_max, rider_avg, rider_sorted) =
+            fare_distribution_stats(&rider_fares);
+        let (driver_min, driver_max, driver_avg, driver_sorted) =
+            fare_distribution_stats(&driver_takes);
 
         ui.columns(5, |columns| {
             columns[0].vertical(|ui| {
@@ -223,6 +245,26 @@ fn render_run_outcomes(ui: &mut egui::Ui, app: &SimUiApp) {
                     }
                 }
                 ui.label(format!("avg {}", format_hms_from_ms(trip_dist.mean)));
+            });
+            columns[3].vertical(|ui| {
+                ui.label(format!("Fare to riders (n={})", n));
+                ui.label(format!("min {:.2}  max {:.2}", rider_min, rider_max));
+                for (p, label) in PERCENTILES {
+                    if let Some(v) = percentile_f64_sorted(&rider_sorted, *p) {
+                        ui.label(format!("{} {:.2}", label, v));
+                    }
+                }
+                ui.label(format!("avg {:.2}", rider_avg));
+            });
+            columns[4].vertical(|ui| {
+                ui.label(format!("Fare to drivers (n={})", n));
+                ui.label(format!("min {:.2}  max {:.2}", driver_min, driver_max));
+                for (p, label) in PERCENTILES {
+                    if let Some(v) = percentile_f64_sorted(&driver_sorted, *p) {
+                        ui.label(format!("{} {:.2}", label, v));
+                    }
+                }
+                ui.label(format!("avg {:.2}", driver_avg));
             });
         });
     }
@@ -513,11 +555,34 @@ fn timing_distribution(trips: &[CompletedTripRecord], f: fn(&CompletedTripRecord
     }
 }
 
-/// Render scenario parameter inputs in a five-column layout organized by category.
+/// Min, max, mean and sorted copy for fare distribution (percentiles).
+fn fare_distribution_stats(values: &[f64]) -> (f64, f64, f64, Vec<f64>) {
+    if values.is_empty() {
+        return (0.0, 0.0, 0.0, Vec::new());
+    }
+    let min = values.iter().cloned().fold(f64::INFINITY, f64::min);
+    let max = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let mean = values.iter().sum::<f64>() / (values.len() as f64);
+    let mut sorted = values.to_vec();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    (min, max, mean, sorted)
+}
+
+/// Nearest-rank percentile (0–100) for sorted f64 slice.
+fn percentile_f64_sorted(sorted: &[f64], p: u8) -> Option<f64> {
+    if sorted.is_empty() || p > 100 {
+        return None;
+    }
+    let n = sorted.len();
+    let idx = ((p as usize) * (n - 1)) / 100;
+    Some(sorted[idx])
+}
+
+/// Render scenario parameter inputs in a seven-column layout organized by category.
 fn render_scenario_parameters(ui: &mut egui::Ui, app: &mut SimUiApp) {
     let can_edit = !app.started;
 
-    ui.columns(5, |columns| {
+    ui.columns(7, |columns| {
         // Col 1: Supply (drivers - initial, spawn count, spread)
         columns[0].vertical(|ui| {
             ui.horizontal(|ui| {
@@ -588,10 +653,10 @@ fn render_scenario_parameters(ui: &mut egui::Ui, app: &mut SimUiApp) {
             });
         });
 
-        // Col 3: Pricing and matching
+        // Col 3: Pricing (base, per km, commission, surge)
         columns[2].vertical(|ui| {
             ui.horizontal(|ui| {
-                ui.label("Pricing & Matching");
+                ui.label("Pricing");
             });
             ui.horizontal(|ui| {
                 ui.label("Base fare");
@@ -623,7 +688,71 @@ fn render_scenario_parameters(ui: &mut egui::Ui, app: &mut SimUiApp) {
             });
             ui.add_space(4.0);
             ui.horizontal(|ui| {
+                ui.add_enabled(can_edit, egui::Checkbox::new(&mut app.surge_enabled, "Surge pricing"));
+            });
+            ui.horizontal(|ui| {
+                ui.label("Surge radius (k)");
+                ui.add_enabled(
+                    can_edit && app.surge_enabled,
+                    egui::DragValue::new(&mut app.surge_radius_k).range(1..=5).speed(1),
+                );
+                ui.label("Max mult");
+                ui.add_enabled(
+                    can_edit && app.surge_enabled,
+                    egui::DragValue::new(&mut app.surge_max_multiplier)
+                        .range(1.0..=5.0)
+                        .speed(0.1),
+                );
+            });
+        });
+
+        // Col 4: Rider quote
+        columns[3].vertical(|ui| {
+            ui.horizontal(|ui| {
+                ui.label("Rider quote");
+            });
+            ui.horizontal(|ui| {
+                ui.label("Max WTP ($)");
+                ui.add_enabled(
+                    can_edit,
+                    egui::DragValue::new(&mut app.max_willingness_to_pay)
+                        .range(1.0..=500.0)
+                        .speed(1.0),
+                );
+            });
+            ui.horizontal(|ui| {
+                ui.label("Max ETA (min)");
+                ui.add_enabled(
+                    can_edit,
+                    egui::DragValue::new(&mut app.max_acceptable_eta_min)
+                        .range(1..=60)
+                        .speed(1),
+                );
+            });
+            ui.horizontal(|ui| {
+                ui.label("Accept %");
+                ui.add_enabled(
+                    can_edit,
+                    egui::DragValue::new(&mut app.accept_probability)
+                        .range(0.0..=1.0)
+                        .speed(0.05),
+                );
+            });
+            ui.horizontal(|ui| {
+                ui.label("Max quote rejections");
+                ui.add_enabled(
+                    can_edit,
+                    egui::DragValue::new(&mut app.max_quote_rejections).range(1..=10).speed(1),
+                );
+            });
+        });
+
+        // Col 5: Matching
+        columns[4].vertical(|ui| {
+            ui.horizontal(|ui| {
                 ui.label("Matching");
+            });
+            ui.horizontal(|ui| {
                 let old_algorithm = app.matching_algorithm;
                 egui::ComboBox::from_id_salt("matching_algorithm")
                     .selected_text(match app.matching_algorithm {
@@ -675,8 +804,8 @@ fn render_scenario_parameters(ui: &mut egui::Ui, app: &mut SimUiApp) {
             });
         });
 
-        // Col 4: Map and trips
-        columns[3].vertical(|ui| {
+        // Col 6: Map and trips
+        columns[5].vertical(|ui| {
             ui.horizontal(|ui| {
                 ui.label("Map & Trips");
             });
@@ -707,8 +836,8 @@ fn render_scenario_parameters(ui: &mut egui::Ui, app: &mut SimUiApp) {
             });
         });
 
-        // Col 5: Timing
-        columns[4].vertical(|ui| {
+        // Col 7: Timing
+        columns[6].vertical(|ui| {
             ui.horizontal(|ui| {
                 ui.label("Timing");
             });

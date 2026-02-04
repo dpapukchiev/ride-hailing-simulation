@@ -35,8 +35,10 @@ pub fn trip_completed_system(
     let driver_entity = trip.driver;
     let rider_entity = trip.rider;
 
-    // Calculate fare, commission, and driver earnings
-    let fare = calculate_trip_fare_with_config(trip.pickup, trip.dropoff, *pricing_config);
+    // Use agreed fare (quoted at accept, may include surge) or fall back to current pricing
+    let fare = trip.agreed_fare.unwrap_or_else(|| {
+        calculate_trip_fare_with_config(trip.pickup, trip.dropoff, *pricing_config)
+    });
     let commission = calculate_platform_revenue(fare, pricing_config.commission_rate);
     let driver_earnings_amount = calculate_driver_earnings(fare, pricing_config.commission_rate);
     let mut should_go_offduty = false;
@@ -94,9 +96,11 @@ pub fn trip_completed_system(
         requested_at: trip.requested_at,
         matched_at: trip.matched_at,
         pickup_at,
+        fare,
     });
     telemetry.riders_completed_total = telemetry.riders_completed_total.saturating_add(1);
     telemetry.platform_revenue_total += commission;
+    telemetry.total_fares_collected += fare;
 
     commands.entity(rider_entity).despawn();
 }
@@ -131,6 +135,7 @@ mod tests {
                 destination: Some(destination),
                 requested_at: None,
                 quote_rejections: 0,
+                accepted_fare: None,
             })
             .id();
         let driver_entity = world
@@ -153,6 +158,7 @@ mod tests {
                 pickup_eta_ms: 0,
                 dropoff_at: None,
                 cancelled_at: None,
+                agreed_fare: None,
             })
             .id();
 

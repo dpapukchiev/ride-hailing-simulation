@@ -64,6 +64,8 @@ mod tests {
             re_quote_delay_secs: 10,
             accept_probability: 0.8,
             seed: 42,
+            max_willingness_to_pay: 100.0,
+            max_acceptable_eta_ms: 600_000,
         });
         let destination = test_neighbor_cell();
         let cell = h3o::CellIndex::try_from(0x8a1fb46622dffff).expect("cell");
@@ -76,6 +78,7 @@ mod tests {
                     destination: Some(destination),
                     requested_at: None,
                     quote_rejections: 1,
+                    accepted_fare: None,
                 },
                 Position(cell),
             ))
@@ -124,6 +127,8 @@ mod tests {
             re_quote_delay_secs: 10,
             accept_probability: 0.8,
             seed: 42,
+            max_willingness_to_pay: 100.0,
+            max_acceptable_eta_ms: 600_000,
         });
         let destination = test_neighbor_cell();
         let cell = h3o::CellIndex::try_from(0x8a1fb46622dffff).expect("cell");
@@ -136,6 +141,7 @@ mod tests {
                     destination: Some(destination),
                     requested_at: None,
                     quote_rejections: 2, // Already at limit
+                    accepted_fare: None,
                 },
                 Position(cell),
             ))

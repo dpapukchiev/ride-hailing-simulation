@@ -5,7 +5,7 @@ use bevy_ecs::prelude::{Commands, Entity, Query, Res, ResMut};
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
 use crate::ecs::{Driver, DriverState, Position, Rider, RiderQuote, RiderState};
 use crate::pricing::{calculate_trip_fare_with_config, PricingConfig};
-use crate::spatial::distance_km_between_cells;
+use crate::spatial::{distance_km_between_cells, GeoIndex};
 
 /// Default ETA in ms when no idle drivers are available (5 minutes).
 const DEFAULT_ETA_MS: u64 = 300 * 1000;
@@ -39,7 +39,35 @@ pub fn show_quote_system(
     };
 
     let pickup = position.0;
-    let fare = calculate_trip_fare_with_config(pickup, dropoff, *pricing_config);
+    let base_fare = calculate_trip_fare_with_config(pickup, dropoff, *pricing_config);
+
+    let surge_multiplier = if pricing_config.surge_enabled && pricing_config.surge_radius_k > 0 {
+        let geo = GeoIndex::default();
+        let cluster_cells = geo.grid_disk(pickup, pricing_config.surge_radius_k);
+        let demand = riders
+            .iter()
+            .filter(|(_, r, pos)| {
+                (r.state == RiderState::Browsing || r.state == RiderState::Waiting)
+                    && cluster_cells.contains(&pos.0)
+            })
+            .count();
+        let supply = drivers
+            .iter()
+            .filter(|(d, pos)| d.state == DriverState::Idle && cluster_cells.contains(&pos.0))
+            .count();
+        if demand > supply && supply > 0 {
+            let raw = 1.0 + (demand - supply) as f64 / supply as f64;
+            raw.min(pricing_config.surge_max_multiplier)
+        } else if demand > supply && supply == 0 {
+            pricing_config.surge_max_multiplier
+        } else {
+            1.0
+        }
+    } else {
+        1.0
+    };
+
+    let fare = base_fare * surge_multiplier;
 
     let eta_ms = drivers
         .iter()
@@ -91,6 +119,7 @@ mod tests {
                     destination: Some(destination),
                     requested_at: None,
                     quote_rejections: 0,
+                    accepted_fare: None,
                 },
                 Position(cell),
             ))

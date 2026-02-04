@@ -68,6 +68,11 @@ pub fn driver_decision_system(
         let matched_at = clock.now();
         let pickup_distance_km_at_accept = distance_km_between_cells(driver_pos.0, pickup);
         driver.state = DriverState::EnRoute;
+        let agreed_fare = riders
+            .get(rider_entity)
+            .ok()
+            .and_then(|(_, r, _)| r.accepted_fare);
+
         let trip_entity = commands
             .spawn(Trip {
                 state: TripState::EnRoute,
@@ -82,6 +87,7 @@ pub fn driver_decision_system(
                 pickup_eta_ms: 0,
                 dropoff_at: None,
                 cancelled_at: None,
+                agreed_fare,
             })
             .id();
 
@@ -134,6 +140,7 @@ mod tests {
                     destination: Some(destination),
                     requested_at: None,
                     quote_rejections: 0,
+                    accepted_fare: Some(15.0),
                 },
                 Position(cell),
             ))

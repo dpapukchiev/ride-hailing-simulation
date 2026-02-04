@@ -90,10 +90,14 @@ pub struct RiderQuoteConfig {
     pub max_quote_rejections: u32,
     /// Delay in seconds before requesting another quote after rejection.
     pub re_quote_delay_secs: u64,
-    /// Probability (0.0–1.0) that rider accepts the quote when viewing it.
+    /// Probability (0.0–1.0) that rider accepts the quote when within price/ETA limits.
     pub accept_probability: f64,
     /// Seed for RNG (for reproducibility).
     pub seed: u64,
+    /// Maximum willingness to pay; reject quote if fare exceeds this.
+    pub max_willingness_to_pay: f64,
+    /// Maximum acceptable ETA to pickup (ms); reject quote if eta_ms exceeds this.
+    pub max_acceptable_eta_ms: u64,
 }
 
 impl Default for RiderQuoteConfig {
@@ -103,6 +107,8 @@ impl Default for RiderQuoteConfig {
             re_quote_delay_secs: 10,
             accept_probability: 0.8,
             seed: 0,
+            max_willingness_to_pay: 100.0,
+            max_acceptable_eta_ms: 600_000, // 10 min
         }
     }
 }
@@ -137,6 +143,8 @@ pub struct ScenarioParams {
     pub epoch_ms: Option<i64>,
     /// Pricing configuration. If None, uses default PricingConfig.
     pub pricing_config: Option<PricingConfig>,
+    /// Rider quote configuration. If None, uses default RiderQuoteConfig.
+    pub rider_quote_config: Option<RiderQuoteConfig>,
     /// Simulation end time in ms. When set, the runner stops when the next event is at or after this time.
     pub simulation_end_time_ms: Option<u64>,
 }
@@ -160,6 +168,7 @@ impl Default for ScenarioParams {
             max_trip_cells: 60,
             epoch_ms: None,
             pricing_config: None,
+            rider_quote_config: None,
             simulation_end_time_ms: None,
         }
     }
@@ -211,6 +220,12 @@ impl ScenarioParams {
     /// Set simulation end time in ms. Runner stops when the next event is at or after this time.
     pub fn with_simulation_end_time_ms(mut self, end_ms: u64) -> Self {
         self.simulation_end_time_ms = Some(end_ms);
+        self
+    }
+
+    /// Set rider quote configuration.
+    pub fn with_rider_quote_config(mut self, rider_quote_config: RiderQuoteConfig) -> Self {
+        self.rider_quote_config = Some(rider_quote_config);
         self
     }
 }
@@ -434,12 +449,14 @@ pub fn build_scenario(world: &mut World, params: ScenarioParams) {
         max_wait_secs: 2400,
         seed: seed.wrapping_add(0xcafe_babe), // Use a different seed offset for cancellation
     });
-    world.insert_resource(RiderQuoteConfig {
+    world.insert_resource(params.rider_quote_config.unwrap_or_else(|| RiderQuoteConfig {
         max_quote_rejections: 3,
         re_quote_delay_secs: 10,
         accept_probability: 0.8,
-        seed: seed.wrapping_add(0x711073_beef), // Use a different seed offset for quote decisions
-    });
+        seed: seed.wrapping_add(0x711073_beef),
+        max_willingness_to_pay: 100.0,
+        max_acceptable_eta_ms: 600_000,
+    }));
     world.insert_resource(SpeedModel::new(params.seed.map(|seed| seed ^ 0x5eed_cafe)));
     // Default to Hungarian (batch) matching with default ETA weight
     world.insert_resource(create_hungarian_matching(crate::matching::DEFAULT_ETA_WEIGHT));

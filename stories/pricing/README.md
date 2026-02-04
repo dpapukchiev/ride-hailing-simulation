@@ -11,4 +11,4 @@
 
 - Story: As a pricing engine, I can apply surge multipliers when demand exceeds
   supply within an H3 cluster.
-  Status: Backlog
+  Status: Done

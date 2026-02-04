@@ -20,7 +20,7 @@ The simulation supports hundreds of concurrent riders and drivers, realistic tim
 - **Dynamic Spawning**: Time-of-day aware spawners for riders and drivers with configurable distributions
 - **State Machine**: Complete lifecycle modeling (browsing → quote accept/reject → waiting → matched → en route → completed/cancelled). Riders can reject quotes and request another, or give up after N rejections.
 - **Driver Behavior**: Earnings targets, fatigue thresholds, and off-duty transitions
-- **Pricing System**: Distance-based fare calculation with configurable base fare, per-km rate, and commission rates. Tracks driver earnings and platform revenue separately.
+- **Pricing System**: Distance-based fare calculation with configurable base fare, per-km rate, and commission rates. Optional surge pricing applies dynamic multipliers when demand exceeds supply in local H3 clusters. Tracks driver earnings and platform revenue separately.
 
 ### Matching Algorithms
 - **Simple Matching**: First-available driver within radius
@@ -148,7 +148,7 @@ The UI provides:
 - Interactive parameter adjustment organized in five columns:
   - Supply (drivers: initial, spawn count, spread)
   - Demand (riders: initial, spawn count, spread, cancel wait)
-  - Pricing & Matching (base fare, per km rate, commission rate, matching algorithm, match radius)
+  - Pricing & Matching (base fare, per km rate, commission rate, surge pricing controls, matching algorithm, match radius)
   - Map & Trips (map size, trip length range)
   - Timing (simulation start time, seed)
 - Time-series charts (active trips, waiting riders, idle drivers, cancellations, abandoned quotes, completed/cancelled trips)
@@ -177,6 +177,9 @@ build_scenario(
             base_fare: 2.50,
             per_km_rate: 1.50,
             commission_rate: 0.15, // 15% commission
+            surge_enabled: true,
+            surge_radius_k: 1,
+            surge_max_multiplier: 2.0,
         }),
 );
 

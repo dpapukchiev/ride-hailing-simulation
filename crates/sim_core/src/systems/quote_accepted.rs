@@ -1,4 +1,4 @@
-use bevy_ecs::prelude::{Commands, Query, Res, ResMut};
+use bevy_ecs::prelude::{Commands, Entity, Query, Res, ResMut};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
@@ -12,7 +12,7 @@ pub fn quote_accepted_system(
     mut commands: Commands,
     batch_config: Option<Res<BatchMatchingConfig>>,
     cancel_config: Option<Res<RiderCancelConfig>>,
-    mut riders: Query<&mut Rider>,
+    mut riders: Query<(Entity, &mut Rider, &RiderQuote)>,
 ) {
     if event.0.kind != EventKind::QuoteAccepted {
         return;
@@ -21,10 +21,11 @@ pub fn quote_accepted_system(
     let Some(EventSubject::Rider(rider_entity)) = event.0.subject else {
         return;
     };
-    let Ok(mut rider) = riders.get_mut(rider_entity) else {
+    let Ok((_, mut rider, quote)) = riders.get_mut(rider_entity) else {
         return;
     };
     if rider.state == RiderState::Browsing {
+        rider.accepted_fare = Some(quote.fare);
         rider.state = RiderState::Waiting;
         commands.entity(rider_entity).remove::<RiderQuote>();
     }
@@ -63,13 +64,17 @@ mod tests {
         let destination = test_neighbor_cell();
         
         let rider_entity = world
-            .spawn(Rider {
-                state: RiderState::Browsing,
-                matched_driver: None,
-                destination: Some(destination),
-                requested_at: None,
-                quote_rejections: 0,
-            })
+            .spawn((
+                Rider {
+                    state: RiderState::Browsing,
+                    matched_driver: None,
+                    destination: Some(destination),
+                    requested_at: None,
+                    quote_rejections: 0,
+                    accepted_fare: None,
+                },
+                RiderQuote { fare: 12.5, eta_ms: 60_000 },
+            ))
             .id();
 
         world
@@ -88,6 +93,7 @@ mod tests {
 
         let rider = world.query::<&Rider>().single(&world);
         assert_eq!(rider.state, RiderState::Waiting);
+        assert_eq!(rider.accepted_fare, Some(12.5));
 
         let next_event = world
             .resource_mut::<SimulationClock>()

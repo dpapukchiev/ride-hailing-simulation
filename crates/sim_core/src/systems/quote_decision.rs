@@ -22,7 +22,7 @@ pub fn quote_decision_system(
         return;
     };
 
-    let Ok((_, rider, _quote)) = riders.get(rider_entity) else {
+    let Ok((_, rider, quote)) = riders.get(rider_entity) else {
         return;
     };
     if rider.state != RiderState::Browsing {
@@ -30,6 +30,16 @@ pub fn quote_decision_system(
     }
 
     let config = quote_config.as_deref().copied().unwrap_or_default();
+    let over_price = quote.fare > config.max_willingness_to_pay;
+    let over_eta = quote.eta_ms > config.max_acceptable_eta_ms;
+    if over_price || over_eta {
+        clock.schedule_in_secs(
+            0,
+            EventKind::QuoteRejected,
+            Some(EventSubject::Rider(rider_entity)),
+        );
+        return;
+    }
     let seed = config.seed.wrapping_add(rider_entity.index() as u64);
     let mut rng = StdRng::seed_from_u64(seed);
     let accept = rng.gen::<f64>() < config.accept_probability;
@@ -66,6 +76,8 @@ mod tests {
             re_quote_delay_secs: 10,
             accept_probability: 1.0, // Always accept
             seed: 42,
+            max_willingness_to_pay: 100.0,
+            max_acceptable_eta_ms: 600_000,
         });
         let destination = test_neighbor_cell();
         let cell = h3o::CellIndex::try_from(0x8a1fb46622dffff).expect("cell");
@@ -78,6 +90,7 @@ mod tests {
                     destination: Some(destination),
                     requested_at: None,
                     quote_rejections: 0,
+                    accepted_fare: None,
                 },
                 Position(cell),
                 RiderQuote {
@@ -122,6 +135,8 @@ mod tests {
             re_quote_delay_secs: 10,
             accept_probability: 0.0, // Never accept
             seed: 42,
+            max_willingness_to_pay: 100.0,
+            max_acceptable_eta_ms: 600_000,
         });
         let destination = test_neighbor_cell();
         let cell = h3o::CellIndex::try_from(0x8a1fb46622dffff).expect("cell");
@@ -134,6 +149,7 @@ mod tests {
                     destination: Some(destination),
                     requested_at: None,
                     quote_rejections: 0,
+                    accepted_fare: None,
                 },
                 Position(cell),
                 RiderQuote {

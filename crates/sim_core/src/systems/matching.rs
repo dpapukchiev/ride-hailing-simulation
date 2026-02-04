@@ -109,6 +109,7 @@ mod tests {
                     destination: Some(destination),
                     requested_at: None,
                     quote_rejections: 0,
+                    accepted_fare: None,
                 },
                 Position(cell),
             ))

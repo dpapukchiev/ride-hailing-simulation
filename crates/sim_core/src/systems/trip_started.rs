@@ -108,6 +108,7 @@ mod tests {
                     destination: Some(destination),
                     requested_at: None,
                     quote_rejections: 0,
+                    accepted_fare: None,
                 },
                 Position(cell),
             ))
@@ -135,6 +136,7 @@ mod tests {
                 pickup_eta_ms: 0,
                 dropoff_at: None,
                 cancelled_at: None,
+                agreed_fare: None,
             })
             .id();
 

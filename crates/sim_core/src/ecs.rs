@@ -20,7 +20,7 @@ pub enum RiderState {
     Cancelled,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]
+#[derive(Debug, Clone, Copy, PartialEq, Component)]
 pub struct Rider {
     pub state: RiderState,
     pub matched_driver: Option<Entity>,
@@ -30,6 +30,8 @@ pub struct Rider {
     pub requested_at: Option<u64>,
     /// Number of times this rider has rejected a quote (used for give-up after max_quote_rejections).
     pub quote_rejections: u32,
+    /// Fare the rider accepted when they transitioned to Waiting; used for driver earnings and trip completion.
+    pub accepted_fare: Option<f64>,
 }
 
 /// Current quote shown to a rider (fare + ETA). Attached while rider is viewing a quote; used for UI/telemetry.
@@ -103,6 +105,8 @@ pub struct Trip {
     pub dropoff_at: Option<u64>,
     /// Simulation time when the trip was cancelled; set in rider_cancel_system.
     pub cancelled_at: Option<u64>,
+    /// Agreed fare (quoted at accept time, may include surge). Used for driver earnings and platform revenue.
+    pub agreed_fare: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]

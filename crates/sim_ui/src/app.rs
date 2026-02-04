@@ -8,7 +8,7 @@ use sim_core::pricing::PricingConfig;
 use sim_core::runner::{run_next_event, simulation_schedule};
 use sim_core::scenario::{
     build_scenario, create_cost_based_matching, create_hungarian_matching, create_simple_matching,
-    ScenarioParams,
+    RiderQuoteConfig, ScenarioParams,
 };
 
 use crate::ui::utils::{
@@ -60,6 +60,13 @@ pub struct SimUiApp {
     pub base_fare: f64,
     pub per_km_rate: f64,
     pub commission_rate: f64,
+    pub surge_enabled: bool,
+    pub surge_radius_k: u32,
+    pub surge_max_multiplier: f64,
+    pub max_willingness_to_pay: f64,
+    pub max_acceptable_eta_min: u64,
+    pub accept_probability: f64,
+    pub max_quote_rejections: u32,
 }
 
 /// Type of matching algorithm to use.
@@ -104,7 +111,14 @@ impl SimUiApp {
         let base_fare = 2.50;
         let per_km_rate = 1.50;
         let commission_rate = 0.175;
-        
+        let surge_enabled = false;
+        let surge_radius_k = 1;
+        let surge_max_multiplier = 2.0;
+        let max_willingness_to_pay = 50.0;
+        let max_acceptable_eta_min: u64 = 10;
+        let accept_probability = 0.8;
+        let max_quote_rejections = 3;
+
         // Default start time: 2026-02-03 06:30:00 UTC
         let year = 2026;
         let month = 2;
@@ -126,6 +140,17 @@ impl SimUiApp {
             base_fare,
             per_km_rate,
             commission_rate,
+            surge_enabled,
+            surge_radius_k,
+            surge_max_multiplier,
+        })
+        .with_rider_quote_config(RiderQuoteConfig {
+            max_quote_rejections,
+            re_quote_delay_secs: 10,
+            accept_probability,
+            seed: if seed_enabled { seed_value } else { 0u64 }.wrapping_add(0x711073_beef_u64),
+            max_willingness_to_pay,
+            max_acceptable_eta_ms: max_acceptable_eta_min.saturating_mul(60).saturating_mul(1000),
         });
         if seed_enabled {
             params = params.with_seed(seed_value);
@@ -182,6 +207,13 @@ impl SimUiApp {
             base_fare,
             per_km_rate,
             commission_rate,
+            surge_enabled,
+            surge_radius_k,
+            surge_max_multiplier,
+            max_willingness_to_pay,
+            max_acceptable_eta_min,
+            accept_probability,
+            max_quote_rejections,
         }
     }
 
@@ -275,11 +307,23 @@ impl SimUiApp {
         params.lng_min = lng_min;
         params.lng_max = lng_max;
 
-        params = params.with_pricing_config(PricingConfig {
-            base_fare: self.base_fare,
-            per_km_rate: self.per_km_rate,
-            commission_rate: self.commission_rate,
-        });
+        params = params
+            .with_pricing_config(PricingConfig {
+                base_fare: self.base_fare,
+                per_km_rate: self.per_km_rate,
+                commission_rate: self.commission_rate,
+                surge_enabled: self.surge_enabled,
+                surge_radius_k: self.surge_radius_k,
+                surge_max_multiplier: self.surge_max_multiplier,
+            })
+            .with_rider_quote_config(RiderQuoteConfig {
+                max_quote_rejections: self.max_quote_rejections,
+                re_quote_delay_secs: 10,
+                accept_probability: self.accept_probability,
+                seed: if self.seed_enabled { self.seed_value } else { 0u64 }.wrapping_add(0x711073_beef_u64),
+                max_willingness_to_pay: self.max_willingness_to_pay,
+                max_acceptable_eta_ms: self.max_acceptable_eta_min.saturating_mul(60).saturating_mul(1000),
+            });
 
         if self.seed_enabled {
             params = params.with_seed(self.seed_value);

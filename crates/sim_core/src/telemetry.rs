@@ -18,6 +18,8 @@ pub struct CompletedTripRecord {
     pub requested_at: u64,
     pub matched_at: u64,
     pub pickup_at: u64,
+    /// Fare paid (agreed at quote accept, may include surge).
+    pub fare: f64,
 }
 
 impl CompletedTripRecord {
@@ -47,6 +49,8 @@ pub struct SimTelemetry {
     pub riders_abandoned_quote_total: u64,
     /// Cumulative platform revenue from commission on completed trips.
     pub platform_revenue_total: f64,
+    /// Total fares collected from riders (sum of agreed fares for completed trips).
+    pub total_fares_collected: f64,
 }
 
 /// Snapshot of one rider for visualization/export.

@@ -1,4 +1,4 @@
-//! Simple pricing system for calculating trip fares.
+//! Pricing system for calculating trip fares with optional surge pricing.
 
 use bevy_ecs::prelude::Resource;
 use h3o::CellIndex;
@@ -20,6 +20,12 @@ pub struct PricingConfig {
     pub per_km_rate: f64,
     /// Commission rate as a fraction (0.0-1.0). 0.15 means 15% commission.
     pub commission_rate: f64,
+    /// When true, apply surge multiplier when demand exceeds supply in pickup H3 cluster.
+    pub surge_enabled: bool,
+    /// H3 grid disk radius (k) for surge cluster around pickup. 1 = immediate neighbors.
+    pub surge_radius_k: u32,
+    /// Maximum surge multiplier cap (e.g. 2.0 = 2x base fare).
+    pub surge_max_multiplier: f64,
 }
 
 impl Default for PricingConfig {
@@ -28,6 +34,9 @@ impl Default for PricingConfig {
             base_fare: BASE_FARE,
             per_km_rate: PER_KM_RATE,
             commission_rate: 0.0,
+            surge_enabled: false,
+            surge_radius_k: 1,
+            surge_max_multiplier: 2.0,
         }
     }
 }
@@ -110,6 +119,9 @@ mod tests {
             base_fare: 3.0,
             per_km_rate: 2.0,
             commission_rate: 0.0,
+            surge_enabled: false,
+            surge_radius_k: 1,
+            surge_max_multiplier: 2.0,
         };
         let fare = calculate_trip_fare_with_config(cell, nearby, config);
         let distance = distance_km_between_cells(cell, nearby);

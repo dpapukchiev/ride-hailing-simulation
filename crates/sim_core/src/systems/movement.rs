@@ -165,6 +165,7 @@ mod tests {
                     destination: Some(dropoff),
                     requested_at: None,
                     quote_rejections: 0,
+                    accepted_fare: None,
                 },
                 Position(neighbor),
             ))
@@ -192,6 +193,7 @@ mod tests {
                 pickup_eta_ms: 0,
                 dropoff_at: None,
                 cancelled_at: None,
+                agreed_fare: None,
             })
             .id();
 
