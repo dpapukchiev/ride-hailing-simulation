@@ -39,6 +39,11 @@ pub fn trip_completed_system(
     let fare = trip.agreed_fare.unwrap_or_else(|| {
         calculate_trip_fare_with_config(trip.pickup, trip.dropoff, *pricing_config)
     });
+    
+    // Calculate base fare (without surge) to determine surge impact
+    let base_fare = calculate_trip_fare_with_config(trip.pickup, trip.dropoff, *pricing_config);
+    let surge_impact = (fare - base_fare).max(0.0); // Ensure non-negative
+    
     let commission = calculate_platform_revenue(fare, pricing_config.commission_rate);
     let driver_earnings_amount = calculate_driver_earnings(fare, pricing_config.commission_rate);
     let mut should_go_offduty = false;
@@ -97,6 +102,7 @@ pub fn trip_completed_system(
         matched_at: trip.matched_at,
         pickup_at,
         fare,
+        surge_impact,
     });
     telemetry.riders_completed_total = telemetry.riders_completed_total.saturating_add(1);
     telemetry.platform_revenue_total += commission;

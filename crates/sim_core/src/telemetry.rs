@@ -33,6 +33,8 @@ pub struct CompletedTripRecord {
     pub pickup_at: u64,
     /// Fare paid (agreed at quote accept, may include surge).
     pub fare: f64,
+    /// Additional cost due to surge pricing (fare - base_fare). Zero if no surge was applied.
+    pub surge_impact: f64,
 }
 
 impl CompletedTripRecord {

@@ -213,7 +213,7 @@ fn render_run_outcomes(ui: &mut egui::Ui, app: &SimUiApp) {
 
     ui.add_space(8.0);
 
-    // Timing and fare distributions: 5 columns (time to match | time to pickup | trip duration | fare to riders | fare to drivers)
+    // Timing and fare distributions: 6 columns (time to match | time to pickup | trip duration | fare to riders | fare to drivers | surge impact)
     if !telemetry.completed_trips.is_empty() {
         let n = telemetry.completed_trips.len();
 
@@ -227,12 +227,27 @@ fn render_run_outcomes(ui: &mut egui::Ui, app: &SimUiApp) {
             .iter()
             .map(|t| t.fare * (1.0 - app.commission_rate))
             .collect();
+        // Only include trips where surge actually increased the price
+        let surge_impacts: Vec<f64> = telemetry
+            .completed_trips
+            .iter()
+            .filter_map(|t| {
+                if t.surge_impact > 0.0 {
+                    Some(t.surge_impact)
+                } else {
+                    None
+                }
+            })
+            .collect();
         let (rider_min, rider_max, rider_avg, rider_sorted) =
             fare_distribution_stats(&rider_fares);
         let (driver_min, driver_max, driver_avg, driver_sorted) =
             fare_distribution_stats(&driver_takes);
+        let (surge_min, surge_max, surge_avg, surge_sorted) =
+            fare_distribution_stats(&surge_impacts);
+        let n_surge = surge_impacts.len();
 
-        ui.columns(5, |columns| {
+        ui.columns(6, |columns| {
             columns[0].vertical(|ui| {
                 ui.label(format!("Time to match (n={})", n));
                 ui.label(format!("min {}  max {}", format_hms_from_ms(match_dist.min), format_hms_from_ms(match_dist.max)));
@@ -282,6 +297,21 @@ fn render_run_outcomes(ui: &mut egui::Ui, app: &SimUiApp) {
                     }
                 }
                 ui.label(format!("avg {:.2}", driver_avg));
+            });
+            columns[5].vertical(|ui| {
+                if n_surge > 0 {
+                    ui.label(format!("Surge impact (n={})", n_surge));
+                    ui.label(format!("min {:.2}  max {:.2}", surge_min, surge_max));
+                    for (p, label) in PERCENTILES {
+                        if let Some(v) = percentile_f64_sorted(&surge_sorted, *p) {
+                            ui.label(format!("{} {:.2}", label, v));
+                        }
+                    }
+                    ui.label(format!("avg {:.2}", surge_avg));
+                } else {
+                    ui.label("Surge impact (n=0)");
+                    ui.label("No trips with surge pricing");
+                }
             });
         });
     }
