@@ -34,6 +34,7 @@ minimal ECS-based agent model. It currently supports:
   number of rejections (tracked in telemetry as abandoned-quote).
 - **Batch matching**: Optional mode where a periodic `BatchMatchRun` event collects all unmatched waiting riders and idle drivers, runs a global matching algorithm (e.g. Hungarian), and applies matches; when enabled, per-rider `TryMatch` is not scheduled. Rejected riders re-enter the next batch.
 - **Simulation end time**: Optional `SimulationEndTimeMs` resource stops the runner when the next event is at or after that time, so runs with recurring events (e.g. batch matching) finish in bounded time.
+- **Parallel experimentation**: Run multiple simulations in parallel with varying parameters to explore parameter space and analyze marketplace health.
 
 This is a "crawl/walk" foundation aligned with the research plan.
 
@@ -99,6 +100,7 @@ stories/
   README.md
   core-sim/
   drivers/
+  experiments/
   matching/
   pricing/
   riders/
@@ -132,6 +134,17 @@ crates/
         driver_offduty.rs
     examples/
       scenario_run.rs
+  sim_experiments/
+    Cargo.toml
+    src/
+      lib.rs
+      parameters.rs
+      runner.rs
+      metrics.rs
+      health.rs
+      export.rs
+    examples/
+      parameter_sweep.rs
   sim_ui/
     Cargo.toml
     src/
@@ -670,6 +683,27 @@ All per-system unit tests emulate the runner by popping one event, inserting
   State, Pickup km (at driver acceptance), Distance km (pickup to dropoff), Requested (simulation datetime), Matched (simulation datetime),
   Started (simulation datetime, if applicable), Completed (simulation datetime, if applicable), Cancelled (simulation datetime, if applicable).
   The UI scales to 80% (pixels_per_point = 0.8) for better screen fit and includes toggle checkboxes for showing/hiding riders, drivers, driver stats, and grid overlay.
+
+### `sim_experiments`
+
+Parallel experimentation framework for parameter sweeps and marketplace health analysis.
+
+- **`ParameterSpace`**: Defines parameter spaces for exploration (grid search, random sampling). Supports varying pricing parameters (commission rate, base fare, per-km rate, surge settings), supply/demand (num_riders, num_drivers), and other configuration parameters.
+- **`ParameterSet`**: Wraps `ScenarioParams` with experiment metadata (experiment ID, run ID, seed) for tracking and reproducibility.
+- **`run_parallel_experiments`**: Executes multiple simulations in parallel using rayon. Each simulation runs independently with no shared state. Defaults to using all available CPU cores but allows specifying thread count.
+- **`SimulationResult`**: Aggregated metrics extracted from completed simulations:
+  - Conversion rate (completed / total resolved)
+  - Platform revenue and driver payouts
+  - Timing statistics (average/median/P90 for time to match and time to pickup)
+  - Abandoned rides breakdown (price, ETA, stochastic)
+- **`HealthWeights`**: Configurable weights for marketplace health score calculation. Default weights: conversion 30%, revenue 25%, driver payouts 15%, time to match 15%, time to pickup 15%, abandoned penalty -20%.
+- **`calculate_health_scores`**: Calculates weighted health scores by normalizing metrics across all results and applying weights. Higher scores indicate healthier marketplace outcomes.
+- **`export_to_parquet`** / **`export_to_json`**: Export experiment results for external analysis.
+- **`find_best_parameters`**: Finds parameter set with highest health score.
+
+**Dependencies**: `sim_core`, `rayon` (parallel execution), `serde`/`serde_json` (serialization), `arrow`/`parquet` (export).
+
+**Usage**: Define parameter space, generate parameter sets, run parallel experiments, calculate health scores, export results. See `examples/parameter_sweep.rs` for complete example.
 
 ## Known Gaps (Not Implemented Yet)
 

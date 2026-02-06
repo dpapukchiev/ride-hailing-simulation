@@ -45,6 +45,12 @@ The simulation supports hundreds of concurrent riders and drivers, realistic tim
 - **Day-of-Week Variations**: Different patterns for weekdays vs. weekends
 - **Driver Supply Patterns**: More consistent than demand, with rush hour availability spikes
 
+### Experimentation & Analysis
+- **Parameter Sweeps**: Run multiple simulations in parallel with varying parameters (pricing, supply/demand, etc.)
+- **Marketplace Health Scoring**: Calculate weighted health scores combining conversion, revenue, driver payouts, and timing metrics
+- **Result Export**: Export experiment results to Parquet/JSON for analysis
+- **Optimal Parameter Discovery**: Find parameter combinations that maximize marketplace health
+
 ## Architecture
 
 ### High-Level Design
@@ -188,6 +194,31 @@ let mut schedule = simulation_schedule();
 let steps = run_until_empty(&mut world, &mut schedule, 1_000_000);
 ```
 
+### Running Parameter Experiments
+
+```rust
+use sim_experiments::{ParameterSpace, run_parallel_experiments, HealthWeights, find_best_result_index};
+
+// Define parameter space
+let space = ParameterSpace::grid()
+    .commission_rate(vec![0.0, 0.1, 0.2, 0.3])
+    .num_drivers(vec![50, 100, 150])
+    .num_riders(vec![300, 500, 700]);
+
+// Generate parameter sets
+let parameter_sets = space.generate();
+
+// Run experiments in parallel
+let results = run_parallel_experiments(parameter_sets, None);
+
+// Calculate health scores and find best result
+let weights = HealthWeights::default();
+let best_idx = find_best_result_index(&results, &weights).unwrap();
+println!("Best result: {:?}", results[best_idx]);
+```
+
+See `crates/sim_experiments/examples/parameter_sweep.rs` for a complete example.
+
 ## Performance
 
 The simulation is optimized for scale and performance:
@@ -238,6 +269,15 @@ ride-hailing-simulation/
 │   │   │   └── ...
 │   │   └── examples/
 │   │       └── scenario_run.rs
+│   ├── sim_experiments/   # Parallel experimentation framework
+│   │   ├── src/
+│   │   │   ├── parameters.rs  # Parameter variation
+│   │   │   ├── runner.rs      # Parallel execution
+│   │   │   ├── metrics.rs     # Metrics extraction
+│   │   │   ├── health.rs      # Health scoring
+│   │   │   └── export.rs      # Result export
+│   │   └── examples/
+│   │       └── parameter_sweep.rs
 │   └── sim_ui/            # Visualization UI
 │       └── src/
 │           ├── app.rs     # Application state
@@ -249,13 +289,18 @@ ride-hailing-simulation/
 
 ## Dependencies
 
-**Core:**
+**Core (`sim_core`):**
 - `bevy_ecs`: Entity Component System
 - `h3o`: H3 geospatial indexing
 - `rand`: Random number generation
 - `arrow` + `parquet`: Data export
 
-**UI:**
+**Experiments (`sim_experiments`):**
+- `rayon`: Parallel execution
+- `serde` + `serde_json`: Parameter serialization and result export
+- `arrow` + `parquet`: Result export
+
+**UI (`sim_ui`):**
 - `eframe`: Native window framework
 - `egui`: Immediate mode GUI
 - `egui_plot`: Time-series plotting
