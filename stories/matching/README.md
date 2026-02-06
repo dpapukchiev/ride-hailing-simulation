@@ -30,3 +30,17 @@
 - Story: As a dispatcher, I can minimize total ETA across all riders in a batch
   by solving a global optimization problem rather than matching riders sequentially.
   Status: Done (Hungarian algorithm minimizes total cost in each batch run)
+
+- Story: As a dispatcher, I can use a simple matching algorithm that selects
+  the first available driver within the match radius, providing a baseline
+  comparison for more sophisticated algorithms.
+  Status: Done (SimpleMatching selects first driver within match_radius; available as algorithm option)
+
+- Story: As a dispatcher, I can configure the match radius (H3 grid distance)
+  to control how far drivers can be from riders for matching, balancing
+  coverage vs. pickup distance.
+  Status: Done (match_radius configurable in ScenarioParams; adjustable in UI)
+
+- Story: As a dispatcher, I can configure the ETA weight in cost-based matching
+  to balance distance vs. estimated pickup time in the scoring function.
+  Status: Done (eta_weight configurable in CostBasedMatching and HungarianMatching; default 0.1 balances distance and ETA)

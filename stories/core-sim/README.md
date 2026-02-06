@@ -11,7 +11,8 @@
   Status: Done
 
 - Story: As a trip lifecycle engine, I can create trips, move drivers to pickup,
-  start trips, and complete trips with timestamps for KPIs.
+  start trips, and complete trips with timestamps for KPIs. During OnTrip, rider
+  positions are synchronized with driver positions (rider is in the vehicle).
   Status: Done
 
 - Story: As a scenario author, I can configure spawners with time-of-day and
@@ -36,6 +37,11 @@
   during simulation execution (even while running), and changes take effect
   immediately for new matching attempts.
   Status: Done
+
+- Story: As a simulation operator, I can set a simulation end time so the
+  simulation stops processing events once the clock reaches that timestamp,
+  enabling bounded runs with recurring events (e.g., batch matching).
+  Status: Done (SimulationEndTimeMs resource stops runner when next event is at or after end time)
 
 - Story: As a researcher, I can generate scenario permutations from a config
   manifest to run experiment batches.
