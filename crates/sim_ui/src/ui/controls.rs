@@ -769,7 +769,7 @@ fn render_scenario_parameters(ui: &mut egui::Ui, app: &mut SimUiApp) {
                 ui.add_enabled(can_edit, egui::Checkbox::new(&mut app.surge_enabled, "Surge pricing")).on_hover_text("When enabled, applies dynamic surge multipliers when demand exceeds supply in local H3 clusters around pickup location");
             });
             ui.horizontal(|ui| {
-                ui.label("Surge radius (k)").on_hover_text("H3 grid disk radius (k) for surge cluster calculation around pickup. Larger radius considers more drivers/riders in the area");
+                ui.label("Surge radius (k)").on_hover_text("H3 grid disk radius (k) for surge cluster calculation around pickup. Larger radius considers more drivers/riders in the area, which may reduce how often surge pricing is applied by including more available drivers in the supply calculation");
                 ui.add_enabled(
                     can_edit && app.surge_enabled,
                     egui::DragValue::new(&mut app.surge_radius_k).range(1..=5).speed(1),
