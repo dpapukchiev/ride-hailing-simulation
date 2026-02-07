@@ -15,20 +15,15 @@ use std::collections::HashMap;
 // ---------------------------------------------------------------------------
 
 /// Pre-defined traffic profiles.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub enum TrafficProfileKind {
     /// No traffic effects; all hourly factors are 1.0.
+    #[default]
     None,
     /// Realistic Berlin traffic pattern with rush-hour slowdowns.
     Berlin,
     /// Custom per-hour factors (index 0 = midnight, index 23 = 11 PM).
     Custom([f64; 24]),
-}
-
-impl Default for TrafficProfileKind {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 /// Hourly speed multipliers. Factor 1.0 = free flow; 0.4 = heavy congestion.
@@ -59,8 +54,8 @@ impl TrafficProfile {
         f[7] = 0.45;
         f[8] = 0.45;
         // Midday
-        for h in 9..16 {
-            f[h] = 0.65;
+        for slot in &mut f[9..16] {
+            *slot = 0.65;
         }
         // Evening rush
         f[16] = 0.40;
@@ -103,18 +98,10 @@ impl TrafficProfile {
 // ---------------------------------------------------------------------------
 
 /// Configuration for spatial congestion zones.
-#[derive(Clone, Debug, Resource)]
+#[derive(Clone, Debug, Default, Resource)]
 pub struct CongestionZones {
     /// Per-cell speed multiplier overrides. Cells not in the map use 1.0.
     pub cell_factors: HashMap<CellIndex, f64>,
-}
-
-impl Default for CongestionZones {
-    fn default() -> Self {
-        Self {
-            cell_factors: HashMap::new(),
-        }
-    }
 }
 
 impl CongestionZones {
@@ -141,15 +128,9 @@ impl CongestionZones {
 // ---------------------------------------------------------------------------
 
 /// Configuration for dynamic (density-based) congestion.
-#[derive(Clone, Debug, Resource)]
+#[derive(Clone, Debug, Default, Resource)]
 pub struct DynamicCongestionConfig {
     pub enabled: bool,
-}
-
-impl Default for DynamicCongestionConfig {
-    fn default() -> Self {
-        Self { enabled: false }
-    }
 }
 
 /// Compute a speed factor based on the number of drivers occupying a cell.

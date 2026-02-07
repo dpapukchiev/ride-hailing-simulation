@@ -325,18 +325,13 @@ pub struct WeightedCell {
 }
 
 /// Configuration for spawn location weighting.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub enum SpawnWeightingKind {
     /// Uniform random within bounds (default, existing behaviour).
+    #[default]
     Uniform,
     /// Weight spawns toward Berlin hotspots (built-in data).
     BerlinHotspots,
-}
-
-impl Default for SpawnWeightingKind {
-    fn default() -> Self {
-        Self::Uniform
-    }
 }
 
 /// Resource holding weighted spawn cells for riders and drivers.

@@ -53,9 +53,10 @@ pub struct RouteResult {
 
 /// Which routing backend to use. Stored in [`ScenarioParams`] so it serializes
 /// into the `ParameterSet` JSON that a future Lambda handler would receive.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub enum RouteProviderKind {
     /// Existing H3 grid-path behaviour, zero external dependencies.
+    #[default]
     H3Grid,
     /// OSRM HTTP endpoint (e.g. `"http://localhost:5000"`).
     #[cfg(feature = "osrm")]
@@ -63,12 +64,6 @@ pub enum RouteProviderKind {
     /// Pre-computed route table loaded from a binary file at startup.
     #[cfg(feature = "precomputed")]
     Precomputed { path: String },
-}
-
-impl Default for RouteProviderKind {
-    fn default() -> Self {
-        Self::H3Grid
-    }
 }
 
 /// Trait for routing backends. Implementations must be `Send + Sync` so the

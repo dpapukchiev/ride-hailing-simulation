@@ -781,6 +781,22 @@ Parallel experimentation framework for parameter sweeps and marketplace health a
 
 **Usage**: Define parameter space (or use pre-defined spaces from `parameter_spaces`), generate parameter sets, run parallel experiments, calculate health scores, export results. See `examples/parameter_sweep.rs` for complete example using pre-defined parameter spaces.
 
+## Local CI
+
+A `ci.sh` script at the repository root mirrors the GitHub Actions workflow
+(`.github/workflows/ci.yml`) so you can catch failures before pushing.
+
+```bash
+./ci.sh              # runs "check" job: fmt + clippy + tests (default)
+./ci.sh check        # same as above
+./ci.sh examples     # builds & runs example scenarios (release mode)
+./ci.sh bench        # runs benchmarks
+./ci.sh all          # runs check + examples + bench
+```
+
+The CI workflow delegates to this script, so local and remote checks stay in
+sync.
+
 ## Known Gaps (Not Implemented Yet)
 
 - Opportunity cost and driver-value weighting in matching.

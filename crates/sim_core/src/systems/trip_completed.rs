@@ -8,6 +8,7 @@ use crate::pricing::{
 };
 use crate::telemetry::{CompletedTripRecord, SimTelemetry};
 
+#[allow(clippy::too_many_arguments)]
 pub fn trip_completed_system(
     event: Res<CurrentEvent>,
     mut clock: ResMut<SimulationClock>,
