@@ -43,3 +43,8 @@
 
 - Story: As a user, I can load and save scenario presets for quick iteration.
   Status: Backlog
+
+- Story: As a user, I can see a Berlin street map rendered beneath the
+  simulation agents on the UI, providing real-world geographic context for
+  rider/driver positions and trip routes.
+  Status: Backlog

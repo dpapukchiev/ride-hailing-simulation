@@ -33,6 +33,7 @@ mod tests {
             .spawn(Driver {
                 state: DriverState::Evaluating,
                 matched_rider: None,
+                assigned_trip: None,
             })
             .id();
 

@@ -76,6 +76,7 @@ mod tests {
                 Rider {
                     state: RiderState::Browsing,
                     matched_driver: None,
+                    assigned_trip: None,
                     destination: Some(destination),
                     requested_at: None,
                     quote_rejections: 0,

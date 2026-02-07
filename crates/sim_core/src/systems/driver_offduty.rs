@@ -2,52 +2,77 @@
 
 use bevy_ecs::prelude::{Query, Res, ResMut};
 
-use crate::clock::{CurrentEvent, EventKind, SimulationClock, ONE_MIN_MS};
+use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock, ONE_MIN_MS};
 use crate::ecs::{Driver, DriverEarnings, DriverFatigue, DriverState};
 
 /// Interval for periodic OffDuty checks (5 minutes).
 const CHECK_INTERVAL_MS: u64 = 5 * ONE_MIN_MS;
 
-/// System that periodically checks if drivers should go OffDuty.
-/// Checks drivers that are not already OffDuty for earnings targets and fatigue thresholds.
+/// Check a single driver for earnings/fatigue thresholds.
+/// Transitions the driver to OffDuty and sets session_end_time_ms if thresholds are exceeded.
+fn check_driver_offduty(
+    now: u64,
+    driver: &mut Driver,
+    earnings: &mut DriverEarnings,
+    fatigue: &DriverFatigue,
+) {
+    if driver.state == DriverState::OffDuty {
+        return;
+    }
+
+    let mut should_go_offduty = false;
+
+    if earnings.daily_earnings >= earnings.daily_earnings_target {
+        should_go_offduty = true;
+    }
+
+    let session_duration_ms = now.saturating_sub(earnings.session_start_time_ms);
+    if session_duration_ms >= fatigue.fatigue_threshold_ms {
+        should_go_offduty = true;
+    }
+
+    if should_go_offduty {
+        driver.state = DriverState::OffDuty;
+        earnings.session_end_time_ms = Some(now);
+    }
+}
+
+/// System that checks if drivers should go OffDuty based on earnings targets and fatigue thresholds.
+///
+/// Supports two modes:
+/// - **Periodic** (no subject): iterates all drivers, then schedules the next periodic check.
+/// - **Targeted** (`EventSubject::Driver(entity)`): checks only the specified driver. Used by
+///   `trip_completed_system` to give immediate feedback after earnings are updated.
+///
+/// Also bootstraps the periodic check cycle on `SimulationStarted`.
 pub fn driver_offduty_check_system(
     mut clock: ResMut<SimulationClock>,
     event: Res<CurrentEvent>,
     mut drivers: Query<(&mut Driver, &mut DriverEarnings, &DriverFatigue)>,
 ) {
-    // Handle periodic check event
     if event.0.kind == EventKind::CheckDriverOffDuty {
         let now = clock.now();
 
-        for (mut driver, mut earnings, fatigue) in drivers.iter_mut() {
-            // Skip drivers already OffDuty
-            if driver.state == DriverState::OffDuty {
-                continue;
+        match event.0.subject {
+            // Targeted check: only the specified driver (e.g. after trip completion)
+            Some(EventSubject::Driver(driver_entity)) => {
+                if let Ok((mut driver, mut earnings, fatigue)) = drivers.get_mut(driver_entity) {
+                    check_driver_offduty(now, &mut driver, &mut earnings, fatigue);
+                }
             }
-
-            // Enforce earnings and fatigue for all active drivers, including EnRoute/OnTrip,
-            // so drivers cannot exceed limits by staying in back-to-back trips between checks.
-            let mut should_go_offduty = false;
-
-            // Check earnings target
-            if earnings.daily_earnings >= earnings.daily_earnings_target {
-                should_go_offduty = true;
-            }
-
-            // Check fatigue threshold
-            let session_duration_ms = now.saturating_sub(earnings.session_start_time_ms);
-            if session_duration_ms >= fatigue.fatigue_threshold_ms {
-                should_go_offduty = true;
-            }
-
-            if should_go_offduty {
-                driver.state = DriverState::OffDuty;
-                earnings.session_end_time_ms = Some(now);
+            // Periodic check: iterate all drivers, then schedule next check
+            _ => {
+                for (mut driver, mut earnings, fatigue) in drivers.iter_mut() {
+                    check_driver_offduty(now, &mut driver, &mut earnings, fatigue);
+                }
+                clock.schedule_in(CHECK_INTERVAL_MS, EventKind::CheckDriverOffDuty, None);
             }
         }
+        return;
+    }
 
-        // Always schedule next check so newly spawned drivers get checked
-        // even if all current drivers are OffDuty at this moment.
+    // Bootstrap periodic checks on simulation start
+    if event.0.kind == EventKind::SimulationStarted {
         clock.schedule_in(CHECK_INTERVAL_MS, EventKind::CheckDriverOffDuty, None);
     }
 }
@@ -68,6 +93,7 @@ mod tests {
                 Driver {
                     state: DriverState::Idle,
                     matched_rider: None,
+                    assigned_trip: None,
                 },
                 DriverEarnings {
                     daily_earnings: 150.0,
@@ -123,6 +149,7 @@ mod tests {
                 Driver {
                     state: DriverState::Idle,
                     matched_rider: None,
+                    assigned_trip: None,
                 },
                 DriverEarnings {
                     daily_earnings: 50.0,
@@ -173,6 +200,7 @@ mod tests {
                 Driver {
                     state: DriverState::EnRoute,
                     matched_rider: None,
+                    assigned_trip: None,
                 },
                 DriverEarnings {
                     daily_earnings: 50.0,

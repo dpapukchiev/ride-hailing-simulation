@@ -110,6 +110,7 @@ mod tests {
                 Rider {
                     state: RiderState::Waiting,
                     matched_driver: None,
+                    assigned_trip: None,
                     destination: Some(destination),
                     requested_at: None,
                     quote_rejections: 0,
@@ -124,6 +125,7 @@ mod tests {
                 Driver {
                     state: DriverState::Idle,
                     matched_rider: None,
+                    assigned_trip: None,
                 },
                 Position(cell),
             ))

@@ -17,3 +17,8 @@
 
 - Story: As a researcher, I can find optimal parameter combinations based on health scores to identify the best marketplace configurations.
   Status: Done
+
+- Story: As a researcher, I can deploy the parameter sweep experiment to AWS
+  Lambda for serverless POC runs, without requiring a separate Docker container
+  for OSRM (using H3 grid routing instead).
+  Status: Backlog

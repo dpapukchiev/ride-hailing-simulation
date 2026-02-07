@@ -89,6 +89,7 @@ fn spawn_rider(
             Rider {
                 state: RiderState::Browsing,
                 matched_driver: None,
+                assigned_trip: None,
                 destination: Some(destination),
                 requested_at: Some(current_time_ms),
                 quote_rejections: 0,
@@ -144,6 +145,7 @@ fn spawn_driver(
         Driver {
             state: DriverState::Idle,
             matched_rider: None,
+            assigned_trip: None,
         },
         Position(position),
         DriverEarnings {

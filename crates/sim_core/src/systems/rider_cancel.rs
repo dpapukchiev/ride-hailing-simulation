@@ -28,11 +28,13 @@ pub fn rider_cancel_system(
     }
 
     if let Some(driver_entity) = rider.matched_driver {
-        for mut trip in trips.iter_mut() {
-            if trip.rider == rider_entity && trip.state == TripState::EnRoute {
-                trip.state = TripState::Cancelled;
-                trip.cancelled_at = Some(clock.now());
-                break;
+        // Use assigned_trip for O(1) trip lookup instead of scanning all trips
+        if let Some(trip_entity) = rider.assigned_trip {
+            if let Ok(mut trip) = trips.get_mut(trip_entity) {
+                if trip.state == TripState::EnRoute {
+                    trip.state = TripState::Cancelled;
+                    trip.cancelled_at = Some(clock.now());
+                }
             }
         }
 
@@ -43,11 +45,14 @@ pub fn rider_cancel_system(
                 }
                 driver.matched_rider = None;
             }
+            // Clear the trip backlink from the driver
+            driver.assigned_trip = None;
         }
     }
 
     rider.state = RiderState::Cancelled;
     rider.matched_driver = None;
+    rider.assigned_trip = None;
     telemetry.riders_cancelled_total = telemetry.riders_cancelled_total.saturating_add(1);
     // Track pickup timeout cancellation
     telemetry.riders_cancelled_pickup_timeout =
@@ -81,6 +86,7 @@ mod tests {
                 Rider {
                     state: RiderState::Waiting,
                     matched_driver: None,
+                    assigned_trip: None,
                     destination: Some(destination),
                     requested_at: None,
                     quote_rejections: 0,
@@ -95,6 +101,7 @@ mod tests {
                 Driver {
                     state: DriverState::EnRoute,
                     matched_rider: Some(rider_entity),
+                    assigned_trip: None,
                 },
                 Position(cell),
             ))
@@ -121,6 +128,12 @@ mod tests {
             let mut rider_entity_mut = world.entity_mut(rider_entity);
             let mut rider = rider_entity_mut.get_mut::<Rider>().expect("rider");
             rider.matched_driver = Some(driver_entity);
+            rider.assigned_trip = Some(trip_entity);
+        }
+        {
+            let mut driver_entity_mut = world.entity_mut(driver_entity);
+            let mut driver = driver_entity_mut.get_mut::<Driver>().expect("driver");
+            driver.assigned_trip = Some(trip_entity);
         }
 
         world.resource_mut::<SimulationClock>().schedule_at_secs(
@@ -166,6 +179,7 @@ mod tests {
                 Rider {
                     state: RiderState::Waiting,
                     matched_driver: None,
+                    assigned_trip: None,
                     destination: Some(destination),
                     requested_at: None,
                     quote_rejections: 0,

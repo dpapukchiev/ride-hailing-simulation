@@ -130,7 +130,10 @@ fn is_trip_completed(event: Option<Res<CurrentEvent>>) -> bool {
 
 fn is_check_driver_offduty(event: Option<Res<CurrentEvent>>) -> bool {
     event
-        .map(|e| e.0.kind == EventKind::CheckDriverOffDuty)
+        .map(|e| {
+            e.0.kind == EventKind::CheckDriverOffDuty
+                || e.0.kind == EventKind::SimulationStarted
+        })
         .unwrap_or(false)
 }
 

@@ -135,6 +135,12 @@ pub fn driver_decision_system(
             })
             .id();
 
+        // Set trip backlinks on rider and driver for O(1) lookup
+        if let Ok((_entity, mut rider, _)) = riders.get_mut(rider_entity) {
+            rider.assigned_trip = Some(trip_entity);
+        }
+        driver.assigned_trip = Some(trip_entity);
+
         clock.schedule_in_secs(
             1,
             EventKind::MoveStep,
@@ -190,6 +196,7 @@ mod tests {
                 Rider {
                     state: RiderState::Waiting,
                     matched_driver: None,
+                    assigned_trip: None,
                     destination: Some(destination),
                     requested_at: None,
                     quote_rejections: 0,
@@ -204,6 +211,7 @@ mod tests {
                 Driver {
                     state: DriverState::Evaluating,
                     matched_rider: Some(rider_entity),
+                    assigned_trip: None,
                 },
                 Position(cell),
                 DriverEarnings {
@@ -275,6 +283,7 @@ mod tests {
                 Rider {
                     state: RiderState::Waiting,
                     matched_driver: None,
+                    assigned_trip: None,
                     destination: Some(destination),
                     requested_at: None,
                     quote_rejections: 0,
@@ -289,6 +298,7 @@ mod tests {
                 Driver {
                     state: DriverState::Evaluating,
                     matched_rider: Some(rider_entity),
+                    assigned_trip: None,
                 },
                 Position(cell),
                 DriverEarnings {
@@ -352,6 +362,7 @@ mod tests {
                 Rider {
                     state: RiderState::Waiting,
                     matched_driver: None,
+                    assigned_trip: None,
                     destination: Some(destination),
                     requested_at: None,
                     quote_rejections: 0,
@@ -366,6 +377,7 @@ mod tests {
                 Driver {
                     state: DriverState::Evaluating,
                     matched_rider: Some(rider_entity1),
+                    assigned_trip: None,
                 },
                 Position(cell),
                 DriverEarnings {
@@ -385,6 +397,7 @@ mod tests {
                 Rider {
                     state: RiderState::Waiting,
                     matched_driver: None,
+                    assigned_trip: None,
                     destination: Some(destination),
                     requested_at: None,
                     quote_rejections: 0,
@@ -399,6 +412,7 @@ mod tests {
                 Driver {
                     state: DriverState::Evaluating,
                     matched_rider: Some(rider_entity2),
+                    assigned_trip: None,
                 },
                 Position(cell),
                 DriverEarnings {

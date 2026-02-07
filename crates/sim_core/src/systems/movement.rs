@@ -295,6 +295,7 @@ mod tests {
                 Rider {
                     state: RiderState::Waiting,
                     matched_driver: None,
+                    assigned_trip: None,
                     destination: Some(dropoff),
                     requested_at: None,
                     quote_rejections: 0,
@@ -309,6 +310,7 @@ mod tests {
                 Driver {
                     state: DriverState::EnRoute,
                     matched_rider: Some(rider_entity),
+                    assigned_trip: None,
                 },
                 Position(origin),
             ))

@@ -26,6 +26,10 @@ pub enum RiderState {
 pub struct Rider {
     pub state: RiderState,
     pub matched_driver: Option<Entity>,
+    /// Backlink to the active Trip entity. Set when a Trip is spawned
+    /// (driver_decision_system), cleared on trip completion/cancellation.
+    /// Enables O(1) trip lookup instead of scanning all Trip entities.
+    pub assigned_trip: Option<Entity>,
     /// Requested dropoff cell. Must be set; riders without a destination are rejected by driver_decision_system.
     pub destination: Option<CellIndex>,
     /// Simulation time when the rider was spawned (set by request_inbound_system).
@@ -60,6 +64,10 @@ pub enum DriverState {
 pub struct Driver {
     pub state: DriverState,
     pub matched_rider: Option<Entity>,
+    /// Backlink to the active Trip entity. Set when a Trip is spawned
+    /// (driver_decision_system), cleared on trip completion/cancellation.
+    /// Enables O(1) trip lookup instead of scanning all Trip entities.
+    pub assigned_trip: Option<Entity>,
 }
 
 /// Tracks driver earnings and daily targets.
