@@ -15,6 +15,20 @@ cargo bench --package sim_core --bench performance simulation_run
 cargo bench --package sim_core
 ```
 
+## Clearing Benchmark Data
+
+To delete all stored benchmark results and start fresh:
+
+```bash
+# Unix/macOS
+rm -rf target/criterion
+
+# Windows (PowerShell)
+Remove-Item -Recurse -Force target/criterion
+```
+
+The next benchmark run will have no previous baseline to compare against.
+
 ## Baseline Storage
 
 Criterion.rs automatically stores baseline data in `target/criterion/` (git-ignored). **Each benchmark run replaces the previous baseline** - comparisons are always against the most recent run, not the original.
