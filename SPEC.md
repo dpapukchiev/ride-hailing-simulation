@@ -174,6 +174,12 @@ crates/
         rendering.rs
         utils.rs
         constants.rs
+xtask/
+  Cargo.toml
+  src/
+    main.rs
+.cargo/
+  config.toml
 ```
 
 ## Dependencies
@@ -198,6 +204,7 @@ crates/
 - `mise` is used for toolchain management via `.mise.toml`.
 - Rust toolchain: `stable`.
 - `README.md` includes setup and run commands.
+- **`cargo xtask`**: Cross-platform task runner (see [Task Runner](#task-runner-cargo-xtask) section below). Provides a single CLI entrypoint for running simulations, experiments, benchmarks, CI checks, and more. Defined in the `xtask` workspace member with a `.cargo/config.toml` alias.
 - **CI**: GitHub Actions workflow (`.github/workflows/ci.yml`) runs three parallel jobs on every push/PR to `main`:
   - `check`: formatting (`cargo fmt --check`), linting (`cargo clippy -D warnings`), and tests (`sim_core` + `sim_experiments`)
   - `examples`: runs both `scenario_run` and `scenario_run_large` in release mode
@@ -786,10 +793,31 @@ Parallel experimentation framework for parameter sweeps and marketplace health a
 
 **Usage**: Define parameter space (or use pre-defined spaces from `parameter_spaces`), generate parameter sets, run parallel experiments, calculate health scores, export results. See `examples/parameter_sweep.rs` for complete example using pre-defined parameter spaces.
 
+## Task Runner (`cargo xtask`)
+
+A cross-platform CLI task runner built with `clap`. The `xtask` crate is a
+workspace member; `.cargo/config.toml` aliases `cargo xtask` to
+`cargo run --package xtask --`. Run `cargo xtask --help` to list all commands.
+
+| Command | Description |
+|---|---|
+| `cargo xtask ui` | Launch the simulation GUI |
+| `cargo xtask run` | Run the standard scenario (500 riders, 100 drivers, release) |
+| `cargo xtask run-large` | Run the large scenario (10K riders, 7K drivers, release) |
+| `cargo xtask sweep` | Run a parameter sweep experiment |
+| `cargo xtask route-export` | Export a precomputed route table (`--sample-count`, `--output`) |
+| `cargo xtask bench` | Run Criterion benchmarks |
+| `cargo xtask bench-compare` | Stash changes, create baseline, restore, compare benchmarks |
+| `cargo xtask ci [check\|examples\|bench\|all]` | Run CI checks (default: `check`) |
+| `cargo xtask load-test` | Run load tests (ignored tests in sim_core) |
+
+**Dependencies** (`xtask/Cargo.toml`): `clap = "4"` (with `derive` feature).
+
 ## Local CI
 
 A `ci.sh` script at the repository root mirrors the GitHub Actions workflow
 (`.github/workflows/ci.yml`) so you can catch failures before pushing.
+The same checks are also available cross-platform via `cargo xtask ci`.
 
 ```bash
 ./ci.sh              # runs "check" job: fmt + clippy + tests (default)
@@ -797,10 +825,15 @@ A `ci.sh` script at the repository root mirrors the GitHub Actions workflow
 ./ci.sh examples     # builds & runs example scenarios (release mode)
 ./ci.sh bench        # runs benchmarks
 ./ci.sh all          # runs check + examples + bench
+
+# Or cross-platform via xtask:
+cargo xtask ci           # same as ./ci.sh check
+cargo xtask ci examples  # same as ./ci.sh examples
+cargo xtask ci all       # same as ./ci.sh all
 ```
 
-The CI workflow delegates to this script, so local and remote checks stay in
-sync.
+The CI workflow delegates to `ci.sh`, so local and remote checks stay in
+sync. On Windows, use `cargo xtask ci` instead of the shell script.
 
 ## Known Gaps (Not Implemented Yet)
 
