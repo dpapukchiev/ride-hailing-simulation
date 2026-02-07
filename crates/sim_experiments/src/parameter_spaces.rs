@@ -75,12 +75,13 @@ pub fn pricing_focused_space() -> ParameterSpace {
         .per_km_rate(vec![1.0, 1.5, 2.0])                     // Per-km rate variations
         .surge_enabled(vec![false, true])                     // Surge pricing on/off
         .surge_max_multiplier(vec![1.5, 2.0, 2.5])            // Maximum surge multiplier
-        .num_drivers(vec![100])                                // Fixed supply
-        .num_riders(vec![500])                                 // Fixed demand
+        .surge_radius_k(vec![1, 2, 3, 4])                        // Surge radius variations
+        .num_drivers(vec![100, 200, 300])                                // Fixed supply
+        .num_riders(vec![500, 1000, 1500])                                 // Fixed demand
         .match_radius(vec![10])                                // Fixed match radius
         .matching_algorithm_type(vec![MatchingAlgorithmType::Hungarian]) // Fixed algorithm
         .batch_matching_enabled(vec![true])                    // Batch matching enabled
-        .batch_interval_secs(vec![5])                          // Fixed batch interval
+        .batch_interval_secs(vec![5, 15, 20, 30])    // Fixed batch interval
         .eta_weight(vec![0.1])                                 // Fixed ETA weight
 }
 
