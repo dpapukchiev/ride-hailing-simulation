@@ -17,6 +17,11 @@ fn main() {
     const NUM_RIDERS: usize = 500;
     const NUM_DRIVERS: usize = 100;
     const SIMULATION_HOURS: u64 = 4;
+    // Buffer after the request window for in-flight trips to complete.
+    // Recurring events (batch matching) keep the queue non-empty forever,
+    // so we need an explicit end time to let run_until_empty terminate.
+    const BUFFER_HOURS: u64 = 2;
+    const END_TIME_MS: u64 = (SIMULATION_HOURS + BUFFER_HOURS) * 3_600_000;
 
     let mut world = World::new();
     build_scenario(
@@ -29,7 +34,8 @@ fn main() {
         .with_seed(123)
         .with_request_window_hours(SIMULATION_HOURS)
         .with_match_radius(5)
-        .with_trip_duration_cells(5, 60),
+        .with_trip_duration_cells(5, 60)
+        .with_simulation_end_time_ms(END_TIME_MS),
     );
     sim_core::runner::initialize_simulation(&mut world);
 

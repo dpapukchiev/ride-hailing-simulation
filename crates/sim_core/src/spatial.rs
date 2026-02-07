@@ -80,7 +80,10 @@ impl GridDiskCache {
     }
 
     fn get_or_compute(&self, origin: CellIndex, k: u32, geo: &GeoIndex) -> Vec<CellIndex> {
-        let mut cache = self.cache.lock().unwrap();
+        let mut cache = match self.cache.lock() {
+            Ok(guard) => guard,
+            Err(_) => return geo.grid_disk(origin, k), // Fallback: compute without cache if mutex poisoned
+        };
         cache.get_or_insert((origin, k), || geo.grid_disk(origin, k)).clone()
     }
 }
@@ -107,7 +110,10 @@ impl PathCache {
     }
 
     fn get_or_compute(&self, from: CellIndex, to: CellIndex) -> Option<Vec<CellIndex>> {
-        let mut cache = self.cache.lock().unwrap();
+        let mut cache = match self.cache.lock() {
+            Ok(guard) => guard,
+            Err(_) => return Self::compute_path(from, to), // Fallback: compute without cache if mutex poisoned
+        };
         let key = if from < to { (from, to) } else { (to, from) };
         
         // Check cache first
@@ -116,7 +122,19 @@ impl PathCache {
         }
         
         // Compute path
-        let path_result = from.grid_path_cells(to)
+        let path_result = Self::compute_path(from, to);
+        
+        // Cache successful paths only
+        if let Some(cells) = &path_result {
+            cache.put(key, cells.clone());
+        }
+        
+        path_result
+    }
+
+    /// Compute a grid path between two cells without caching.
+    fn compute_path(from: CellIndex, to: CellIndex) -> Option<Vec<CellIndex>> {
+        from.grid_path_cells(to)
             .ok()
             .and_then(|path| {
                 let cells: Vec<CellIndex> = path.filter_map(|cell| cell.ok()).collect();
@@ -125,14 +143,7 @@ impl PathCache {
                 } else {
                     Some(cells)
                 }
-            });
-        
-        // Cache successful paths only
-        if let Some(cells) = &path_result {
-            cache.put(key, cells.clone());
-        }
-        
-        path_result
+            })
     }
 }
 
@@ -283,7 +294,10 @@ pub fn distance_km_between_cells(a: CellIndex, b: CellIndex) -> f64 {
     // Use symmetric key (smaller cell first) to maximize cache hits
     let key = if a < b { (a, b) } else { (b, a) };
     
-    let mut cache = get_distance_cache().lock().unwrap();
+    let mut cache = match get_distance_cache().lock() {
+        Ok(guard) => guard,
+        Err(_) => return distance_km_between_cells_uncached(key.0, key.1), // Fallback: compute without cache if mutex poisoned
+    };
     
     // Try to get from cache, compute if missing
     *cache.get_or_insert(key, || distance_km_between_cells_uncached(key.0, key.1))

@@ -11,7 +11,18 @@ This simulation models a ride-hailing marketplace (similar to Uber/Bolt) with re
 - **H3 Spatial Indexing**: Geographic indexing for efficient spatial queries and matching
 - **Real-time Visualization**: Native UI built with egui for live simulation monitoring
 
-The simulation supports hundreds of concurrent riders and drivers, realistic time-of-day demand patterns (rush hours, day/night variations), and multiple matching algorithms for driver-rider pairing.
+The simulation supports thousands of concurrent riders and drivers, realistic time-of-day demand patterns (rush hours, day/night variations), and multiple matching algorithms for driver-rider pairing.
+
+## Development Story
+
+**Built in ~1 week without prior Rust experience** -- this project demonstrates rapid learning, effective AI collaboration, and multi-disciplinary engineering skills.
+
+- **Research-first**: Deep dive into Bolt.eu marketplace dynamics, DES architecture, and Rust ecosystem (see `research/` folder)
+- **AI-guided implementation**: Multiple AI agents with strategic prompting techniques, strong architectural guidance, and quality gates
+- **Multi-disciplinary**: Wore multiple hats -- researcher, software architect, engineer, data engineer, data scientist
+- **Scale achieved**: Successfully tested with **10,000 riders and 7,000 drivers** -- hitting single-machine resource limits in the experimentation framework
+
+See [DEVELOPMENT.md](./DEVELOPMENT.md) for the complete development narrative.
 
 ## Features
 
@@ -139,8 +150,11 @@ cargo test -p sim_core
 # Run example scenario (500 riders, 100 drivers, 4 hours)
 cargo run -p sim_core --example scenario_run
 
+# Run large-scale scenario (10K riders, 7K drivers) with performance metrics
+cargo run -p sim_core --example scenario_run_large --release
+
 # Export to Parquet (optional)
-SIM_EXPORT_DIR=/path/to/export cargo run -p sim_core --example scenario_run
+SIM_EXPORT_DIR=/path/to/export cargo run -p sim_core --example scenario_run --release
 ```
 
 **Interactive UI:**
@@ -223,16 +237,24 @@ See `crates/sim_experiments/examples/parameter_sweep.rs` for a complete example.
 
 The simulation is optimized for scale and performance:
 
-- **Tested Scale**: 500 riders, 100 drivers over 4+ hours
-- **Event Throughput**: Processes millions of events efficiently
+- **Tested Scale**: 10,000 riders, 7,000 drivers (4-hour simulation window)
+- **Event Throughput**: ~12,200 events/sec (release build, 280K events in ~23s wall-clock)
 - **Memory**: Efficient ECS storage with minimal allocations
 - **Deterministic**: Reproducible results with seeded RNG
+
+Run `cargo run -p sim_core --example scenario_run_large --release` to reproduce these numbers.
 
 **Optimizations:**
 - Binary heap for O(log n) event scheduling
 - H3 spatial indexing for O(1) cell lookups
 - ECS component storage for cache-friendly access patterns
 - Rejection sampling for large trip distances (avoids generating huge grid disks)
+- **No logging overhead**: Logging intentionally removed due to performance bottlenecks at scale
+
+**Experimentation Framework:**
+- Parallel execution using rayon for CPU-bound work
+- Current limits: Single-machine resource constraints (memory/CPU)
+- Architecture designed for distributed execution (coordinator/worker model documented in `crates/sim_experiments/README.md`)
 
 ## Technical Highlights
 
@@ -268,7 +290,8 @@ ride-hailing-simulation/
 │   │   │   ├── spatial.rs # H3 spatial operations
 │   │   │   └── ...
 │   │   └── examples/
-│   │       └── scenario_run.rs
+│   │       ├── scenario_run.rs
+│   │       └── scenario_run_large.rs
 │   ├── sim_experiments/   # Parallel experimentation framework
 │   │   ├── src/
 │   │   │   ├── parameters.rs  # Parameter variation
@@ -305,14 +328,19 @@ ride-hailing-simulation/
 - `egui`: Immediate mode GUI
 - `egui_plot`: Time-series plotting
 
-## Future Enhancements
+## Limitations & Future Work
 
-Potential improvements (not yet implemented):
-- Opportunity cost and driver-value weighting in matching
-- Driver acceptance models and rider conversion
-- H3-based routing for realistic movement
+**Current Limitations:**
+- Single-machine experimentation: Large parameter sweeps hit resource limits (memory/CPU)
+- No distributed execution: Architecture designed but not yet implemented (see `crates/sim_experiments/README.md`)
+- Simplified routing: H3-based movement, not real road network routing
+
+**Future Enhancements:**
+- Distributed experimentation: Coordinator/worker model for multi-machine parameter sweeps
+- Real routing: Integrate OSRM or similar for realistic road network movement
+- Advanced matching: Opportunity cost, shadow pricing, driver-value weighting
+- Multi-service switching: Driver behavior across multiple platforms (rides, food delivery)
 - Replay system for saved simulations
-- CSV export option (currently Parquet only)
 
 ## Contributing
 

@@ -141,6 +141,7 @@ crates/
       load_tests.rs
     examples/
       scenario_run.rs
+      scenario_run_large.rs
   sim_experiments/
     Cargo.toml
     src/
@@ -196,7 +197,9 @@ crates/
 - `grid_disk(origin, k)` wraps `h3o::CellIndex::grid_disk` and asserts the
   resolution matches the index resolution.
 - Default resolution is `Resolution::Nine`.
-- `distance_km_between_cells(a, b)` calculates haversine distance between two H3 cells in kilometers. Uses a global LRU cache (10,000 entries, ~160KB memory) to avoid repeated H3 cell → LatLng conversions and Haversine calculations for frequently accessed cell pairs. Cache keys use symmetric ordering (smaller cell first) to maximize cache hits.
+- `distance_km_between_cells(a, b)` calculates haversine distance between two H3 cells in kilometers. Uses a global LRU cache (50,000 entries, ~800KB memory) to avoid repeated H3 cell → LatLng conversions and Haversine calculations for frequently accessed cell pairs. Cache keys use symmetric ordering (smaller cell first) to maximize cache hits. All cache mutex locks use graceful fallbacks: if a mutex is poisoned, the function computes the result without caching instead of panicking.
+- `grid_disk_cached(origin, k)` returns grid disk results with LRU caching (1,000 entries). Falls back to uncached computation on mutex poisoning.
+- `grid_path_cells_cached(from, to)` returns grid path results with LRU caching (5,000 entries). Only caches successful paths. Falls back to uncached computation on mutex poisoning.
 
 ### `sim_core::pricing`
 
@@ -670,11 +673,21 @@ Load tests are marked with `#[ignore]` and must be run explicitly: `cargo test -
 
 - **`scenario_run`** (`cargo run -p sim_core --example scenario_run`): Builds a
   scenario with configurable rider/driver counts (default 500 / 100), 4h request
-  window, match radius 5, trip duration 5–60 cells. Runs until the event queue
-  is empty (up to 2M steps) and prints steps executed, simulation time, completed
-  trip count, and up to 100 sample completed trips (time_to_match, time_to_pickup,
-  trip_duration, completed_at in seconds).
+  window, match radius 5, trip duration 5–60 cells, and a simulation end time
+  of 6h (request window + 2h buffer for in-flight trips). The end time is
+  required because recurring events (batch matching) keep the queue non-empty;
+  without it `run_until_empty` would never terminate. Runs until the event queue
+  is empty or the end time is reached (up to 2M steps) and prints steps executed,
+  simulation time, completed trip count, and up to 100 sample completed trips
+  (time_to_match, time_to_pickup, trip_duration, completed_at in seconds).
 - Set `SIM_EXPORT_DIR=/path` to export `completed_trips.parquet`, `trips.parquet` (all trips with full details, same as UI table), `snapshot_counts.parquet`, and `agent_positions.parquet`.
+- **`scenario_run_large`** (`cargo run -p sim_core --example scenario_run_large --release`): Large-scale
+  scenario with 10,000 riders / 7,000 drivers over a 4h simulation window with 15% commission rate
+  and surge pricing (radius 2, max multiplier 1.3x). Reports detailed performance metrics: wall-clock
+  time, events per second (~12,200 events/sec in release build), outcome breakdown (completed/cancelled/abandoned
+  with reasons), timing distributions (time to match, time to pickup, trip duration with avg/p50/p90/p99/max),
+  and event processing summary. Uses `EventMetrics` for throughput tracking. Recommended to run with
+  `--release` for realistic performance numbers. Supports `SIM_EXPORT_DIR` for Parquet export.
 - **`sim_ui`** (`cargo run -p sim_ui`): Native UI that runs the scenario in-process,
   renders riders/drivers on a map with icons and state-based colors, and charts for
   active trips, completed trips, waiting riders, idle drivers, cancelled riders, abandoned (quote), and cancelled trips. The UI starts paused, allows
