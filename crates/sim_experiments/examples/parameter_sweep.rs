@@ -26,7 +26,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // - matching_focused_space(): Matching algorithm comparison
     // - supply_demand_space(): Supply/demand analysis
     // - minimal_space(): Quick testing
-    let space = sim_experiments::parameter_spaces::surge_pricing_space();
+    let space = sim_experiments::parameter_spaces::refined_surge_commission_space();
 
     println!("Generating parameter sets...");
     let parameter_sets = space.generate();

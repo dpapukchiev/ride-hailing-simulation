@@ -44,14 +44,14 @@ pub fn comprehensive_space() -> ParameterSpace {
         .per_km_rate(vec![1.0, 1.5, 2.0])
         .surge_enabled(vec![false, true])
         .surge_max_multiplier(vec![1.5, 2.0, 2.5])
-        .num_drivers(vec![50, 100, 150])
-        .num_riders(vec![300, 500, 700])
+        .num_drivers(vec![100, 150, 250, 300, 500])
+        .num_riders(vec![300, 500, 700, 1000])
         .match_radius(vec![5, 10, 15])
         .epoch_ms(vec![
             Some(datetime_to_unix_ms(2026, 2, 7, 8, 0)),
             Some(datetime_to_unix_ms(2026, 2, 7, 17, 0)),
         ])
-        .simulation_duration_hours(vec![Some(4), Some(8)])
+        .simulation_duration_hours(vec![Some(8), Some(18)])
         .matching_algorithm_type(vec![
             MatchingAlgorithmType::Simple, 
             MatchingAlgorithmType::CostBased, 
@@ -142,4 +142,34 @@ pub fn minimal_space() -> ParameterSpace {
         .batch_matching_enabled(vec![true])
         .batch_interval_secs(vec![5])
         .eta_weight(vec![0.1])
+}
+
+/// Fine-grained parameter space focused on top-performing configurations
+/// and testing surge/commission interactions.
+///
+/// This space targets:
+/// - Commission rates around 15-20%
+/// - Driver-to-rider ratios 0.9-1.3
+/// - Surge enabled only under constrained supply
+/// - Hungarian and CostBased matching with batch intervals ≤5s
+/// - Surge radius vs multiplier trade-offs
+pub fn refined_surge_commission_space() -> ParameterSpace {
+    ParameterSpace::grid()
+        .commission_rate(vec![0.15, 0.17, 0.19, 0.20])
+        .base_fare(vec![2.0, 2.5, 3.0])
+        .per_km_rate(vec![1.0, 1.2, 1.5])
+        .surge_enabled(vec![true, false])
+        .surge_radius_k(vec![1, 2, 3])
+        .surge_max_multiplier(vec![1.2, 1.5, 1.8])
+        .num_drivers(vec![400, 500, 750])
+        .num_riders(vec![600, 900, 1300])
+        .match_radius(vec![5, 10])
+        .matching_algorithm_type(vec![
+            MatchingAlgorithmType::CostBased,
+            MatchingAlgorithmType::Hungarian
+        ])
+        .batch_matching_enabled(vec![true])
+        .batch_interval_secs(vec![3, 5])
+        .eta_weight(vec![0.0, 0.1])
+        .simulation_duration_hours(vec![Some(12)])
 }
