@@ -98,6 +98,7 @@ Throughout development, strict quality standards were maintained:
 3. **Benchmarks**: Criterion.rs benchmarks for performance tracking with baseline comparison
 4. **Linting**: Clippy pedantic mode enabled, no-warnings policy enforced
 5. **Code Review**: All AI-generated code reviewed for correctness and style
+6. **CI**: GitHub Actions workflow running tests, clippy, formatting checks, examples, and benchmarks on every push
 6. **Spec Sync**: SPEC.md updated with every behavioral change
 
 ## Performance Engineering

@@ -1,5 +1,7 @@
 # Ride-Hailing Simulation
 
+[![CI](https://github.com/dpapukchiev/ride-hailing-simulation/actions/workflows/ci.yml/badge.svg)](https://github.com/dpapukchiev/ride-hailing-simulation/actions/workflows/ci.yml)
+
 A high-performance, discrete-event simulation of a ride-hailing marketplace built in Rust. This project demonstrates advanced simulation techniques, spatial indexing, and real-time visualization for modeling complex multi-agent systems.
 
 ## Overview

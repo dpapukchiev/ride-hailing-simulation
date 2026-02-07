@@ -188,6 +188,10 @@ crates/
 - `mise` is used for toolchain management via `.mise.toml`.
 - Rust toolchain: `stable`.
 - `README.md` includes setup and run commands.
+- **CI**: GitHub Actions workflow (`.github/workflows/ci.yml`) runs three parallel jobs on every push/PR to `main`:
+  - `check`: formatting (`cargo fmt --check`), linting (`cargo clippy -D warnings`), and tests (`sim_core` + `sim_experiments`)
+  - `examples`: runs both `scenario_run` and `scenario_run_large` in release mode
+  - `bench`: runs Criterion benchmarks (push to `main` only)
 
 ## Core Modules
 
