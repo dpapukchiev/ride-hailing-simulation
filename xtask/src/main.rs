@@ -105,7 +105,14 @@ fn ci_check() {
     run_cargo(&["fmt", "--all", "--", "--check"]);
 
     step("Clippy");
-    run_cargo(&["clippy", "--all-targets", "--all-features", "--", "-D", "warnings"]);
+    run_cargo(&[
+        "clippy",
+        "--all-targets",
+        "--all-features",
+        "--",
+        "-D",
+        "warnings",
+    ]);
 
     step("Test sim_core");
     run_cargo(&["test", "-p", "sim_core"]);
@@ -116,7 +123,14 @@ fn ci_check() {
 
 fn ci_examples() {
     step("Run scenario_run (500 riders, 100 drivers)");
-    run_cargo(&["run", "-p", "sim_core", "--example", "scenario_run", "--release"]);
+    run_cargo(&[
+        "run",
+        "-p",
+        "sim_core",
+        "--example",
+        "scenario_run",
+        "--release",
+    ]);
 
     step("Run scenario_run_large (10K riders, 7K drivers)");
     run_cargo(&[
@@ -197,8 +211,7 @@ fn main() {
             let baseline_dir = Path::new("target/criterion");
             if baseline_dir.exists() {
                 step("Removing existing benchmark data");
-                std::fs::remove_dir_all(baseline_dir)
-                    .expect("failed to remove target/criterion");
+                std::fs::remove_dir_all(baseline_dir).expect("failed to remove target/criterion");
             }
 
             step("Stashing current changes");
