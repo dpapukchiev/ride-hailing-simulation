@@ -16,6 +16,7 @@ use crate::systems::{
     driver_decision::driver_decision_system,
     driver_offduty::driver_offduty_check_system,
     match_accepted::match_accepted_system,
+    match_rejected::match_rejected_system,
     matching::matching_system,
     movement::movement_system,
     pickup_eta_updated::pickup_eta_updated_system,
@@ -95,6 +96,12 @@ fn is_match_accepted(event: Option<Res<CurrentEvent>>) -> bool {
 fn is_driver_decision(event: Option<Res<CurrentEvent>>) -> bool {
     event
         .map(|e| e.0.kind == EventKind::DriverDecision)
+        .unwrap_or(false)
+}
+
+fn is_match_rejected(event: Option<Res<CurrentEvent>>) -> bool {
+    event
+        .map(|e| e.0.kind == EventKind::MatchRejected)
         .unwrap_or(false)
 }
 
@@ -277,6 +284,8 @@ pub fn simulation_schedule() -> Schedule {
         match_accepted_system.run_if(is_match_accepted),
         // DriverDecision
         driver_decision_system.run_if(is_driver_decision),
+        // MatchRejected
+        match_rejected_system.run_if(is_match_rejected),
         // RiderCancel
         rider_cancel_system.run_if(is_rider_cancel),
         // MoveStep

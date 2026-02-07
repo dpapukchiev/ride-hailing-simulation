@@ -7,10 +7,8 @@ use crate::ecs::{
     Driver, DriverEarnings, DriverFatigue, DriverState, Position, Rider, RiderState, Trip,
     TripState,
 };
-use crate::scenario::{BatchMatchingConfig, DriverDecisionConfig};
+use crate::scenario::DriverDecisionConfig;
 use crate::spatial::distance_km_between_cells;
-
-const MATCH_RETRY_SECS: u64 = 30;
 
 /// Calculate logit probability from score and sample stochastically using seeded RNG.
 fn logit_accepts_stochastic(score: f64, seed: u64, driver_entity: Entity) -> bool {
@@ -23,7 +21,6 @@ fn logit_accepts_stochastic(score: f64, seed: u64, driver_entity: Entity) -> boo
 pub fn driver_decision_system(
     mut clock: ResMut<SimulationClock>,
     event: Res<CurrentEvent>,
-    batch_config: Option<Res<BatchMatchingConfig>>,
     driver_config: Option<Res<DriverDecisionConfig>>,
     mut commands: Commands,
     mut drivers: Query<(&mut Driver, &Position, &DriverEarnings, &DriverFatigue)>,
@@ -151,18 +148,12 @@ pub fn driver_decision_system(
         driver.state = DriverState::Idle;
         driver.matched_rider = None;
         if let Some(rider_entity) = rejected_rider {
-            if let Ok((_entity, mut rider, _)) = riders.get_mut(rider_entity) {
-                rider.matched_driver = None;
-                // Only schedule per-rider TryMatch when batch matching is disabled
-                let batch_enabled = batch_config.as_deref().is_some_and(|c| c.enabled);
-                if rider.state == RiderState::Waiting && !batch_enabled {
-                    clock.schedule_in_secs(
-                        MATCH_RETRY_SECS,
-                        EventKind::TryMatch,
-                        Some(EventSubject::Rider(rider_entity)),
-                    );
-                }
-            }
+            // Delegate rider-side cleanup to match_rejected_system
+            clock.schedule_in(
+                0,
+                EventKind::MatchRejected,
+                Some(EventSubject::Rider(rider_entity)),
+            );
         }
     }
 }
@@ -332,8 +323,14 @@ mod tests {
         assert_eq!(driver.state, DriverState::Idle);
         assert_eq!(driver.matched_rider, None);
 
-        let rider = world.query::<&Rider>().single(&world);
-        assert_eq!(rider.matched_driver, None);
+        // MatchRejected event should be scheduled at delta 0 for the rider
+        let next_event = world
+            .resource_mut::<SimulationClock>()
+            .pop_next()
+            .expect("match rejected event");
+        assert_eq!(next_event.kind, EventKind::MatchRejected);
+        assert_eq!(next_event.timestamp, 1000); // delta 0 from DriverDecision at 1s
+        assert_eq!(next_event.subject, Some(EventSubject::Rider(rider_entity)));
     }
 
     #[test]

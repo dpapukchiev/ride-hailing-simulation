@@ -29,6 +29,7 @@ pub enum EventKind {
     BatchMatchRun,
     MatchAccepted,
     DriverDecision,
+    MatchRejected,
     MoveStep,
     PickupEtaUpdated,
     TripStarted,

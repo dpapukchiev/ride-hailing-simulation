@@ -16,6 +16,7 @@ pub mod batch_matching;
 pub mod driver_decision;
 pub mod driver_offduty;
 pub mod match_accepted;
+pub mod match_rejected;
 pub mod matching;
 pub mod movement;
 pub mod pickup_eta_updated;
