@@ -1,10 +1,11 @@
-use bevy_ecs::prelude::{ParamSet, Query, Res, ResMut};
+use bevy_ecs::prelude::{Commands, ParamSet, Query, Res, ResMut};
 
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
-use crate::ecs::{Driver, DriverState, Position, Rider, RiderState, Trip, TripState};
+use crate::ecs::{Driver, DriverState, Position, Rider, RiderState, Trip, TripRoute, TripState};
 
 #[allow(clippy::type_complexity)]
 pub fn trip_started_system(
+    mut commands: Commands,
     mut clock: ResMut<SimulationClock>,
     event: Res<CurrentEvent>,
     mut trips: Query<&mut Trip>,
@@ -80,6 +81,10 @@ pub fn trip_started_system(
         trip.state = TripState::OnTrip;
         trip.pickup_at = Some(clock.now());
     }
+
+    // Remove the pickup-leg TripRoute so the movement system will resolve a
+    // fresh route for the dropoff leg on the next MoveStep.
+    commands.entity(trip_entity).remove::<TripRoute>();
 
     // Start moving driver toward dropoff; completion is scheduled by movement when driver arrives.
     clock.schedule_in_secs(

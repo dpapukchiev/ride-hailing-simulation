@@ -6,6 +6,7 @@
 
 use sim_core::pricing::PricingConfig;
 use sim_core::scenario::{MatchingAlgorithmType, ScenarioParams};
+use sim_core::traffic::TrafficProfileKind;
 use std::collections::HashSet;
 
 /// Represents a single parameter combination.
@@ -458,6 +459,12 @@ pub struct ParameterSpace {
     batch_interval_secs: Vec<u64>,
     /// ETA weights to explore.
     eta_weights: Vec<f64>,
+    /// Traffic profiles to explore.
+    traffic_profiles: Vec<TrafficProfileKind>,
+    /// Dynamic congestion enabled values to explore.
+    dynamic_congestion_enabled: Vec<bool>,
+    /// Base speed (km/h) values to explore.
+    base_speed_kmh: Vec<Option<f64>>,
 }
 
 impl ParameterSpace {
@@ -480,6 +487,9 @@ impl ParameterSpace {
             batch_matching_enabled: vec![],
             batch_interval_secs: vec![],
             eta_weights: vec![],
+            traffic_profiles: vec![],
+            dynamic_congestion_enabled: vec![],
+            base_speed_kmh: vec![],
         }
     }
 
@@ -575,6 +585,24 @@ impl ParameterSpace {
     /// Set ETA weights to explore.
     pub fn eta_weight(mut self, weights: Vec<f64>) -> Self {
         self.eta_weights = weights;
+        self
+    }
+
+    /// Set traffic profiles to explore.
+    pub fn traffic_profile(mut self, profiles: Vec<TrafficProfileKind>) -> Self {
+        self.traffic_profiles = profiles;
+        self
+    }
+
+    /// Set dynamic congestion enabled values to explore.
+    pub fn dynamic_congestion_enabled(mut self, enabled: Vec<bool>) -> Self {
+        self.dynamic_congestion_enabled = enabled;
+        self
+    }
+
+    /// Set base speed (km/h) values to explore.
+    pub fn base_speed_kmh(mut self, speeds: Vec<Option<f64>>) -> Self {
+        self.base_speed_kmh = speeds;
         self
     }
 

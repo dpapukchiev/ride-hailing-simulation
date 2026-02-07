@@ -115,3 +115,16 @@ pub struct Trip {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]
 pub struct Position(pub CellIndex);
+
+/// Resolved route for a trip, stored on the Trip entity after the first MoveStep.
+/// Contains the full cell path so subsequent MoveSteps advance along it without
+/// re-querying the route provider.
+#[derive(Debug, Clone, Component)]
+pub struct TripRoute {
+    /// H3 cells from origin to destination.
+    pub cells: Vec<CellIndex>,
+    /// Current index into `cells` (the cell the driver is currently at or moving toward).
+    pub current_index: usize,
+    /// Total route distance in km (from the route provider, may differ from Haversine).
+    pub total_distance_km: f64,
+}

@@ -367,6 +367,78 @@ Cancellation is scheduled when rider accepts quote and transitions to `Waiting` 
 
 ---
 
+## Routing
+
+### Configuration Parameters
+
+| Parameter | Default | Type | Description |
+|-----------|---------|------|-------------|
+| `route_provider_kind` | `H3Grid` | `RouteProviderKind` | Which routing backend to use |
+
+### Route Provider Kinds
+
+| Kind | Description | Dependencies |
+|------|-------------|-------------|
+| `H3Grid` | H3 grid paths + Haversine distance (existing behaviour) | None |
+| `Osrm { endpoint }` | OSRM HTTP endpoint (e.g. `http://localhost:5000`) | Feature `osrm`, running OSRM container |
+| `Precomputed { path }` | Pre-computed binary route table loaded at startup | Feature `precomputed`, route table file |
+
+Routes are resolved on the first `MoveStep` of each trip leg (pickup, dropoff) and stored as a `TripRoute` component. Subsequent movement steps advance along the cached cell path. OSRM and Precomputed providers are wrapped in an LRU cache (20,000 entries) with automatic H3 fallback on failure.
+
+---
+
+## Traffic Model
+
+### Configuration Parameters
+
+| Parameter | Default | Type | Description |
+|-----------|---------|------|-------------|
+| `traffic_profile` | `None` | `TrafficProfileKind` | Time-of-day speed profile |
+| `congestion_zones_enabled` | `false` | bool | Enable spatial congestion zone factors |
+| `dynamic_congestion_enabled` | `false` | bool | Enable density-based congestion from vehicle counts |
+| `base_speed_kmh` | `None` | Option<f64> | Free-flow base speed; when set, overrides the 20-60 km/h default range |
+
+### Traffic Profile Kinds
+
+| Kind | Description |
+|------|-------------|
+| `None` | All hourly factors 1.0 (no time-of-day effect) |
+| `Berlin` | Realistic Berlin pattern: rush hours 0.40-0.45, midday 0.65, evening 0.75, night 1.0 |
+| `Custom([f64; 24])` | User-defined per-hour speed multipliers |
+
+### Berlin Traffic Profile (hourly speed factors)
+
+| Hours | Factor | Effective Speed (~50 km/h base) |
+|-------|--------|-------------------------------|
+| 00-06 | 1.00 | ~50 km/h (free flow) |
+| 07-08 | 0.45 | ~22 km/h (morning rush) |
+| 09-15 | 0.65 | ~32 km/h (midday) |
+| 16-18 | 0.40 | ~20 km/h (evening rush) |
+| 19-23 | 0.75 | ~38 km/h (evening) |
+
+### Dynamic Congestion (density-based)
+
+When `dynamic_congestion_enabled = true`, vehicle speed is further reduced based on how many drivers occupy the same H3 cell:
+
+| Drivers in cell | Speed factor |
+|----------------|-------------|
+| 0-2 | 1.00 |
+| 3-5 | 0.85 |
+| 6-10 | 0.70 |
+| 11+ | 0.55 |
+
+### Composite Speed Formula
+
+```
+traffic_factor = hourly_factor × zone_factor × density_factor
+effective_speed = base_speed × traffic_factor × stochastic_noise
+time_ms = (distance_km / effective_speed) × 3600 × 1000
+```
+
+Where `stochastic_noise` comes from the existing SpeedModel (uniform sampling scaled by the traffic factor via `SpeedFactors.multiplier`).
+
+---
+
 ## Movement & Speed
 
 ### Configuration Parameters
@@ -378,26 +450,26 @@ Cancellation is scheduled when rider accepts quote and transitions to `Waiting` 
 | `h3_resolution` | Resolution::Nine | Resolution | H3 grid resolution (~0.24 km per cell at res 9) |
 
 ### Speed Sampling
-**Random** (uniform distribution, seeded)
+**Random** (uniform distribution, seeded, traffic-adjusted)
 
 ```
-speed_kmh = random_uniform(min_kmh, max_kmh)
+speed_kmh = random_uniform(min_kmh, max_kmh) × traffic_factor
 ```
 
 **Seed**: `speed_model_seed + trip_entity_id + movement_step_count` (for variety with reproducibility)
 
-Speed is sampled per movement step (each H3 cell hop).
+Speed is sampled per movement step (each H3 cell hop). The `traffic_factor` is computed from the traffic profile, congestion zones, and dynamic density (see Traffic Model above). When no traffic model is active, `traffic_factor = 1.0` and behaviour is unchanged from the original.
 
 ### Movement Calculation
 **Deterministic** (based on distance and sampled speed)
 
 ```
-distance_km = haversine_distance(current_cell, target_cell)
+distance_km = haversine_distance(current_cell, next_cell_in_route)
 time_ms = (distance_km / speed_kmh) × 3600 × 1000
 time_ms = max(time_ms, 1000)  // Minimum 1 second per hop
 ```
 
-Driver moves one H3 cell per `MoveStep` event toward pickup (EnRoute) or dropoff (OnTrip).
+On the first `MoveStep` for a trip leg, the route provider is queried and the result stored as a `TripRoute` component. Driver moves one H3 cell per `MoveStep` event along the cached route toward pickup (EnRoute) or dropoff (OnTrip). When a trip transitions from EnRoute to OnTrip, the pickup-leg route is removed and a fresh route is resolved for the dropoff leg.
 
 ### Pickup ETA Calculation
 **Deterministic** (based on remaining distance and sampled speed)

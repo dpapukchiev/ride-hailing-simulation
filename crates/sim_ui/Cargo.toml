@@ -3,6 +3,10 @@ name = "sim_ui"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = ["osrm"]
+osrm = ["sim_core/osrm"]
+
 [dependencies]
 sim_core = { path = "../sim_core" }
 bevy_ecs = "0.13"

@@ -38,6 +38,7 @@ mod end_to_end_tests {
     use crate::distributions::UniformInterArrival;
     use crate::ecs::{Driver, DriverState, Trip, TripState};
     use crate::pricing::PricingConfig;
+    use crate::routing::{H3GridRouteProvider, RouteProviderResource};
     use crate::runner::{initialize_simulation, run_until_empty, simulation_schedule};
     use crate::scenario::{
         create_simple_matching, MatchRadius, RiderCancelConfig, RiderQuoteConfig,
@@ -46,6 +47,7 @@ mod end_to_end_tests {
     use crate::spawner::{DriverSpawner, DriverSpawnerConfig, RiderSpawner, RiderSpawnerConfig};
     use crate::speed::SpeedModel;
     use crate::telemetry::{SimSnapshotConfig, SimSnapshots, SimTelemetry};
+    use crate::traffic::{CongestionZones, DynamicCongestionConfig, TrafficProfile};
 
     #[test]
     fn simulates_one_ride_end_to_end() {
@@ -64,6 +66,10 @@ mod end_to_end_tests {
         });
         world.insert_resource(PricingConfig::default());
         world.insert_resource(SpatialIndex::new());
+        world.insert_resource(RouteProviderResource(Box::new(H3GridRouteProvider)));
+        world.insert_resource(TrafficProfile::none());
+        world.insert_resource(CongestionZones::default());
+        world.insert_resource(DynamicCongestionConfig::default());
 
         let cell = h3o::CellIndex::try_from(0x8a1fb46622dffff).expect("cell");
 
@@ -179,6 +185,10 @@ mod end_to_end_tests {
         });
         world.insert_resource(PricingConfig::default());
         world.insert_resource(SpatialIndex::new());
+        world.insert_resource(RouteProviderResource(Box::new(H3GridRouteProvider)));
+        world.insert_resource(TrafficProfile::none());
+        world.insert_resource(CongestionZones::default());
+        world.insert_resource(DynamicCongestionConfig::default());
 
         let cell = h3o::CellIndex::try_from(0x8a1fb46622dffff).expect("cell");
 

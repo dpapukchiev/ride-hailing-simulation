@@ -5,11 +5,14 @@ use std::time::Instant;
 
 use sim_core::matching::{MatchingAlgorithmResource, DEFAULT_ETA_WEIGHT};
 use sim_core::pricing::PricingConfig;
+use sim_core::routing::RouteProviderKind;
 use sim_core::runner::{run_next_event, simulation_schedule};
 use sim_core::scenario::{
     build_scenario, create_cost_based_matching, create_hungarian_matching, create_simple_matching,
     DriverDecisionConfig, RiderQuoteConfig, ScenarioParams,
 };
+use sim_core::spawner::SpawnWeightingKind;
+use sim_core::traffic::TrafficProfileKind;
 
 use crate::ui::utils::{
     apply_batch_config, apply_cancel_config, apply_snapshot_interval, bounds_from_km,
@@ -70,6 +73,15 @@ pub struct SimUiApp {
     pub driver_base_acceptance_score: f64,
     pub driver_fare_weight: f64,
     pub driver_pickup_distance_penalty: f64,
+    // Routing & Traffic
+    pub routing_mode: RoutingMode,
+    pub osrm_endpoint: String,
+    pub traffic_profile_mode: TrafficProfileMode,
+    pub congestion_zones_enabled: bool,
+    pub dynamic_congestion_enabled: bool,
+    pub base_speed_enabled: bool,
+    pub base_speed_kmh: f64,
+    pub spawn_mode: SpawnMode,
 }
 
 /// Type of matching algorithm to use.
@@ -78,6 +90,27 @@ pub enum MatchingAlgorithmType {
     Simple,
     CostBased,
     Hungarian,
+}
+
+/// Routing backend to use (UI-friendly enum).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RoutingMode {
+    H3Grid,
+    Osrm,
+}
+
+/// Traffic profile to apply (UI-friendly enum).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrafficProfileMode {
+    None,
+    Berlin,
+}
+
+/// Spawn location weighting (UI-friendly enum).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpawnMode {
+    Uniform,
+    BerlinHotspots,
 }
 
 impl MatchingAlgorithmType {
@@ -124,6 +157,14 @@ impl SimUiApp {
         let driver_base_acceptance_score = 1.0;
         let driver_fare_weight = 0.37;
         let driver_pickup_distance_penalty = -0.7;
+        let routing_mode = RoutingMode::H3Grid;
+        let osrm_endpoint = "http://localhost:5000".to_string();
+        let traffic_profile_mode = TrafficProfileMode::None;
+        let congestion_zones_enabled = false;
+        let dynamic_congestion_enabled = false;
+        let base_speed_enabled = false;
+        let base_speed_kmh = 50.0;
+        let spawn_mode = SpawnMode::Uniform;
 
         // Default start time: 2026-02-03 06:30:00 UTC
         let year = 2026;
@@ -232,6 +273,14 @@ impl SimUiApp {
             driver_base_acceptance_score,
             driver_fare_weight,
             driver_pickup_distance_penalty,
+            routing_mode,
+            osrm_endpoint,
+            traffic_profile_mode,
+            congestion_zones_enabled,
+            dynamic_congestion_enabled,
+            base_speed_enabled,
+            base_speed_kmh,
+            spawn_mode,
         }
     }
 
@@ -372,6 +421,29 @@ impl SimUiApp {
         if self.seed_enabled {
             params = params.with_seed(self.seed_value);
         }
+
+        // Routing & traffic
+        params.route_provider_kind = match self.routing_mode {
+            RoutingMode::H3Grid => RouteProviderKind::H3Grid,
+            RoutingMode::Osrm => RouteProviderKind::Osrm {
+                endpoint: self.osrm_endpoint.clone(),
+            },
+        };
+        params.traffic_profile = match self.traffic_profile_mode {
+            TrafficProfileMode::None => TrafficProfileKind::None,
+            TrafficProfileMode::Berlin => TrafficProfileKind::Berlin,
+        };
+        params.congestion_zones_enabled = self.congestion_zones_enabled;
+        params.dynamic_congestion_enabled = self.dynamic_congestion_enabled;
+        params.base_speed_kmh = if self.base_speed_enabled {
+            Some(self.base_speed_kmh)
+        } else {
+            None
+        };
+        params.spawn_weighting = match self.spawn_mode {
+            SpawnMode::Uniform => SpawnWeightingKind::Uniform,
+            SpawnMode::BerlinHotspots => SpawnWeightingKind::BerlinHotspots,
+        };
         params
     }
 

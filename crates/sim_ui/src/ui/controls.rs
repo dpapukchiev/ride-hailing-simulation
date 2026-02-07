@@ -5,7 +5,7 @@ use eframe::egui;
 use sim_core::ecs::DriverState;
 use sim_core::telemetry::{CompletedTripRecord, SimSnapshots, SimTelemetry};
 
-use crate::app::{MatchingAlgorithmType, SimUiApp};
+use crate::app::{MatchingAlgorithmType, RoutingMode, SimUiApp, SpawnMode, TrafficProfileMode};
 use crate::ui::utils::{
     datetime_from_unix_ms, format_datetime_from_unix_ms, format_hms_from_ms, now_unix_ms,
 };
@@ -684,7 +684,7 @@ fn percentile_f64_sorted(sorted: &[f64], p: u8) -> Option<f64> {
 fn render_scenario_parameters(ui: &mut egui::Ui, app: &mut SimUiApp) {
     let can_edit = !app.started;
 
-    ui.columns(7, |columns| {
+    ui.columns(8, |columns| {
         // Col 1: Supply (drivers - initial, spawn count, spread)
         columns[0].vertical(|ui| {
             ui.horizontal(|ui| {
@@ -970,8 +970,142 @@ fn render_scenario_parameters(ui: &mut egui::Ui, app: &mut SimUiApp) {
             });
         });
 
-        // Col 7: Timing
+        // Col 7: Routing & Traffic
         columns[6].vertical(|ui| {
+            ui.horizontal(|ui| {
+                ui.label("Routing & Traffic");
+            });
+            ui.horizontal(|ui| {
+                ui.label("Routing").on_hover_text(
+                    "H3 Grid: fast, grid-based pathfinding (no external service needed).\n\
+                     OSRM: real road-network routing via local OSRM server (requires Docker setup).",
+                );
+                let combo_response = egui::ComboBox::from_id_salt("routing_mode")
+                    .selected_text(match app.routing_mode {
+                        RoutingMode::H3Grid => "H3 Grid",
+                        RoutingMode::Osrm => "OSRM",
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut app.routing_mode,
+                            RoutingMode::H3Grid,
+                            "H3 Grid",
+                        );
+                        ui.selectable_value(
+                            &mut app.routing_mode,
+                            RoutingMode::Osrm,
+                            "OSRM (Berlin)",
+                        );
+                    });
+                combo_response.response.on_hover_text(
+                    "Select routing backend for vehicle movement",
+                );
+            });
+            if app.routing_mode == RoutingMode::Osrm {
+                ui.horizontal(|ui| {
+                    ui.label("Endpoint").on_hover_text(
+                        "OSRM HTTP endpoint URL. Default: http://localhost:5000 \
+                         (Docker setup in infra/osrm/)",
+                    );
+                    ui.add_enabled(
+                        can_edit,
+                        egui::TextEdit::singleline(&mut app.osrm_endpoint)
+                            .desired_width(120.0),
+                    );
+                });
+            }
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.label("Traffic").on_hover_text(
+                    "Time-of-day speed profile.\n\
+                     None: constant speed (no traffic effects).\n\
+                     Berlin: realistic rush-hour slowdowns.",
+                );
+                egui::ComboBox::from_id_salt("traffic_profile")
+                    .selected_text(match app.traffic_profile_mode {
+                        TrafficProfileMode::None => "None",
+                        TrafficProfileMode::Berlin => "Berlin",
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut app.traffic_profile_mode,
+                            TrafficProfileMode::None,
+                            "None",
+                        );
+                        ui.selectable_value(
+                            &mut app.traffic_profile_mode,
+                            TrafficProfileMode::Berlin,
+                            "Berlin",
+                        );
+                    });
+            });
+            ui.horizontal(|ui| {
+                ui.add_enabled(
+                    can_edit,
+                    egui::Checkbox::new(&mut app.congestion_zones_enabled, "Congestion zones"),
+                )
+                .on_hover_text(
+                    "Enable spatial congestion zones (city center and ring road). \
+                     Slows vehicles in predefined high-traffic areas.",
+                );
+            });
+            ui.horizontal(|ui| {
+                ui.add_enabled(
+                    can_edit,
+                    egui::Checkbox::new(&mut app.dynamic_congestion_enabled, "Dynamic congestion"),
+                )
+                .on_hover_text(
+                    "Enable density-based congestion: speed is reduced when \
+                     many vehicles occupy the same H3 cell.",
+                );
+            });
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.label("Spawns").on_hover_text(
+                    "Spawn location weighting for riders and drivers.\n\
+                     Uniform: random positions within map bounds.\n\
+                     Berlin Hotspots: weighted toward realistic city hotspots.",
+                );
+                egui::ComboBox::from_id_salt("spawn_mode")
+                    .selected_text(match app.spawn_mode {
+                        SpawnMode::Uniform => "Uniform",
+                        SpawnMode::BerlinHotspots => "Berlin",
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut app.spawn_mode,
+                            SpawnMode::Uniform,
+                            "Uniform",
+                        );
+                        ui.selectable_value(
+                            &mut app.spawn_mode,
+                            SpawnMode::BerlinHotspots,
+                            "Berlin Hotspots",
+                        );
+                    });
+            });
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.add_enabled(
+                    can_edit,
+                    egui::Checkbox::new(&mut app.base_speed_enabled, "Base speed"),
+                )
+                .on_hover_text(
+                    "Override the default free-flow speed (50 km/h). \
+                     Traffic factors are multiplied against this base.",
+                );
+                ui.add_enabled(
+                    can_edit && app.base_speed_enabled,
+                    egui::DragValue::new(&mut app.base_speed_kmh)
+                        .range(10.0..=200.0)
+                        .speed(1.0)
+                        .suffix(" km/h"),
+                );
+            });
+        });
+
+        // Col 8: Timing
+        columns[7].vertical(|ui| {
             ui.horizontal(|ui| {
                 ui.label("Timing");
             });

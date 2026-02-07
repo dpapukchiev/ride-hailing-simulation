@@ -1,9 +1,20 @@
-use bevy_ecs::prelude::{ParamSet, Query, Res, ResMut, With};
+//! Movement system: advances vehicles cell-by-cell along routes.
+//!
+//! On the first `MoveStep` for a trip, the route provider is queried and the
+//! result is stored as a [`TripRoute`] component. Subsequent steps advance
+//! along the cached cell path. Travel time per step is adjusted by the traffic
+//! model (time-of-day profile, congestion zones, vehicle density).
+
+use bevy_ecs::prelude::{Commands, Entity, ParamSet, Query, Res, ResMut, With};
 
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock, ONE_SEC_MS};
-use crate::ecs::{Driver, DriverState, Position, Rider, Trip, TripState};
-use crate::spatial::{distance_km_between_cells, grid_path_cells_cached};
+use crate::ecs::{Driver, DriverState, Position, Rider, Trip, TripRoute, TripState};
+use crate::routing::RouteProviderResource;
+use crate::spatial::{distance_km_between_cells, grid_path_cells_cached, SpatialIndex};
 use crate::speed::{SpeedFactors, SpeedModel};
+use crate::traffic::{
+    compute_traffic_factor, CongestionZones, DynamicCongestionConfig, TrafficProfile,
+};
 
 fn travel_time_ms(distance_km: f64, speed_kmh: f64) -> u64 {
     if distance_km <= 0.0 {
@@ -15,12 +26,73 @@ fn travel_time_ms(distance_km: f64, speed_kmh: f64) -> u64 {
     }
 }
 
-#[allow(clippy::type_complexity)]
+/// Resolve or advance the route for a trip, returning the next cell to move to.
+///
+/// - On first call (no `TripRoute`), queries the route provider and stores the result.
+/// - On subsequent calls, advances `current_index` by one and returns the next cell.
+fn resolve_next_cell(
+    commands: &mut Commands,
+    trip_entity: Entity,
+    driver_pos_cell: h3o::CellIndex,
+    target_cell: h3o::CellIndex,
+    route_provider: &RouteProviderResource,
+    trip_route: Option<&mut TripRoute>,
+) -> Option<h3o::CellIndex> {
+    if let Some(route) = trip_route {
+        // Already have a route — advance to the next cell
+        let next_idx = route.current_index + 1;
+        if next_idx < route.cells.len() {
+            route.current_index = next_idx;
+            Some(route.cells[next_idx])
+        } else {
+            // Reached end of route
+            None
+        }
+    } else {
+        // First MoveStep: resolve route from provider
+        let route_result = route_provider.0.route(driver_pos_cell, target_cell);
+
+        if let Some(rr) = route_result {
+            if rr.cells.len() > 1 {
+                let next_cell = rr.cells[1];
+                commands.entity(trip_entity).insert(TripRoute {
+                    cells: rr.cells,
+                    current_index: 1,
+                    total_distance_km: rr.distance_km,
+                });
+                return Some(next_cell);
+            }
+        }
+
+        // Fallback: use H3 grid path directly
+        if let Some(path) = grid_path_cells_cached(driver_pos_cell, target_cell) {
+            if let Some(next_cell) = path.get(1).copied() {
+                let dist = distance_km_between_cells(driver_pos_cell, target_cell);
+                commands.entity(trip_entity).insert(TripRoute {
+                    cells: path,
+                    current_index: 1,
+                    total_distance_km: dist,
+                });
+                return Some(next_cell);
+            }
+        }
+
+        None
+    }
+}
+
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn movement_system(
+    mut commands: Commands,
     mut clock: ResMut<SimulationClock>,
     event: Res<CurrentEvent>,
     mut speed: ResMut<SpeedModel>,
-    mut trips: Query<&mut Trip>,
+    route_provider: Res<RouteProviderResource>,
+    traffic_profile: Res<TrafficProfile>,
+    congestion_zones: Res<CongestionZones>,
+    dynamic_congestion: Res<DynamicCongestionConfig>,
+    spatial_index: Option<Res<SpatialIndex>>,
+    mut trips: Query<(&mut Trip, Option<&mut TripRoute>)>,
     mut queries: ParamSet<(
         Query<(&mut Driver, &mut Position)>,
         Query<&mut Position, With<Rider>>,
@@ -35,7 +107,7 @@ pub fn movement_system(
     };
 
     let (driver_entity, target_cell, is_en_route, rider_entity) = {
-        let Ok(trip) = trips.get(trip_entity) else {
+        let Ok((trip, _)) = trips.get(trip_entity) else {
             return;
         };
         let target = match trip.state {
@@ -68,11 +140,32 @@ pub fn movement_system(
         driver_pos.0
     };
 
-    let speed_kmh = speed.sample_kmh(SpeedFactors::default());
+    // Compute traffic-adjusted speed
+    let epoch_ms = clock.epoch_ms();
+    let sim_time_ms = clock.now();
+    let drivers_in_cell = spatial_index
+        .as_ref()
+        .map(|si| si.get_drivers_in_cells(&[driver_pos_cell]).len())
+        .unwrap_or(0);
+
+    let traffic_factor = compute_traffic_factor(
+        &traffic_profile,
+        &congestion_zones,
+        &dynamic_congestion,
+        driver_pos_cell,
+        sim_time_ms,
+        epoch_ms,
+        drivers_in_cell,
+    );
+
+    let speed_kmh = speed.sample_kmh(SpeedFactors {
+        multiplier: traffic_factor,
+    });
+
     let remaining_km = distance_km_between_cells(driver_pos_cell, target_cell);
     if remaining_km <= 0.0 {
         if is_en_route {
-            if let Ok(mut trip) = trips.get_mut(trip_entity) {
+            if let Ok((mut trip, _)) = trips.get_mut(trip_entity) {
                 trip.pickup_eta_ms = 0;
             }
         }
@@ -85,15 +178,31 @@ pub fn movement_system(
         return;
     }
 
-    let mut step_distance_km = remaining_km;
-    let mut next_driver_cell = driver_pos_cell;
-    // Use cached path lookup
-    if let Some(path) = grid_path_cells_cached(driver_pos_cell, target_cell) {
-        if let Some(next_cell) = path.get(1).copied() {
-            step_distance_km = distance_km_between_cells(driver_pos_cell, next_cell);
-            next_driver_cell = next_cell;
-        }
-    }
+    // Resolve next cell from route provider or cached route
+    let next_driver_cell = {
+        let mut trip_route = trips
+            .get_mut(trip_entity)
+            .ok()
+            .and_then(|(_, route)| route);
+
+        let trip_route_ref = trip_route.as_deref_mut();
+
+        resolve_next_cell(
+            &mut commands,
+            trip_entity,
+            driver_pos_cell,
+            target_cell,
+            &route_provider,
+            trip_route_ref,
+        )
+        .unwrap_or(driver_pos_cell)
+    };
+
+    let step_distance_km = if next_driver_cell != driver_pos_cell {
+        distance_km_between_cells(driver_pos_cell, next_driver_cell)
+    } else {
+        remaining_km
+    };
 
     // Update driver position
     {
@@ -114,7 +223,7 @@ pub fn movement_system(
 
     let remaining = distance_km_between_cells(next_driver_cell, target_cell);
     if is_en_route {
-        if let Ok(mut trip) = trips.get_mut(trip_entity) {
+        if let Ok((mut trip, _)) = trips.get_mut(trip_entity) {
             trip.pickup_eta_ms = if remaining <= 0.0 {
                 0
             } else {
@@ -149,14 +258,25 @@ mod tests {
     use super::*;
     use crate::clock::ONE_SEC_MS;
     use crate::ecs::{Rider, RiderState};
+    use crate::routing::{H3GridRouteProvider, RouteProviderResource};
     use crate::speed::SpeedModel;
+    use crate::traffic::{CongestionZones, DynamicCongestionConfig, TrafficProfile};
     use bevy_ecs::prelude::{Schedule, World};
+
+    /// Helper to set up the world with all required resources for movement tests.
+    fn setup_movement_world(world: &mut World) {
+        world.insert_resource(SimulationClock::default());
+        world.insert_resource(SpeedModel::with_range(Some(1), 40.0, 40.0));
+        world.insert_resource(RouteProviderResource(Box::new(H3GridRouteProvider)));
+        world.insert_resource(TrafficProfile::none());
+        world.insert_resource(CongestionZones::default());
+        world.insert_resource(DynamicCongestionConfig { enabled: false });
+    }
 
     #[test]
     fn movement_steps_toward_rider_and_schedules_trip_start() {
         let mut world = World::new();
-        world.insert_resource(SimulationClock::default());
-        world.insert_resource(SpeedModel::with_range(Some(1), 40.0, 40.0));
+        setup_movement_world(&mut world);
 
         let origin = h3o::CellIndex::try_from(0x8a1fb46622dffff).expect("cell");
         let neighbor = origin

@@ -41,6 +41,7 @@ pub mod matching;
 pub mod patterns;
 pub mod pricing;
 pub mod profiling;
+pub mod routing;
 pub mod runner;
 pub mod scenario;
 pub mod spatial;
@@ -48,6 +49,7 @@ pub mod spawner;
 pub mod speed;
 pub mod systems;
 pub mod telemetry;
+pub mod traffic;
 pub mod telemetry_export;
 
 #[cfg(any(test, feature = "test-helpers"))]

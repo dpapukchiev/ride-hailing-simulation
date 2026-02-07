@@ -11,10 +11,15 @@ parquet = "57.2.0"
 arrow = "57.2.0"
 pathfinding = "4.14"
 lru = "0.12"
+serde = { version = "1.0", features = ["derive"] }
+reqwest = { version = "0.12", features = ["blocking", "json"], optional = true }
+bincode = { version = "1.3", optional = true }
 
 [features]
 default = ["test-helpers"]
 test-helpers = []
+osrm = ["reqwest"]
+precomputed = ["bincode"]
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }

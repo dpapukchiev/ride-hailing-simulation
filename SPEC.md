@@ -35,6 +35,9 @@ minimal ECS-based agent model. It currently supports:
 - **Batch matching**: Optional mode where a periodic `BatchMatchRun` event collects all unmatched waiting riders and idle drivers, runs a global matching algorithm (e.g. Hungarian), and applies matches; when enabled, per-rider `TryMatch` is not scheduled. Rejected riders re-enter the next batch.
 - **Simulation end time**: Optional `SimulationEndTimeMs` resource stops the runner when the next event is at or after that time, so runs with recurring events (e.g. batch matching) finish in bounded time.
 - **Parallel experimentation**: Run multiple simulations in parallel with varying parameters to explore parameter space and analyze marketplace health.
+- **Pluggable routing**: A `RouteProvider` trait abstracts routing backends. Three implementations: `H3GridRouteProvider` (zero-dependency default), `OsrmRouteProvider` (OSRM HTTP, feature-gated), and `PrecomputedRouteProvider` (binary route table, feature-gated). Routes are cached in an LRU cache with H3 fallback on failure. The active provider is selected via `RouteProviderKind` in `ScenarioParams`.
+- **Traffic model**: Time-of-day speed profiles (`TrafficProfile`), spatial congestion zones (`CongestionZones`), and dynamic density-based congestion. These multiply the effective vehicle speed via `SpeedFactors.multiplier`. A Berlin profile is built-in with rush-hour slowdowns.
+- **Berlin map support**: Default geographic bounds are Berlin (lat 52.34–52.68, lng 13.08–13.76). OSRM setup scripts and Docker Compose are provided in `infra/osrm/` for running a local OSRM instance with Berlin OpenStreetMap data.
 
 This is a "crawl/walk" foundation aligned with the research plan.
 
@@ -96,6 +99,10 @@ datetime, which affects the time-of-day patterns applied to spawn rates.
 ```text
 README.md
 Cargo.toml
+infra/
+  osrm/
+    docker-compose.yml
+    setup.sh / setup.ps1
 stories/
   README.md
   core-sim/
@@ -119,6 +126,8 @@ crates/
       telemetry.rs
       pricing.rs
       profiling.rs
+      routing.rs
+      traffic.rs
       systems/
         mod.rs
         show_quote.rs
@@ -182,6 +191,7 @@ crates/
 
 - `eframe` + `egui_plot` for the native visualization UI.
 - `bevy_ecs` + `h3o` for shared types and map projection.
+- Feature `osrm` (default): enables OSRM routing backend selection in the UI.
 
 ## Tooling
 
@@ -723,13 +733,14 @@ Load tests are marked with `#[ignore]` and must be run explicitly: `cargo test -
   matching attempts, but new `TryMatch` events will use the updated algorithm). The metrics chart includes an **Abandoned (quote)** series for riders who gave up after rejecting too many quotes. The Run outcomes section displays breakdowns of abandonment reasons (price too high, ETA too long, stochastic rejection) and pickup cancellation reasons (timeout) with counts and percentages.
   
   The UI is organized into collapsible sections:
-  - **Scenario parameters**: Organized in a seven-column layout:
+  - **Scenario parameters**: Organized in an eight-column layout:
     - **Supply (Drivers)**: Initial count, spawn count, spread (hours)
     - **Demand (Riders)**: Initial count, spawn count, spread (hours), cancel wait (min/max minutes)
     - **Pricing**: Base fare, per km rate, commission rate (displayed as percentage), surge pricing (checkbox, surge radius k, max multiplier)
     - **Rider quote**: Max willingness to pay ($), max ETA (min), accept probability (%), max quote rejections
     - **Matching**: Matching algorithm (Simple, Cost-based, or Hungarian (batch)), batch matching checkbox (default on), batch interval (s), match radius (km)
     - **Map & Trips**: Map size (km), trip length range (km, min–max)
+    - **Routing & Traffic**: Routing backend (H3 Grid or OSRM with configurable endpoint), traffic profile (None or Berlin), congestion zones checkbox, dynamic congestion checkbox, spawn location weighting (Uniform or Berlin Hotspots), optional base speed override (km/h)
     - **Timing**: Simulation start time (year/month/day/hour/minute UTC with "Now" button), sim duration (hours; simulation stops when clock reaches this time), seed (optional)
     All parameters except matching algorithm are only editable before simulation starts. Platform revenue is displayed in the Run outcomes section.
   - **Run outcomes**: Shows outcome counters (riders completed, riders cancelled with pickup timeout breakdown, abandoned quote with breakdown by reason: price too high, ETA too long, stochastic rejection, trips completed, total resolved, conversion %, platform revenue, total rider pay, avg fare),

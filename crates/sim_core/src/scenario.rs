@@ -12,16 +12,23 @@ use crate::matching::{
 };
 use crate::patterns::{apply_driver_patterns, apply_rider_patterns};
 use crate::pricing::PricingConfig;
+use crate::routing::{build_route_provider, RouteProviderKind, RouteProviderResource};
+use crate::traffic::{
+    CongestionZones, DynamicCongestionConfig, TrafficProfile, TrafficProfileKind,
+};
 use crate::spatial::SpatialIndex;
-use crate::spawner::{DriverSpawner, DriverSpawnerConfig, RiderSpawner, RiderSpawnerConfig};
+use crate::spawner::{
+    DriverSpawner, DriverSpawnerConfig, RiderSpawner, RiderSpawnerConfig, SpawnWeighting,
+    SpawnWeightingKind,
+};
 use crate::speed::SpeedModel;
 use crate::telemetry::{SimSnapshotConfig, SimSnapshots, SimTelemetry};
 
-/// Default bounding box: San Francisco Bay Area (approx).
-const DEFAULT_LAT_MIN: f64 = 37.6;
-const DEFAULT_LAT_MAX: f64 = 37.85;
-const DEFAULT_LNG_MIN: f64 = -122.55;
-const DEFAULT_LNG_MAX: f64 = -122.35;
+/// Default bounding box: Berlin, Germany (approx).
+const DEFAULT_LAT_MIN: f64 = 52.34;
+const DEFAULT_LAT_MAX: f64 = 52.68;
+const DEFAULT_LNG_MIN: f64 = 13.08;
+const DEFAULT_LNG_MAX: f64 = 13.76;
 
 /// Default time window for rider requests: 1 hour (simulation ms).
 const DEFAULT_REQUEST_WINDOW_MS: u64 = 60 * 60 * 1000;
@@ -201,6 +208,19 @@ pub struct ScenarioParams {
     pub batch_interval_secs: Option<u64>,
     /// ETA weight for cost-based and Hungarian matching algorithms. If None, uses DEFAULT_ETA_WEIGHT.
     pub eta_weight: Option<f64>,
+    /// Which routing backend to use. Defaults to H3Grid (existing behaviour).
+    pub route_provider_kind: RouteProviderKind,
+    /// Traffic profile (time-of-day speed factors). Defaults to None (no traffic effects).
+    pub traffic_profile: TrafficProfileKind,
+    /// Whether spatial congestion zones are enabled.
+    pub congestion_zones_enabled: bool,
+    /// Whether dynamic congestion from vehicle density is enabled.
+    pub dynamic_congestion_enabled: bool,
+    /// Free-flow base speed in km/h (used as the reference speed before traffic factors).
+    /// When set, overrides the default SpeedModel range. Defaults to None (use 20-60 km/h).
+    pub base_speed_kmh: Option<f64>,
+    /// Spawn location weighting. Defaults to Uniform (existing behaviour).
+    pub spawn_weighting: SpawnWeightingKind,
 }
 
 impl Default for ScenarioParams {
@@ -229,6 +249,12 @@ impl Default for ScenarioParams {
             batch_matching_enabled: None,
             batch_interval_secs: None,
             eta_weight: None,
+            route_provider_kind: RouteProviderKind::default(),
+            traffic_profile: TrafficProfileKind::default(),
+            congestion_zones_enabled: false,
+            dynamic_congestion_enabled: false,
+            base_speed_kmh: None,
+            spawn_weighting: SpawnWeightingKind::default(),
         }
     }
 }
@@ -571,7 +597,19 @@ pub fn build_scenario(world: &mut World, params: ScenarioParams) {
                 ..Default::default()
             }),
     );
-    world.insert_resource(SpeedModel::new(params.seed.map(|seed| seed ^ 0x5eed_cafe)));
+    // If base_speed_kmh is set, use a narrower speed range centred on that value
+    // (±10 km/h for some stochastic variation). Otherwise use the default 20-60 km/h range.
+    if let Some(base) = params.base_speed_kmh {
+        let min = (base - 10.0).max(5.0);
+        let max = base + 10.0;
+        world.insert_resource(SpeedModel::with_range(
+            params.seed.map(|seed| seed ^ 0x5eed_cafe),
+            min,
+            max,
+        ));
+    } else {
+        world.insert_resource(SpeedModel::new(params.seed.map(|seed| seed ^ 0x5eed_cafe)));
+    }
     // Set matching algorithm based on params
     let eta_weight = params
         .eta_weight
@@ -587,6 +625,24 @@ pub fn build_scenario(world: &mut World, params: ScenarioParams) {
     world.insert_resource(algorithm);
     // Insert pricing config (use provided or default)
     world.insert_resource(params.pricing_config.unwrap_or_default());
+
+    // Insert route provider
+    let route_provider = build_route_provider(&params.route_provider_kind);
+    world.insert_resource(RouteProviderResource(route_provider));
+
+    // Insert traffic model resources
+    world.insert_resource(TrafficProfile::from_kind(&params.traffic_profile));
+    if params.congestion_zones_enabled {
+        world.insert_resource(CongestionZones::berlin_defaults());
+    } else {
+        world.insert_resource(CongestionZones::default());
+    }
+    world.insert_resource(DynamicCongestionConfig {
+        enabled: params.dynamic_congestion_enabled,
+    });
+
+    // Insert spawn weighting
+    world.insert_resource(SpawnWeighting::from_kind(&params.spawn_weighting));
 
     let seed = params.seed.unwrap_or(0);
     let request_window_ms = params.request_window_ms;

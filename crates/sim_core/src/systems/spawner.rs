@@ -8,7 +8,7 @@ use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock, ONE_H
 use crate::ecs::{Driver, DriverEarnings, DriverFatigue, DriverState, Position, Rider, RiderState};
 use crate::scenario::{random_destination, BatchMatchingConfig};
 use crate::spatial::GeoIndex;
-use crate::spawner::{random_cell_in_bounds, DriverSpawner, RiderSpawner};
+use crate::spawner::{random_cell_in_bounds, DriverSpawner, RiderSpawner, SpawnWeighting};
 use h3o::CellIndex;
 
 /// Create a seeded RNG for spawn operations.
@@ -52,18 +52,23 @@ fn spawn_rider(
     clock: &mut SimulationClock,
     spawner: &mut RiderSpawner,
     current_time_ms: u64,
+    weighting: Option<&SpawnWeighting>,
 ) -> bevy_ecs::prelude::Entity {
     // Create RNG for position/destination generation
     let mut rng = create_spawn_rng(spawner.config.seed, spawner.spawned_count());
 
-    // Generate position
-    let position = generate_spawn_position(
-        &mut rng,
-        spawner.config.lat_min,
-        spawner.config.lat_max,
-        spawner.config.lng_min,
-        spawner.config.lng_max,
-    );
+    // Generate position: try weighted cell first, then fall back to uniform random
+    let position = weighting
+        .and_then(|w| w.sample_rider_cell(&mut rng))
+        .unwrap_or_else(|| {
+            generate_spawn_position(
+                &mut rng,
+                spawner.config.lat_min,
+                spawner.config.lat_max,
+                spawner.config.lng_min,
+                spawner.config.lng_max,
+            )
+        });
 
     let geo = GeoIndex::default();
     let destination = random_destination(
@@ -105,18 +110,27 @@ fn spawn_rider(
 }
 
 /// Helper function to spawn a single driver.
-fn spawn_driver(commands: &mut Commands, spawner: &mut DriverSpawner, current_time_ms: u64) {
+fn spawn_driver(
+    commands: &mut Commands,
+    spawner: &mut DriverSpawner,
+    current_time_ms: u64,
+    weighting: Option<&SpawnWeighting>,
+) {
     // Create RNG for position generation
     let mut rng = create_spawn_rng(spawner.config.seed, spawner.spawned_count());
 
-    // Generate position
-    let position = generate_spawn_position(
-        &mut rng,
-        spawner.config.lat_min,
-        spawner.config.lat_max,
-        spawner.config.lng_min,
-        spawner.config.lng_max,
-    );
+    // Generate position: try weighted cell first, then fall back to uniform random
+    let position = weighting
+        .and_then(|w| w.sample_driver_cell(&mut rng))
+        .unwrap_or_else(|| {
+            generate_spawn_position(
+                &mut rng,
+                spawner.config.lat_min,
+                spawner.config.lat_max,
+                spawner.config.lng_min,
+                spawner.config.lng_max,
+            )
+        });
 
     // Sample earnings target: $100-$300 range
     let daily_earnings_target = rng.gen_range(100.0..=300.0);
@@ -149,13 +163,14 @@ fn initialize_rider_spawner(
     commands: &mut Commands,
     clock: &mut SimulationClock,
     current_time_ms: u64,
+    weighting: Option<&SpawnWeighting>,
 ) {
     if !spawner.initialized() {
         spawner.set_initialized(true);
 
         // Spawn initial riders immediately
         for _ in 0..spawner.config.initial_count {
-            spawn_rider(commands, clock, spawner, current_time_ms);
+            spawn_rider(commands, clock, spawner, current_time_ms, weighting);
             // Manually increment count since we're not calling advance() for initial spawns
             spawner.increment_spawned_count();
         }
@@ -173,13 +188,14 @@ fn initialize_driver_spawner(
     commands: &mut Commands,
     clock: &mut SimulationClock,
     current_time_ms: u64,
+    weighting: Option<&SpawnWeighting>,
 ) {
     if !spawner.initialized() {
         spawner.set_initialized(true);
 
         // Spawn initial drivers immediately
         for _ in 0..spawner.config.initial_count {
-            spawn_driver(commands, spawner, current_time_ms);
+            spawn_driver(commands, spawner, current_time_ms, weighting);
             // Manually increment count since we're not calling advance() for initial spawns
             spawner.increment_spawned_count();
         }
@@ -197,6 +213,7 @@ fn process_rider_spawner_event(
     commands: &mut Commands,
     clock: &mut SimulationClock,
     current_time_ms: u64,
+    weighting: Option<&SpawnWeighting>,
 ) {
     // Check if we're before start time (shouldn't happen, but be safe)
     if let Some(start_time) = spawner.config.start_time_ms {
@@ -209,7 +226,7 @@ fn process_rider_spawner_event(
 
     // Check if we should spawn
     if spawner.should_spawn(current_time_ms) {
-        spawn_rider(commands, clock, spawner, current_time_ms);
+        spawn_rider(commands, clock, spawner, current_time_ms, weighting);
 
         // Advance spawner to next spawn time (uses seeded distribution internally)
         spawner.advance(current_time_ms);
@@ -227,6 +244,7 @@ fn process_driver_spawner_event(
     commands: &mut Commands,
     clock: &mut SimulationClock,
     current_time_ms: u64,
+    weighting: Option<&SpawnWeighting>,
 ) {
     // Check if we're before start time (shouldn't happen, but be safe)
     if let Some(start_time) = spawner.config.start_time_ms {
@@ -239,7 +257,7 @@ fn process_driver_spawner_event(
 
     // Check if we should spawn
     if spawner.should_spawn(current_time_ms) {
-        spawn_driver(commands, spawner, current_time_ms);
+        spawn_driver(commands, spawner, current_time_ms, weighting);
 
         // Advance spawner to next spawn time (uses seeded distribution internally)
         spawner.advance(current_time_ms);
@@ -258,6 +276,7 @@ pub fn simulation_started_system(
     batch_config: Option<Res<BatchMatchingConfig>>,
     rider_spawner: Option<ResMut<RiderSpawner>>,
     driver_spawner: Option<ResMut<DriverSpawner>>,
+    spawn_weighting: Option<Res<SpawnWeighting>>,
     event: Res<CurrentEvent>,
 ) {
     if event.0.kind != EventKind::SimulationStarted {
@@ -265,6 +284,7 @@ pub fn simulation_started_system(
     }
 
     let current_time_ms = clock.now();
+    let weighting = spawn_weighting.as_deref();
 
     // When batch matching is enabled, schedule the first BatchMatchRun at time 0
     if let Some(cfg) = batch_config.as_deref() {
@@ -275,12 +295,24 @@ pub fn simulation_started_system(
 
     // Initialize rider spawner and spawn initial riders
     if let Some(mut spawner) = rider_spawner {
-        initialize_rider_spawner(&mut spawner, &mut commands, &mut clock, current_time_ms);
+        initialize_rider_spawner(
+            &mut spawner,
+            &mut commands,
+            &mut clock,
+            current_time_ms,
+            weighting,
+        );
     }
 
     // Initialize driver spawner and spawn initial drivers
     if let Some(mut spawner) = driver_spawner {
-        initialize_driver_spawner(&mut spawner, &mut commands, &mut clock, current_time_ms);
+        initialize_driver_spawner(
+            &mut spawner,
+            &mut commands,
+            &mut clock,
+            current_time_ms,
+            weighting,
+        );
     }
 }
 
@@ -289,6 +321,7 @@ pub fn rider_spawner_system(
     mut commands: Commands,
     mut clock: ResMut<SimulationClock>,
     mut spawner: ResMut<RiderSpawner>,
+    spawn_weighting: Option<Res<SpawnWeighting>>,
     event: Res<CurrentEvent>,
 ) {
     if event.0.kind != EventKind::SpawnRider {
@@ -296,7 +329,14 @@ pub fn rider_spawner_system(
     }
 
     let current_time_ms = clock.now();
-    process_rider_spawner_event(&mut spawner, &mut commands, &mut clock, current_time_ms);
+    let weighting = spawn_weighting.as_deref();
+    process_rider_spawner_event(
+        &mut spawner,
+        &mut commands,
+        &mut clock,
+        current_time_ms,
+        weighting,
+    );
 }
 
 /// System that processes driver spawner and creates drivers.
@@ -304,6 +344,7 @@ pub fn driver_spawner_system(
     mut commands: Commands,
     mut clock: ResMut<SimulationClock>,
     mut spawner: ResMut<DriverSpawner>,
+    spawn_weighting: Option<Res<SpawnWeighting>>,
     event: Res<CurrentEvent>,
 ) {
     if event.0.kind != EventKind::SpawnDriver {
@@ -311,5 +352,12 @@ pub fn driver_spawner_system(
     }
 
     let current_time_ms = clock.now();
-    process_driver_spawner_event(&mut spawner, &mut commands, &mut clock, current_time_ms);
+    let weighting = spawn_weighting.as_deref();
+    process_driver_spawner_event(
+        &mut spawner,
+        &mut commands,
+        &mut clock,
+        current_time_ms,
+        weighting,
+    );
 }

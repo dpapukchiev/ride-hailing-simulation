@@ -13,6 +13,7 @@ use arrow::record_batch::RecordBatch;
 use parquet::arrow::ArrowWriter;
 use parquet::file::properties::WriterProperties;
 use sim_core::scenario::MatchingAlgorithmType;
+use sim_core::traffic::TrafficProfileKind;
 
 use crate::health::{calculate_health_scores, HealthWeights};
 use crate::metrics::SimulationResult;
@@ -203,6 +204,10 @@ pub fn export_to_csv(
         "batch_matching_enabled",
         "batch_interval_secs",
         "eta_weight",
+        // Traffic parameters
+        "traffic_profile",
+        "dynamic_congestion_enabled",
+        "base_speed_kmh",
         // Results
         "total_riders",
         "total_drivers",
@@ -282,6 +287,18 @@ pub fn export_to_csv(
                 .params
                 .eta_weight
                 .map(|w| w.to_string())
+                .unwrap_or_default(),
+            // Traffic parameters
+            &match &param_set.params.traffic_profile {
+                TrafficProfileKind::None => "None".to_string(),
+                TrafficProfileKind::Berlin => "Berlin".to_string(),
+                TrafficProfileKind::Custom(_) => "Custom".to_string(),
+            },
+            &param_set.params.dynamic_congestion_enabled.to_string(),
+            &param_set
+                .params
+                .base_speed_kmh
+                .map(|s| s.to_string())
                 .unwrap_or_default(),
             // Results
             &result.total_riders.to_string(),
