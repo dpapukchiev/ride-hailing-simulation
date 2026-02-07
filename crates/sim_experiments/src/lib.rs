@@ -44,6 +44,7 @@
 pub mod export;
 pub mod health;
 pub mod metrics;
+pub mod parameter_spaces;
 pub mod parameters;
 pub mod runner;
 

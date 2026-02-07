@@ -5,7 +5,7 @@
 //! random sampling strategies.
 
 use sim_core::pricing::PricingConfig;
-use sim_core::scenario::ScenarioParams;
+use sim_core::scenario::{MatchingAlgorithmType, ScenarioParams};
 use std::collections::HashSet;
 
 /// Represents a single parameter combination.
@@ -15,12 +15,114 @@ struct ParameterCombination {
     base_fare: f64,
     per_km_rate: f64,
     surge_enabled: bool,
+    surge_radius_k: u32,
     surge_max_multiplier: f64,
     num_riders: usize,
     num_drivers: usize,
     match_radius: u32,
     epoch_ms: Option<i64>,
     simulation_duration_hours: Option<u64>,
+    matching_algorithm_type: MatchingAlgorithmType,
+    batch_matching_enabled: bool,
+    batch_interval_secs: u64,
+    eta_weight: f64,
+}
+
+/// Partial combination used for incremental building.
+#[derive(Debug, Clone, Default)]
+struct PartialCombination {
+    commission_rate: Option<f64>,
+    base_fare: Option<f64>,
+    per_km_rate: Option<f64>,
+    surge_enabled: Option<bool>,
+    surge_radius_k: Option<u32>,
+    surge_max_multiplier: Option<f64>,
+    num_riders: Option<usize>,
+    num_drivers: Option<usize>,
+    match_radius: Option<u32>,
+    epoch_ms: Option<Option<i64>>,
+    simulation_duration_hours: Option<Option<u64>>,
+    matching_algorithm_type: Option<MatchingAlgorithmType>,
+    batch_matching_enabled: Option<bool>,
+    batch_interval_secs: Option<u64>,
+}
+
+impl PartialCombination {
+    fn with_commission_rate(mut self, v: f64) -> Self {
+        self.commission_rate = Some(v);
+        self
+    }
+    fn with_base_fare(mut self, v: f64) -> Self {
+        self.base_fare = Some(v);
+        self
+    }
+    fn with_per_km_rate(mut self, v: f64) -> Self {
+        self.per_km_rate = Some(v);
+        self
+    }
+    fn with_surge_enabled(mut self, v: bool) -> Self {
+        self.surge_enabled = Some(v);
+        self
+    }
+    fn with_surge_radius_k(mut self, v: u32) -> Self {
+        self.surge_radius_k = Some(v);
+        self
+    }
+    fn with_surge_max_multiplier(mut self, v: f64) -> Self {
+        self.surge_max_multiplier = Some(v);
+        self
+    }
+    fn with_num_riders(mut self, v: usize) -> Self {
+        self.num_riders = Some(v);
+        self
+    }
+    fn with_num_drivers(mut self, v: usize) -> Self {
+        self.num_drivers = Some(v);
+        self
+    }
+    fn with_match_radius(mut self, v: u32) -> Self {
+        self.match_radius = Some(v);
+        self
+    }
+    fn with_epoch_ms(mut self, v: Option<i64>) -> Self {
+        self.epoch_ms = Some(v);
+        self
+    }
+    fn with_simulation_duration_hours(mut self, v: Option<u64>) -> Self {
+        self.simulation_duration_hours = Some(v);
+        self
+    }
+    fn with_matching_algorithm_type(mut self, v: MatchingAlgorithmType) -> Self {
+        self.matching_algorithm_type = Some(v);
+        self
+    }
+    fn with_batch_matching_enabled(mut self, v: bool) -> Self {
+        self.batch_matching_enabled = Some(v);
+        self
+    }
+    fn with_batch_interval_secs(mut self, v: u64) -> Self {
+        self.batch_interval_secs = Some(v);
+        self
+    }
+    fn to_combination(self, eta_weight: f64) -> ParameterCombination {
+        ParameterCombination {
+            commission_rate: self.commission_rate.unwrap(),
+            base_fare: self.base_fare.unwrap(),
+            per_km_rate: self.per_km_rate.unwrap(),
+            surge_enabled: self.surge_enabled.unwrap(),
+            surge_radius_k: self.surge_radius_k.unwrap(),
+            surge_max_multiplier: self.surge_max_multiplier.unwrap(),
+            num_riders: self.num_riders.unwrap(),
+            num_drivers: self.num_drivers.unwrap(),
+            match_radius: self.match_radius.unwrap(),
+            epoch_ms: self.epoch_ms.unwrap(),
+            simulation_duration_hours: self.simulation_duration_hours.unwrap(),
+            matching_algorithm_type: self.matching_algorithm_type.unwrap(),
+            batch_matching_enabled: self.batch_matching_enabled.unwrap(),
+            batch_interval_secs: self.batch_interval_secs.unwrap(),
+            eta_weight,
+        }
+    }
 }
 
 /// Holds all parameter variations to explore.
@@ -29,12 +131,17 @@ struct ParameterVariations {
     base_fares: Vec<f64>,
     per_km_rates: Vec<f64>,
     surge_enabled: Vec<bool>,
+    surge_radius_k: Vec<u32>,
     surge_max_multipliers: Vec<f64>,
     num_riders: Vec<usize>,
     num_drivers: Vec<usize>,
     match_radii: Vec<u32>,
     epoch_ms_values: Vec<Option<i64>>,
     simulation_duration_hours: Vec<Option<u64>>,
+    matching_algorithm_types: Vec<MatchingAlgorithmType>,
+    batch_matching_enabled: Vec<bool>,
+    batch_interval_secs: Vec<u64>,
+    eta_weights: Vec<f64>,
 }
 
 impl ParameterVariations {
@@ -61,6 +168,11 @@ impl ParameterVariations {
                 vec![default_pricing.map(|p| p.surge_enabled).unwrap_or(false)]
             } else {
                 space.surge_enabled.clone()
+            },
+            surge_radius_k: if space.surge_radius_k.is_empty() {
+                vec![default_pricing.map(|p| p.surge_radius_k).unwrap_or(1)]
+            } else {
+                space.surge_radius_k.clone()
             },
             surge_max_multipliers: if space.surge_max_multipliers.is_empty() {
                 vec![default_pricing.map(|p| p.surge_max_multiplier).unwrap_or(2.0)]
@@ -92,101 +204,98 @@ impl ParameterVariations {
             } else {
                 space.simulation_duration_hours.clone()
             },
+            matching_algorithm_types: if space.matching_algorithm_types.is_empty() {
+                vec![space.base.matching_algorithm_type.unwrap_or(MatchingAlgorithmType::Hungarian)]
+            } else {
+                space.matching_algorithm_types.clone()
+            },
+            batch_matching_enabled: if space.batch_matching_enabled.is_empty() {
+                vec![space.base.batch_matching_enabled.unwrap_or(true)]
+            } else {
+                space.batch_matching_enabled.clone()
+            },
+            batch_interval_secs: if space.batch_interval_secs.is_empty() {
+                vec![space.base.batch_interval_secs.unwrap_or(5)]
+            } else {
+                space.batch_interval_secs.clone()
+            },
+            eta_weights: if space.eta_weights.is_empty() {
+                vec![space.base.eta_weight.unwrap_or(sim_core::matching::DEFAULT_ETA_WEIGHT)]
+            } else {
+                space.eta_weights.clone()
+            },
         }
     }
 
     /// Generate all combinations using Cartesian product.
-    fn generate_combinations(&self) -> impl Iterator<Item = ParameterCombination> + '_ {
-        // Build combinations by iteratively expanding partial combinations
-        // This avoids deep nesting by using helper functions
-        self.commission_rates.iter()
-            .flat_map(move |&commission_rate| {
-                self.expand_with_base_fares(commission_rate)
-            })
+    /// Uses a functional fold-based approach to build combinations incrementally.
+    fn generate_combinations(&self) -> Vec<ParameterCombination> {
+        // Start with a single empty combination
+        let mut partial: Vec<PartialCombination> = vec![PartialCombination::default()];
+        
+        // Build combinations incrementally by expanding each partial combination
+        partial = self.commission_rates.iter().flat_map(|&rate| {
+            partial.iter().map(move |p| p.clone().with_commission_rate(rate))
+        }).collect();
+        
+        partial = self.base_fares.iter().flat_map(|&fare| {
+            partial.iter().map(move |p| p.clone().with_base_fare(fare))
+        }).collect();
+        
+        partial = self.per_km_rates.iter().flat_map(|&rate| {
+            partial.iter().map(move |p| p.clone().with_per_km_rate(rate))
+        }).collect();
+        
+        partial = self.surge_enabled.iter().flat_map(|&enabled| {
+            partial.iter().map(move |p| p.clone().with_surge_enabled(enabled))
+        }).collect();
+        
+        partial = self.surge_radius_k.iter().flat_map(|&radius_k| {
+            partial.iter().map(move |p| p.clone().with_surge_radius_k(radius_k))
+        }).collect();
+        
+        partial = self.surge_max_multipliers.iter().flat_map(|&mult| {
+            partial.iter().map(move |p| p.clone().with_surge_max_multiplier(mult))
+        }).collect();
+        
+        partial = self.num_riders.iter().flat_map(|&count| {
+            partial.iter().map(move |p| p.clone().with_num_riders(count))
+        }).collect();
+        
+        partial = self.num_drivers.iter().flat_map(|&count| {
+            partial.iter().map(move |p| p.clone().with_num_drivers(count))
+        }).collect();
+        
+        partial = self.match_radii.iter().flat_map(|&radius| {
+            partial.iter().map(move |p| p.clone().with_match_radius(radius))
+        }).collect();
+        
+        partial = self.epoch_ms_values.iter().flat_map(|&epoch| {
+            partial.iter().map(move |p| p.clone().with_epoch_ms(epoch))
+        }).collect();
+        
+        partial = self.simulation_duration_hours.iter().flat_map(|&duration| {
+            partial.iter().map(move |p| p.clone().with_simulation_duration_hours(duration))
+        }).collect();
+        
+        partial = self.matching_algorithm_types.iter().flat_map(|&alg| {
+            partial.iter().map(move |p| p.clone().with_matching_algorithm_type(alg))
+        }).collect();
+        
+        partial = self.batch_matching_enabled.iter().flat_map(|&enabled| {
+            partial.iter().map(move |p| p.clone().with_batch_matching_enabled(enabled))
+        }).collect();
+        
+        partial = self.batch_interval_secs.iter().flat_map(|&interval| {
+            partial.iter().map(move |p| p.clone().with_batch_interval_secs(interval))
+        }).collect();
+        
+        // Final step: convert to ParameterCombination
+        self.eta_weights.iter().flat_map(|&eta_weight| {
+            partial.iter().map(move |p| p.clone().to_combination(eta_weight))
+        }).collect()
     }
 
-    /// Helper to expand combinations with base_fares and subsequent parameters.
-    fn expand_with_base_fares(&self, commission_rate: f64) -> impl Iterator<Item = ParameterCombination> + '_ {
-        self.base_fares.iter()
-            .flat_map(move |&base_fare| {
-                self.expand_with_per_km_rates(commission_rate, base_fare)
-            })
-    }
-
-    /// Helper to expand combinations with per_km_rates and subsequent parameters.
-    fn expand_with_per_km_rates(&self, commission_rate: f64, base_fare: f64) -> impl Iterator<Item = ParameterCombination> + '_ {
-        self.per_km_rates.iter()
-            .flat_map(move |&per_km_rate| {
-                self.expand_with_surge_enabled(commission_rate, base_fare, per_km_rate)
-            })
-    }
-
-    /// Helper to expand combinations with surge_enabled and subsequent parameters.
-    fn expand_with_surge_enabled(&self, commission_rate: f64, base_fare: f64, per_km_rate: f64) -> impl Iterator<Item = ParameterCombination> + '_ {
-        self.surge_enabled.iter()
-            .flat_map(move |&surge_enabled| {
-                self.expand_with_surge_multipliers(commission_rate, base_fare, per_km_rate, surge_enabled)
-            })
-    }
-
-    /// Helper to expand combinations with surge_max_multipliers and subsequent parameters.
-    fn expand_with_surge_multipliers(&self, commission_rate: f64, base_fare: f64, per_km_rate: f64, surge_enabled: bool) -> impl Iterator<Item = ParameterCombination> + '_ {
-        self.surge_max_multipliers.iter()
-            .flat_map(move |&surge_max_multiplier| {
-                self.expand_with_num_riders(commission_rate, base_fare, per_km_rate, surge_enabled, surge_max_multiplier)
-            })
-    }
-
-    /// Helper to expand combinations with num_riders and subsequent parameters.
-    fn expand_with_num_riders(&self, commission_rate: f64, base_fare: f64, per_km_rate: f64, surge_enabled: bool, surge_max_multiplier: f64) -> impl Iterator<Item = ParameterCombination> + '_ {
-        self.num_riders.iter()
-            .flat_map(move |&num_riders| {
-                self.expand_with_num_drivers(commission_rate, base_fare, per_km_rate, surge_enabled, surge_max_multiplier, num_riders)
-            })
-    }
-
-    /// Helper to expand combinations with num_drivers and subsequent parameters.
-    fn expand_with_num_drivers(&self, commission_rate: f64, base_fare: f64, per_km_rate: f64, surge_enabled: bool, surge_max_multiplier: f64, num_riders: usize) -> impl Iterator<Item = ParameterCombination> + '_ {
-        self.num_drivers.iter()
-            .flat_map(move |&num_drivers| {
-                self.expand_with_match_radii(commission_rate, base_fare, per_km_rate, surge_enabled, surge_max_multiplier, num_riders, num_drivers)
-            })
-    }
-
-    /// Helper to expand combinations with match_radii and subsequent parameters.
-    fn expand_with_match_radii(&self, commission_rate: f64, base_fare: f64, per_km_rate: f64, surge_enabled: bool, surge_max_multiplier: f64, num_riders: usize, num_drivers: usize) -> impl Iterator<Item = ParameterCombination> + '_ {
-        self.match_radii.iter()
-            .flat_map(move |&match_radius| {
-                self.expand_with_epoch_ms(commission_rate, base_fare, per_km_rate, surge_enabled, surge_max_multiplier, num_riders, num_drivers, match_radius)
-            })
-    }
-
-    /// Helper to expand combinations with epoch_ms and subsequent parameters.
-    fn expand_with_epoch_ms(&self, commission_rate: f64, base_fare: f64, per_km_rate: f64, surge_enabled: bool, surge_max_multiplier: f64, num_riders: usize, num_drivers: usize, match_radius: u32) -> impl Iterator<Item = ParameterCombination> + '_ {
-        self.epoch_ms_values.iter()
-            .flat_map(move |&epoch_ms| {
-                self.expand_with_duration(commission_rate, base_fare, per_km_rate, surge_enabled, surge_max_multiplier, num_riders, num_drivers, match_radius, epoch_ms)
-            })
-    }
-
-    /// Helper to expand combinations with simulation_duration_hours (final step).
-    fn expand_with_duration(&self, commission_rate: f64, base_fare: f64, per_km_rate: f64, surge_enabled: bool, surge_max_multiplier: f64, num_riders: usize, num_drivers: usize, match_radius: u32, epoch_ms: Option<i64>) -> impl Iterator<Item = ParameterCombination> + '_ {
-        self.simulation_duration_hours.iter()
-            .map(move |&simulation_duration_hours| {
-                ParameterCombination {
-                    commission_rate,
-                    base_fare,
-                    per_km_rate,
-                    surge_enabled,
-                    surge_max_multiplier,
-                    num_riders,
-                    num_drivers,
-                    match_radius,
-                    epoch_ms,
-                    simulation_duration_hours,
-                }
-            })
-    }
 }
 
 /// A single parameter configuration for a simulation run.
@@ -244,6 +353,8 @@ pub struct ParameterSpace {
     per_km_rates: Vec<f64>,
     /// Surge enabled values to explore.
     surge_enabled: Vec<bool>,
+    /// Surge radius k values to explore.
+    surge_radius_k: Vec<u32>,
     /// Surge max multipliers to explore.
     surge_max_multipliers: Vec<f64>,
     /// Number of riders to explore.
@@ -256,6 +367,14 @@ pub struct ParameterSpace {
     epoch_ms: Vec<Option<i64>>,
     /// Simulation duration in hours to explore.
     simulation_duration_hours: Vec<Option<u64>>,
+    /// Matching algorithm types to explore.
+    matching_algorithm_types: Vec<MatchingAlgorithmType>,
+    /// Batch matching enabled values to explore.
+    batch_matching_enabled: Vec<bool>,
+    /// Batch interval (seconds) values to explore.
+    batch_interval_secs: Vec<u64>,
+    /// ETA weights to explore.
+    eta_weights: Vec<f64>,
 }
 
 impl ParameterSpace {
@@ -267,12 +386,17 @@ impl ParameterSpace {
             base_fares: vec![],
             per_km_rates: vec![],
             surge_enabled: vec![],
+            surge_radius_k: vec![],
             surge_max_multipliers: vec![],
             num_riders: vec![],
             num_drivers: vec![],
             match_radii: vec![],
             epoch_ms: vec![],
             simulation_duration_hours: vec![],
+            matching_algorithm_types: vec![],
+            batch_matching_enabled: vec![],
+            batch_interval_secs: vec![],
+            eta_weights: vec![],
         }
     }
 
@@ -303,6 +427,12 @@ impl ParameterSpace {
     /// Set surge enabled values to explore.
     pub fn surge_enabled(mut self, enabled: Vec<bool>) -> Self {
         self.surge_enabled = enabled;
+        self
+    }
+
+    /// Set surge radius k values to explore.
+    pub fn surge_radius_k(mut self, radius_k: Vec<u32>) -> Self {
+        self.surge_radius_k = radius_k;
         self
     }
 
@@ -342,22 +472,65 @@ impl ParameterSpace {
         self
     }
 
+    /// Set matching algorithm types to explore.
+    pub fn matching_algorithm_type(mut self, types: Vec<MatchingAlgorithmType>) -> Self {
+        self.matching_algorithm_types = types;
+        self
+    }
+
+    /// Set batch matching enabled values to explore.
+    pub fn batch_matching_enabled(mut self, enabled: Vec<bool>) -> Self {
+        self.batch_matching_enabled = enabled;
+        self
+    }
+
+    /// Set batch interval (seconds) values to explore.
+    pub fn batch_interval_secs(mut self, intervals: Vec<u64>) -> Self {
+        self.batch_interval_secs = intervals;
+        self
+    }
+
+    /// Set ETA weights to explore.
+    pub fn eta_weight(mut self, weights: Vec<f64>) -> Self {
+        self.eta_weights = weights;
+        self
+    }
+
     /// Set base parameters (used as defaults).
     pub fn with_base(mut self, base: ScenarioParams) -> Self {
         self.base = base;
         self
     }
 
+    /// Check if a parameter combination is valid.
+    ///
+    /// Returns false for invalid combinations that should be discarded.
+    fn is_valid_combination(combo: &ParameterCombination) -> bool {
+        // Hungarian matching algorithm requires batch matching to be enabled
+        // (it's designed for batch optimization via find_batch_matches)
+        if combo.matching_algorithm_type == MatchingAlgorithmType::Hungarian 
+            && !combo.batch_matching_enabled {
+            return false;
+        }
+        true
+    }
+
     /// Generate all parameter sets using grid search (Cartesian product).
     ///
     /// Each combination of specified parameters will be generated.
     /// Parameters not specified will use values from the base configuration.
+    /// Invalid combinations (e.g., Hungarian matching without batch matching) are filtered out.
     pub fn generate(&self) -> Vec<ParameterSet> {
         // Collect all parameter variations with defaults
         let variations = ParameterVariations::from_space(self);
         
-        // Generate Cartesian product using iterator approach
-        variations.generate_combinations()
+        // Generate Cartesian product using nested loops (avoids stack overflow)
+        let combinations: Vec<_> = variations.generate_combinations()
+            .into_iter()
+            .filter(|combo| Self::is_valid_combination(combo))
+            .collect();
+        
+        combinations.into_iter()
             .enumerate()
             .map(|(experiment_id, combo)| {
                 let mut params = self.base.clone();
@@ -379,10 +552,16 @@ impl ParameterSpace {
                     per_km_rate: combo.per_km_rate,
                     commission_rate: combo.commission_rate,
                     surge_enabled: combo.surge_enabled,
-                    surge_radius_k: self.base.pricing_config.as_ref().map(|p| p.surge_radius_k).unwrap_or(1),
+                    surge_radius_k: combo.surge_radius_k,
                     surge_max_multiplier: combo.surge_max_multiplier,
                 };
                 params.pricing_config = Some(pricing_config);
+
+                // Set matching algorithm parameters
+                params.matching_algorithm_type = Some(combo.matching_algorithm_type);
+                params.batch_matching_enabled = Some(combo.batch_matching_enabled);
+                params.batch_interval_secs = Some(combo.batch_interval_secs);
+                params.eta_weight = Some(combo.eta_weight);
 
                 let seed = (experiment_id as u64).wrapping_mul(0x9e3779b9);
 
@@ -441,6 +620,12 @@ impl ParameterSpace {
                 self.base.pricing_config.as_ref().map(|p| p.surge_enabled).unwrap_or(false)
             };
 
+            let surge_radius_k = if !self.surge_radius_k.is_empty() {
+                self.surge_radius_k[rng.gen_range(0..self.surge_radius_k.len())]
+            } else {
+                self.base.pricing_config.as_ref().map(|p| p.surge_radius_k).unwrap_or(1)
+            };
+
             let surge_max_multiplier = if !self.surge_max_multipliers.is_empty() {
                 self.surge_max_multipliers[rng.gen_range(0..self.surge_max_multipliers.len())]
             } else {
@@ -484,15 +669,47 @@ impl ParameterSpace {
                 params.simulation_end_time_ms = Some(end_time_ms);
             }
 
+            // Sample matching algorithm parameters
+            params.matching_algorithm_type = if !self.matching_algorithm_types.is_empty() {
+                Some(self.matching_algorithm_types[rng.gen_range(0..self.matching_algorithm_types.len())])
+            } else {
+                self.base.matching_algorithm_type.or(Some(MatchingAlgorithmType::Hungarian))
+            };
+
+            params.batch_matching_enabled = if !self.batch_matching_enabled.is_empty() {
+                Some(self.batch_matching_enabled[rng.gen_range(0..self.batch_matching_enabled.len())])
+            } else {
+                self.base.batch_matching_enabled.or(Some(true))
+            };
+
+            params.batch_interval_secs = if !self.batch_interval_secs.is_empty() {
+                Some(self.batch_interval_secs[rng.gen_range(0..self.batch_interval_secs.len())])
+            } else {
+                self.base.batch_interval_secs.or(Some(5))
+            };
+
+            params.eta_weight = if !self.eta_weights.is_empty() {
+                Some(self.eta_weights[rng.gen_range(0..self.eta_weights.len())])
+            } else {
+                self.base.eta_weight.or(Some(sim_core::matching::DEFAULT_ETA_WEIGHT))
+            };
+
             let pricing_config = PricingConfig {
                 base_fare,
                 per_km_rate,
                 commission_rate,
                 surge_enabled,
-                surge_radius_k: self.base.pricing_config.as_ref().map(|p| p.surge_radius_k).unwrap_or(1),
+                surge_radius_k,
                 surge_max_multiplier,
             };
             params.pricing_config = Some(pricing_config);
+
+            // Validate combination: Hungarian matching requires batch matching to be enabled
+            if params.matching_algorithm_type == Some(MatchingAlgorithmType::Hungarian)
+                && params.batch_matching_enabled == Some(false) {
+                // Skip invalid combination: Hungarian requires batch matching
+                continue;
+            }
 
             // Create a hash of the parameter combination to avoid duplicates
             let param_hash = format!("{:?}", params);
@@ -559,16 +776,62 @@ mod tests {
         let sets = space.generate();
         assert_eq!(sets.len(), 4); // 2 * 2 = 4 combinations
         
-        // Verify epoch_ms is set correctly
-        assert_eq!(sets[0].scenario_params().epoch_ms, Some(1700000000000));
-        assert_eq!(sets[1].scenario_params().epoch_ms, Some(1700000000000));
-        assert_eq!(sets[2].scenario_params().epoch_ms, Some(1700086400000));
-        assert_eq!(sets[3].scenario_params().epoch_ms, Some(1700086400000));
+        // Verify all combinations exist (order-independent check)
+        let epoch1 = Some(1700000000000);
+        let epoch2 = Some(1700086400000);
+        let mut found_epoch1_dur4 = false;
+        let mut found_epoch1_dur8 = false;
+        let mut found_epoch2_dur4 = false;
+        let mut found_epoch2_dur8 = false;
         
-        // Verify simulation_end_time_ms is set based on duration
-        // Each set should have end_time = request_window_ms + duration_hours * 3600000
         let request_window = sets[0].scenario_params().request_window_ms;
-        assert_eq!(sets[0].scenario_params().simulation_end_time_ms, Some(request_window + 4 * 60 * 60 * 1000));
-        assert_eq!(sets[1].scenario_params().simulation_end_time_ms, Some(request_window + 8 * 60 * 60 * 1000));
+        
+        for set in &sets {
+            let params = set.scenario_params();
+            let duration_hours = if let Some(end_time) = params.simulation_end_time_ms {
+                Some((end_time - request_window) / (60 * 60 * 1000))
+            } else {
+                None
+            };
+            
+            match (params.epoch_ms, duration_hours) {
+                (e, Some(4)) if e == epoch1 => found_epoch1_dur4 = true,
+                (e, Some(8)) if e == epoch1 => found_epoch1_dur8 = true,
+                (e, Some(4)) if e == epoch2 => found_epoch2_dur4 = true,
+                (e, Some(8)) if e == epoch2 => found_epoch2_dur8 = true,
+                _ => {}
+            }
+            
+            // Verify simulation_end_time_ms is set correctly
+            if let Some(dur) = duration_hours {
+                let expected_end = request_window + dur * 60 * 60 * 1000;
+                assert_eq!(params.simulation_end_time_ms, Some(expected_end));
+            }
+        }
+        
+        assert!(found_epoch1_dur4, "Missing combination: epoch1 + duration 4");
+        assert!(found_epoch1_dur8, "Missing combination: epoch1 + duration 8");
+        assert!(found_epoch2_dur4, "Missing combination: epoch2 + duration 4");
+        assert!(found_epoch2_dur8, "Missing combination: epoch2 + duration 8");
+    }
+
+    #[test]
+    fn test_invalid_combinations_filtered() {
+        // Test that Hungarian matching without batch matching is filtered out
+        let space = ParameterSpace::grid()
+            .matching_algorithm_type(vec![MatchingAlgorithmType::Simple, MatchingAlgorithmType::Hungarian])
+            .batch_matching_enabled(vec![false, true]);
+        
+        let sets = space.generate();
+        // Should have: Simple+false, Simple+true, Hungarian+true (Hungarian+false filtered out)
+        assert_eq!(sets.len(), 3);
+        
+        // Verify no Hungarian+false combinations exist
+        for set in &sets {
+            if set.params.matching_algorithm_type == Some(MatchingAlgorithmType::Hungarian) {
+                assert_eq!(set.params.batch_matching_enabled, Some(true), 
+                    "Hungarian matching must have batch matching enabled");
+            }
+        }
     }
 }

@@ -1,34 +1,34 @@
 //! Example: Parameter sweep for pricing and supply/demand analysis.
 //!
 //! This example demonstrates how to:
-//! 1. Define a parameter space (grid search)
+//! 1. Select a pre-defined parameter space
 //! 2. Run multiple simulations in parallel
 //! 3. Calculate health scores
 //! 4. Find optimal parameter combinations
 //! 5. Export results to Parquet/JSON
+//!
+//! To use a different parameter space, change the function call in main().
 
+use sim_core::scenario::MatchingAlgorithmType;
 use sim_experiments::{
     export_to_json, export_to_parquet, find_best_parameters, find_best_result_index,
-    HealthWeights, ParameterSpace, run_parallel_experiments,
+    HealthWeights, run_parallel_experiments,
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Starting parameter sweep experiment...");
 
-    // Define parameter space: explore commission rates and supply/demand balance
-    // You can also vary simulation start time and duration
-    let space = ParameterSpace::grid()
-        .commission_rate(vec![0.0, 0.1, 0.2, 0.3]) // 0%, 10%, 20%, 30% commission
-        .num_drivers(vec![50, 100, 150])           // Low, medium, high supply
-        .num_riders(vec![300, 500, 700])           // Low, medium, high demand
-        // Optional: vary simulation start time (epoch_ms) and duration
-        // .epoch_ms(vec![Some(1700000000000), Some(1700086400000)]) // Different start times
-        // .simulation_duration_hours(vec![Some(4), Some(8), Some(12)]); // Different durations
-        ;
+    // Select which parameter space to use:
+    // - comprehensive_space(): Full exploration of all dimensions
+    // - pricing_focused_space(): Pricing analysis with fixed supply/demand
+    // - matching_focused_space(): Matching algorithm comparison
+    // - supply_demand_space(): Supply/demand analysis
+    // - minimal_space(): Quick testing
+    let space = sim_experiments::parameter_spaces::pricing_focused_space();
 
     println!("Generating parameter sets...");
     let parameter_sets = space.generate();
-    println!("Generated {} parameter combinations", parameter_sets.len());
+    println!("Generated {} parameter combinations (invalid combinations filtered out)", parameter_sets.len());
 
     // Run experiments in parallel (uses all available CPU cores by default)
     println!("Running simulations in parallel...");
@@ -61,6 +61,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("Number of drivers: {}", best_params.params.num_drivers);
         println!("Number of riders: {}", best_params.params.num_riders);
         println!("Match radius: {}", best_params.params.match_radius);
+        if let Some(alg_type) = &best_params.params.matching_algorithm_type {
+            let alg_name = match alg_type {
+                MatchingAlgorithmType::Simple => "Simple",
+                MatchingAlgorithmType::CostBased => "Cost-based",
+                MatchingAlgorithmType::Hungarian => "Hungarian",
+            };
+            println!("Matching algorithm: {}", alg_name);
+        }
+        if let Some(batch_enabled) = best_params.params.batch_matching_enabled {
+            println!("Batch matching enabled: {}", batch_enabled);
+        }
+        if let Some(batch_interval) = best_params.params.batch_interval_secs {
+            println!("Batch interval: {}s", batch_interval);
+        }
+        if let Some(eta_weight) = best_params.params.eta_weight {
+            println!("ETA weight: {:.2}", eta_weight);
+        }
     }
 
     // Export results

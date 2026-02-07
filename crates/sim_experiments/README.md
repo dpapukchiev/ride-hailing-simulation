@@ -26,13 +26,17 @@ sim_experiments = { path = "../sim_experiments" }
 ## Quick Start
 
 ```rust
-use sim_experiments::{ParameterSpace, run_parallel_experiments, HealthWeights, find_best_result_index};
+use sim_experiments::{run_parallel_experiments, HealthWeights, find_best_result_index};
+use sim_experiments::parameter_spaces;
 
-// Define parameter space (grid search)
-let space = ParameterSpace::grid()
-    .commission_rate(vec![0.0, 0.1, 0.2, 0.3])
-    .num_drivers(vec![50, 100, 150])
-    .num_riders(vec![300, 500, 700]);
+// Use a pre-defined parameter space
+let space = parameter_spaces::pricing_focused_space();
+
+// Or define your own parameter space
+// let space = ParameterSpace::grid()
+//     .commission_rate(vec![0.0, 0.1, 0.2, 0.3])
+//     .num_drivers(vec![50, 100, 150])
+//     .num_riders(vec![300, 500, 700]);
 
 // Generate parameter sets
 let parameter_sets = space.generate();
@@ -60,7 +64,12 @@ let space = ParameterSpace::grid()
     .num_riders(vec![300, 500, 700])
     // Optional: vary simulation start time and duration
     .epoch_ms(vec![Some(1700000000000), Some(1700086400000)]) // Unix timestamp in ms
-    .simulation_duration_hours(vec![Some(4), Some(8), Some(12)]); // Duration in hours
+    .simulation_duration_hours(vec![Some(4), Some(8), Some(12)]) // Duration in hours
+    // Optional: vary matching configuration
+    .matching_algorithm_type(vec![MatchingAlgorithmType::Simple, MatchingAlgorithmType::Hungarian])
+    .batch_matching_enabled(vec![false, true])
+    .batch_interval_secs(vec![5, 10])
+    .eta_weight(vec![0.0, 0.1, 0.5]); // ETA weight for cost-based/Hungarian algorithms
 
 let parameter_sets = space.generate(); // Cartesian product
 
@@ -76,15 +85,19 @@ let parameter_sets = space.sample_random(100, 42); // 100 random samples
 
 The `ParameterSpace` supports varying the following parameters:
 
-- **Pricing**: `commission_rate()`, `base_fare()`, `per_km_rate()`, `surge_enabled()`, `surge_max_multiplier()`
+- **Pricing**: `commission_rate()`, `base_fare()`, `per_km_rate()`, `surge_enabled()`, `surge_radius_k()`, `surge_max_multiplier()`
 - **Supply/Demand**: `num_drivers()`, `num_riders()`, `match_radius()`
+- **Matching Configuration**: `matching_algorithm_type()` (Simple, CostBased, Hungarian), `batch_matching_enabled()`, `batch_interval_secs()`, `eta_weight()` (for cost-based and Hungarian algorithms)
 - **Simulation Timing**: `epoch_ms()` (start datetime as Unix timestamp in milliseconds), `simulation_duration_hours()` (simulation duration in hours)
 
 When `simulation_duration_hours` is specified, the simulation end time is automatically calculated as `request_window_ms + duration_hours * 3600000`. If not specified, the runner will use a default buffer.
 
-**Example with timing parameters**:
+**Note**: Invalid parameter combinations are automatically filtered out. For example, Hungarian matching requires batch matching to be enabled, so combinations with Hungarian matching and batch matching disabled are excluded from the generated parameter sets.
+
+**Example with timing and matching parameters**:
 ```rust
 use sim_experiments::ParameterSpace;
+use sim_core::scenario::MatchingAlgorithmType;
 
 // Convert datetime to epoch_ms (you can use sim_ui::datetime_to_unix_ms or provide directly)
 let space = ParameterSpace::grid()
@@ -92,7 +105,10 @@ let space = ParameterSpace::grid()
         Some(1700000000000),  // 2023-11-15 00:00:00 UTC
         Some(1700086400000),  // 2023-11-16 00:00:00 UTC
     ])
-    .simulation_duration_hours(vec![Some(4), Some(8)]); // 4 or 8 hour simulations
+    .simulation_duration_hours(vec![Some(4), Some(8)]) // 4 or 8 hour simulations
+    .matching_algorithm_type(vec![MatchingAlgorithmType::CostBased, MatchingAlgorithmType::Hungarian])
+    .batch_matching_enabled(vec![true]) // Required for Hungarian
+    .eta_weight(vec![0.1, 0.5]); // ETA weight variations
 ```
 
 ### Running Experiments
@@ -140,10 +156,36 @@ export_to_json(&results, "results.json")?;
 export_to_parquet(&results, "results.parquet")?;
 ```
 
+## Pre-defined Parameter Spaces
+
+The `parameter_spaces` module provides ready-to-use parameter space configurations for common experiment types:
+
+```rust
+use sim_experiments::parameter_spaces;
+
+// Comprehensive exploration of all dimensions
+let space = parameter_spaces::comprehensive_space();
+
+// Focused pricing analysis
+let space = parameter_spaces::pricing_focused_space();
+
+// Matching algorithm comparison
+let space = parameter_spaces::matching_focused_space();
+
+// Supply/demand analysis
+let space = parameter_spaces::supply_demand_space();
+
+// Quick testing
+let space = parameter_spaces::minimal_space();
+```
+
+Each function returns a `ParameterSpace` configured for that experiment type. You can still customize it further using the builder methods if needed.
+
 ## Examples
 
 See `examples/parameter_sweep.rs` for a complete example demonstrating:
 
+- Using pre-defined parameter spaces
 - Parameter space definition
 - Parallel execution
 - Health score calculation

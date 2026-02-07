@@ -139,6 +139,7 @@ crates/
     src/
       lib.rs
       parameters.rs
+      parameter_spaces.rs
       runner.rs
       metrics.rs
       health.rs
@@ -688,7 +689,13 @@ All per-system unit tests emulate the runner by popping one event, inserting
 
 Parallel experimentation framework for parameter sweeps and marketplace health analysis.
 
-- **`ParameterSpace`**: Defines parameter spaces for exploration (grid search, random sampling). Supports varying pricing parameters (commission rate, base fare, per-km rate, surge settings), supply/demand (num_riders, num_drivers), and other configuration parameters.
+- **`ParameterSpace`**: Defines parameter spaces for exploration (grid search, random sampling). Supports varying pricing parameters (commission rate, base fare, per-km rate, surge settings including `surge_radius_k`), supply/demand (num_riders, num_drivers), matching configuration (matching algorithm type, batch matching enabled/interval, ETA weight), simulation timing (epoch_ms, simulation_duration_hours), and other configuration parameters. Invalid combinations (e.g., Hungarian matching without batch matching) are automatically filtered out.
+- **`parameter_spaces`**: Pre-defined parameter space configurations for common experiment types:
+  - `comprehensive_space()`: Explores all major dimensions (pricing, supply/demand, matching algorithms, timing)
+  - `pricing_focused_space()`: Pricing analysis with fixed supply/demand and matching configuration
+  - `matching_focused_space()`: Matching algorithm comparison with fixed pricing
+  - `supply_demand_space()`: Supply/demand analysis with fixed pricing and matching
+  - `minimal_space()`: Quick testing with minimal parameter variations
 - **`ParameterSet`**: Wraps `ScenarioParams` with experiment metadata (experiment ID, run ID, seed) for tracking and reproducibility.
 - **`run_parallel_experiments`**: Executes multiple simulations in parallel using rayon. Each simulation runs independently with no shared state. Defaults to using all available CPU cores but allows specifying thread count.
 - **`SimulationResult`**: Aggregated metrics extracted from completed simulations:
@@ -703,7 +710,7 @@ Parallel experimentation framework for parameter sweeps and marketplace health a
 
 **Dependencies**: `sim_core`, `rayon` (parallel execution), `serde`/`serde_json` (serialization), `arrow`/`parquet` (export).
 
-**Usage**: Define parameter space, generate parameter sets, run parallel experiments, calculate health scores, export results. See `examples/parameter_sweep.rs` for complete example.
+**Usage**: Define parameter space (or use pre-defined spaces from `parameter_spaces`), generate parameter sets, run parallel experiments, calculate health scores, export results. See `examples/parameter_sweep.rs` for complete example using pre-defined parameter spaces.
 
 ## Known Gaps (Not Implemented Yet)
 

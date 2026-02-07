@@ -36,6 +36,14 @@ const DRIVER_SUPPLY_AVERAGE_MULTIPLIER: f64 = 1.2;
 
 // Note: DEFAULT_ETA_WEIGHT is defined in matching/cost_based.rs to keep it with the algorithm
 
+/// Type of matching algorithm to use.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MatchingAlgorithmType {
+    Simple,
+    CostBased,
+    Hungarian,
+}
+
 /// Max H3 grid distance (cells) for matching rider to driver. 0 = same cell only.
 #[derive(Debug, Clone, Copy, Default, Resource)]
 pub struct MatchRadius(pub u32);
@@ -182,6 +190,14 @@ pub struct ScenarioParams {
     pub driver_decision_config: Option<DriverDecisionConfig>,
     /// Simulation end time in ms. When set, the runner stops when the next event is at or after this time.
     pub simulation_end_time_ms: Option<u64>,
+    /// Matching algorithm type. If None, defaults to Hungarian.
+    pub matching_algorithm_type: Option<MatchingAlgorithmType>,
+    /// Whether batch matching is enabled. If None, defaults to true.
+    pub batch_matching_enabled: Option<bool>,
+    /// Batch matching interval in seconds. If None, defaults to 5.
+    pub batch_interval_secs: Option<u64>,
+    /// ETA weight for cost-based and Hungarian matching algorithms. If None, uses DEFAULT_ETA_WEIGHT.
+    pub eta_weight: Option<f64>,
 }
 
 impl Default for ScenarioParams {
@@ -206,6 +222,10 @@ impl Default for ScenarioParams {
             rider_quote_config: None,
             driver_decision_config: None,
             simulation_end_time_ms: None,
+            matching_algorithm_type: None,
+            batch_matching_enabled: None,
+            batch_interval_secs: None,
+            eta_weight: None,
         }
     }
 }
@@ -481,7 +501,10 @@ pub fn build_scenario(world: &mut World, params: ScenarioParams) {
     world.insert_resource(SimSnapshotConfig::default());
     world.insert_resource(SimSnapshots::default());
     world.insert_resource(MatchRadius(params.match_radius));
-    world.insert_resource(BatchMatchingConfig::default());
+    world.insert_resource(BatchMatchingConfig {
+        enabled: params.batch_matching_enabled.unwrap_or(true),
+        interval_secs: params.batch_interval_secs.unwrap_or(5),
+    });
     if let Some(end_ms) = params.simulation_end_time_ms {
         world.insert_resource(SimulationEndTimeMs(end_ms));
     }
@@ -504,8 +527,14 @@ pub fn build_scenario(world: &mut World, params: ScenarioParams) {
         ..Default::default()
     }));
     world.insert_resource(SpeedModel::new(params.seed.map(|seed| seed ^ 0x5eed_cafe)));
-    // Default to Hungarian (batch) matching with default ETA weight
-    world.insert_resource(create_hungarian_matching(crate::matching::DEFAULT_ETA_WEIGHT));
+    // Set matching algorithm based on params
+    let eta_weight = params.eta_weight.unwrap_or(crate::matching::DEFAULT_ETA_WEIGHT);
+    let algorithm = match params.matching_algorithm_type.unwrap_or(MatchingAlgorithmType::Hungarian) {
+        MatchingAlgorithmType::Simple => create_simple_matching(),
+        MatchingAlgorithmType::CostBased => create_cost_based_matching(eta_weight),
+        MatchingAlgorithmType::Hungarian => create_hungarian_matching(eta_weight),
+    };
+    world.insert_resource(algorithm);
     // Insert pricing config (use provided or default)
     world.insert_resource(params.pricing_config.unwrap_or_default());
 
