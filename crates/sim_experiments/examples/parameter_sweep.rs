@@ -11,7 +11,9 @@
 
 use sim_core::scenario::MatchingAlgorithmType;
 use sim_experiments::{
-    export_to_json, export_to_parquet, find_best_parameters, find_best_result_index,
+    export_to_csv, 
+    // export_to_json, export_to_parquet, 
+    find_best_parameters, find_best_result_index,
     HealthWeights, run_parallel_experiments,
 };
 
@@ -24,7 +26,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // - matching_focused_space(): Matching algorithm comparison
     // - supply_demand_space(): Supply/demand analysis
     // - minimal_space(): Quick testing
-    let space = sim_experiments::parameter_spaces::pricing_focused_space();
+    let space = sim_experiments::parameter_spaces::surge_pricing_space();
 
     println!("Generating parameter sets...");
     let parameter_sets = space.generate();
@@ -82,11 +84,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Export results
     println!("\nExporting results...");
-    export_to_json(&results, "experiment_results.json")?;
-    println!("Exported to experiment_results.json");
+    // export_to_json(&results, "experiment_results.json")?;
+    // println!("Exported to experiment_results.json");
 
-    export_to_parquet(&results, "experiment_results.parquet")?;
-    println!("Exported to experiment_results.parquet");
+    // export_to_parquet(&results, "experiment_results.parquet")?;
+    // println!("Exported to experiment_results.parquet");
+
+    export_to_csv(&results, &parameter_sets, "experiment_results.csv")?;
+    println!("Exported to experiment_results.csv");
 
     println!("\nExperiment complete!");
 

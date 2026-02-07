@@ -37,108 +37,109 @@ fn datetime_to_unix_ms(year: i32, month: u32, day: u32, hour: u32, minute: u32) 
     total_secs * 1000 // Convert to milliseconds
 }
 
-/// Comprehensive parameter space exploring all major dimensions.
-/// 
-/// Explores pricing, supply/demand, matching algorithms, and timing.
 pub fn comprehensive_space() -> ParameterSpace {
     ParameterSpace::grid()
-        .commission_rate(vec![0.0, 0.1, 0.2, 0.3])           // 0%, 10%, 20%, 30% commission
-        .base_fare(vec![2.0, 2.5, 3.0])                      // Base fare variations
-        .per_km_rate(vec![1.0, 1.5, 2.0])                    // Per-km rate variations
-        .surge_enabled(vec![false, true])                     // Surge pricing on/off
-        .surge_max_multiplier(vec![1.5, 2.0, 2.5])           // Maximum surge multiplier
-        .num_drivers(vec![50, 100, 150])                      // Low, medium, high supply
-        .num_riders(vec![300, 500, 700])                      // Low, medium, high demand
-        .match_radius(vec![5, 10, 15])                        // Match radius in km
+        .commission_rate(vec![0.0, 0.1, 0.2, 0.3])
+        .base_fare(vec![2.0, 2.5, 3.0])
+        .per_km_rate(vec![1.0, 1.5, 2.0])
+        .surge_enabled(vec![false, true])
+        .surge_max_multiplier(vec![1.5, 2.0, 2.5])
+        .num_drivers(vec![50, 100, 150])
+        .num_riders(vec![300, 500, 700])
+        .match_radius(vec![5, 10, 15])
         .epoch_ms(vec![
-            Some(datetime_to_unix_ms(2026, 2, 7, 8, 0)),   // 2026-02-07 08:00 UTC (morning rush)
-            Some(datetime_to_unix_ms(2026, 2, 7, 17, 0)),  // 2026-02-07 17:00 UTC (evening rush)
+            Some(datetime_to_unix_ms(2026, 2, 7, 8, 0)),
+            Some(datetime_to_unix_ms(2026, 2, 7, 17, 0)),
         ])
-        .simulation_duration_hours(vec![Some(4), Some(8)])    // Different durations
+        .simulation_duration_hours(vec![Some(4), Some(8)])
         .matching_algorithm_type(vec![
             MatchingAlgorithmType::Simple, 
             MatchingAlgorithmType::CostBased, 
             MatchingAlgorithmType::Hungarian
-        ])                                                       // Matching algorithms
-        .batch_matching_enabled(vec![false, true])              // Batch matching on/off
-        .batch_interval_secs(vec![5, 10, 20])                   // Batch interval variations
-        .eta_weight(vec![0.0, 0.1, 0.5, 1.0])                   // ETA weight variations
+        ])
+        .batch_matching_enabled(vec![false, true])
+        .batch_interval_secs(vec![5, 10, 20])
+        .eta_weight(vec![0.0, 0.1, 0.5, 1.0])
 }
 
-/// Focused parameter space for pricing analysis.
-/// 
-/// Explores commission rates and pricing parameters with fixed supply/demand.
 pub fn pricing_focused_space() -> ParameterSpace {
     ParameterSpace::grid()
-        .commission_rate(vec![0.0, 0.1, 0.2, 0.3])           // 0%, 10%, 20%, 30% commission
-        .base_fare(vec![2.0, 2.5, 3.0])                       // Base fare variations
-        .per_km_rate(vec![1.0, 1.5, 2.0])                     // Per-km rate variations
-        .surge_enabled(vec![false, true])                     // Surge pricing on/off
-        .surge_max_multiplier(vec![1.5, 2.0, 2.5])            // Maximum surge multiplier
-        .surge_radius_k(vec![1, 2, 3, 4])                        // Surge radius variations
-        .num_drivers(vec![100, 200, 300])                                // Fixed supply
-        .num_riders(vec![500, 1000, 1500])                                 // Fixed demand
-        .match_radius(vec![10])                                // Fixed match radius
-        .matching_algorithm_type(vec![MatchingAlgorithmType::Hungarian]) // Fixed algorithm
-        .batch_matching_enabled(vec![true])                    // Batch matching enabled
-        .batch_interval_secs(vec![5, 15, 20, 30])    // Fixed batch interval
-        .eta_weight(vec![0.1])                                 // Fixed ETA weight
+        .commission_rate(vec![0.1, 0.2, 0.3])
+        .base_fare(vec![2.0, 2.5, 3.0])
+        .per_km_rate(vec![1.0, 1.5, 2.0])
+        .surge_enabled(vec![false, true])
+        .surge_max_multiplier(vec![1.5, 2.0, 2.5])
+        .surge_radius_k(vec![1, 2, 4])
+        .num_drivers(vec![100, 200, 300])
+        .num_riders(vec![500, 1000, 1500])
+        .match_radius(vec![10])
+        .matching_algorithm_type(vec![MatchingAlgorithmType::Hungarian])
+        .batch_matching_enabled(vec![true])
+        .batch_interval_secs(vec![10, 20, 30])
+        .eta_weight(vec![0.1])
 }
 
-/// Focused parameter space for matching algorithm comparison.
-/// 
-/// Explores different matching algorithms and batch configurations
-/// with fixed pricing.
+pub fn surge_pricing_space() -> ParameterSpace {
+    ParameterSpace::grid()
+        .commission_rate(vec![0.15, 0.2])
+        .base_fare(vec![2.5])
+        .per_km_rate(vec![1.2, 1.5])
+        .surge_enabled(vec![true])
+        .surge_max_multiplier(vec![1.5, 2.0, 2.5, 3.0])
+        .surge_radius_k(vec![1, 2, 3, 4, 5])
+        .num_drivers(vec![100, 125, 150, 250, 300])
+        .num_riders(vec![500, 600, 700])
+        .match_radius(vec![10])
+        .matching_algorithm_type(vec![MatchingAlgorithmType::Hungarian])
+        .batch_matching_enabled(vec![true])
+        .batch_interval_secs(vec![10 ,20, 30])
+        .eta_weight(vec![0.1])
+}
+
 pub fn matching_focused_space() -> ParameterSpace {
     ParameterSpace::grid()
-        .commission_rate(vec![0.2])                           // Fixed commission
-        .base_fare(vec![2.5])                                  // Fixed base fare
-        .per_km_rate(vec![1.5])                                // Fixed per-km rate
-        .surge_enabled(vec![false])                            // No surge
-        .surge_max_multiplier(vec![2.0])                       // Fixed multiplier
-        .num_drivers(vec![100])                                // Fixed supply
-        .num_riders(vec![500])                                 // Fixed demand
-        .match_radius(vec![10])                                // Fixed match radius
+        .commission_rate(vec![0.2])
+        .base_fare(vec![2.5])
+        .per_km_rate(vec![1.5])
+        .surge_enabled(vec![false])
+        .surge_max_multiplier(vec![2.0])
+        .num_drivers(vec![100])
+        .num_riders(vec![500])
+        .match_radius(vec![10])
         .matching_algorithm_type(vec![
             MatchingAlgorithmType::Simple, 
             MatchingAlgorithmType::CostBased, 
             MatchingAlgorithmType::Hungarian
-        ])                                                       // Matching algorithms
-        .batch_matching_enabled(vec![false, true])              // Batch matching on/off
-        .batch_interval_secs(vec![5, 10, 20])                   // Batch interval variations
-        .eta_weight(vec![0.0, 0.1, 0.5, 1.0])                   // ETA weight variations
+        ])
+        .batch_matching_enabled(vec![false, true])
+        .batch_interval_secs(vec![5, 10, 20])
+        .eta_weight(vec![0.0, 0.1, 0.5, 1.0])
 }
 
-/// Focused parameter space for supply/demand analysis.
-/// 
-/// Explores different supply and demand levels with fixed pricing and matching.
 pub fn supply_demand_space() -> ParameterSpace {
     ParameterSpace::grid()
-        .commission_rate(vec![0.2])                            // Fixed commission
-        .base_fare(vec![2.5])                                  // Fixed base fare
-        .per_km_rate(vec![1.5])                                // Fixed per-km rate
-        .surge_enabled(vec![false])                            // No surge
-        .surge_max_multiplier(vec![2.0])                       // Fixed multiplier
-        .num_drivers(vec![50, 100, 150])                       // Low, medium, high supply
-        .num_riders(vec![300, 500, 700])                       // Low, medium, high demand
-        .match_radius(vec![10])                                // Fixed match radius
-        .matching_algorithm_type(vec![MatchingAlgorithmType::Hungarian]) // Fixed algorithm
-        .batch_matching_enabled(vec![true])                    // Batch matching enabled
-        .batch_interval_secs(vec![5])                          // Fixed batch interval
-        .eta_weight(vec![0.1])                                 // Fixed ETA weight
+        .commission_rate(vec![0.2])
+        .base_fare(vec![2.5])
+        .per_km_rate(vec![1.5])
+        .surge_enabled(vec![false])
+        .surge_max_multiplier(vec![2.0])
+        .num_drivers(vec![50, 100, 150])
+        .num_riders(vec![300, 500, 700])
+        .match_radius(vec![10])
+        .matching_algorithm_type(vec![MatchingAlgorithmType::Hungarian])
+        .batch_matching_enabled(vec![true])
+        .batch_interval_secs(vec![5])
+        .eta_weight(vec![0.1])
 }
 
-/// Minimal parameter space for quick testing.
-/// 
-/// Small space for quick validation runs.
 pub fn minimal_space() -> ParameterSpace {
     ParameterSpace::grid()
-        .commission_rate(vec![0.0, 0.2])                       // Two commission rates
-        .num_drivers(vec![100])                                // Fixed supply
-        .num_riders(vec![500])                                 // Fixed demand
-        .match_radius(vec![10])                                // Fixed match radius
-        .matching_algorithm_type(vec![MatchingAlgorithmType::Hungarian]) // Fixed algorithm
-        .batch_matching_enabled(vec![true])                    // Batch matching enabled
-        .batch_interval_secs(vec![5])                          // Fixed batch interval
-        .eta_weight(vec![0.1])                                 // Fixed ETA weight
+        .commission_rate(vec![0.0, 0.2])
+        .num_drivers(vec![100])
+        .num_riders(vec![500])
+        .match_radius(vec![10])
+        .matching_algorithm_type(vec![MatchingAlgorithmType::Hungarian])
+        .batch_matching_enabled(vec![true])
+        .batch_interval_secs(vec![5])
+        .eta_weight(vec![0.1])
 }

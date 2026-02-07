@@ -48,7 +48,7 @@ pub mod parameter_spaces;
 pub mod parameters;
 pub mod runner;
 
-pub use export::{export_to_json, export_to_parquet, find_best_parameters, find_best_result_index};
+pub use export::{export_to_csv, export_to_json, export_to_parquet, find_best_parameters, find_best_result_index};
 pub use health::{calculate_health_scores, HealthWeights};
 pub use metrics::SimulationResult;
 pub use parameters::{ParameterSet, ParameterSpace};

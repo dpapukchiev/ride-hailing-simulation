@@ -12,6 +12,7 @@ use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use parquet::arrow::ArrowWriter;
 use parquet::file::properties::WriterProperties;
+use sim_core::scenario::MatchingAlgorithmType;
 
 use crate::health::{calculate_health_scores, HealthWeights};
 use crate::metrics::SimulationResult;
@@ -123,6 +124,142 @@ pub fn export_to_parquet(results: &[SimulationResult], path: impl AsRef<Path>) -
 pub fn export_to_json(results: &[SimulationResult], path: impl AsRef<Path>) -> Result<(), Box<dyn std::error::Error>> {
     let file = File::create(path)?;
     serde_json::to_writer_pretty(file, results)?;
+    Ok(())
+}
+
+/// Export simulation results with parameters to CSV format.
+///
+/// Creates a CSV file with columns for all parameters and all metrics.
+/// Parameters and results are paired by index (results[i] corresponds to parameter_sets[i]).
+///
+/// # Arguments
+///
+/// * `results` - Vector of simulation results to export
+/// * `parameter_sets` - Vector of parameter sets (must match results in order)
+/// * `path` - Path to output CSV file
+///
+/// # Errors
+///
+/// Returns an error if file creation or CSV writing fails, or if results and parameter_sets lengths don't match.
+pub fn export_to_csv(
+    results: &[SimulationResult],
+    parameter_sets: &[ParameterSet],
+    path: impl AsRef<Path>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if results.is_empty() {
+        return Err("No results to export".into());
+    }
+    if results.len() != parameter_sets.len() {
+        return Err(format!(
+            "Results length ({}) doesn't match parameter_sets length ({})",
+            results.len(),
+            parameter_sets.len()
+        ).into());
+    }
+
+    let file = File::create(path)?;
+    let mut wtr = csv::Writer::from_writer(file);
+
+    // Write header
+    wtr.write_record(&[
+        // Parameter metadata
+        "experiment_id",
+        "run_id",
+        "seed",
+        // Pricing parameters
+        "commission_rate",
+        "base_fare",
+        "per_km_rate",
+        "surge_enabled",
+        "surge_radius_k",
+        "surge_max_multiplier",
+        // Scenario parameters
+        "num_riders",
+        "num_drivers",
+        "match_radius",
+        "epoch_ms",
+        "matching_algorithm_type",
+        "batch_matching_enabled",
+        "batch_interval_secs",
+        "eta_weight",
+        // Results
+        "total_riders",
+        "total_drivers",
+        "completed_riders",
+        "abandoned_quote_riders",
+        "cancelled_riders",
+        "conversion_rate",
+        "platform_revenue",
+        "driver_payouts",
+        "total_fares_collected",
+        "avg_time_to_match_ms",
+        "median_time_to_match_ms",
+        "p90_time_to_match_ms",
+        "avg_time_to_pickup_ms",
+        "median_time_to_pickup_ms",
+        "p90_time_to_pickup_ms",
+        "completed_trips",
+        "riders_abandoned_price",
+        "riders_abandoned_eta",
+        "riders_abandoned_stochastic",
+    ])?;
+
+    // Write data rows
+    for (result, param_set) in results.iter().zip(parameter_sets.iter()) {
+        let pricing = param_set.params.pricing_config.as_ref();
+        let matching_alg = param_set.params.matching_algorithm_type.as_ref();
+        let matching_alg_str = match matching_alg {
+            Some(MatchingAlgorithmType::Simple) => "Simple",
+            Some(MatchingAlgorithmType::CostBased) => "CostBased",
+            Some(MatchingAlgorithmType::Hungarian) => "Hungarian",
+            None => "",
+        };
+
+        wtr.write_record(&[
+            // Parameter metadata
+            &param_set.experiment_id,
+            &param_set.run_id.to_string(),
+            &param_set.seed.to_string(),
+            // Pricing parameters
+            &pricing.map(|p| p.commission_rate.to_string()).unwrap_or_default(),
+            &pricing.map(|p| p.base_fare.to_string()).unwrap_or_default(),
+            &pricing.map(|p| p.per_km_rate.to_string()).unwrap_or_default(),
+            &pricing.map(|p| p.surge_enabled.to_string()).unwrap_or_default(),
+            &pricing.map(|p| p.surge_radius_k.to_string()).unwrap_or_default(),
+            &pricing.map(|p| p.surge_max_multiplier.to_string()).unwrap_or_default(),
+            // Scenario parameters
+            &param_set.params.num_riders.to_string(),
+            &param_set.params.num_drivers.to_string(),
+            &param_set.params.match_radius.to_string(),
+            &param_set.params.epoch_ms.map(|e| e.to_string()).unwrap_or_default(),
+            matching_alg_str,
+            &param_set.params.batch_matching_enabled.map(|b| b.to_string()).unwrap_or_default(),
+            &param_set.params.batch_interval_secs.map(|i| i.to_string()).unwrap_or_default(),
+            &param_set.params.eta_weight.map(|w| w.to_string()).unwrap_or_default(),
+            // Results
+            &result.total_riders.to_string(),
+            &result.total_drivers.to_string(),
+            &result.completed_riders.to_string(),
+            &result.abandoned_quote_riders.to_string(),
+            &result.cancelled_riders.to_string(),
+            &result.conversion_rate.to_string(),
+            &result.platform_revenue.to_string(),
+            &result.driver_payouts.to_string(),
+            &result.total_fares_collected.to_string(),
+            &result.avg_time_to_match_ms.to_string(),
+            &result.median_time_to_match_ms.to_string(),
+            &result.p90_time_to_match_ms.to_string(),
+            &result.avg_time_to_pickup_ms.to_string(),
+            &result.median_time_to_pickup_ms.to_string(),
+            &result.p90_time_to_pickup_ms.to_string(),
+            &result.completed_trips.to_string(),
+            &result.riders_abandoned_price.to_string(),
+            &result.riders_abandoned_eta.to_string(),
+            &result.riders_abandoned_stochastic.to_string(),
+        ])?;
+    }
+
+    wtr.flush()?;
     Ok(())
 }
 
