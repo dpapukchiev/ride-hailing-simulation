@@ -24,7 +24,10 @@ fn main() {
     const NUM_DRIVERS: usize = 7_000;
     const SIMULATION_HOURS: u64 = 4;
 
-    println!("=== Large-Scale Scenario ({} riders, {} drivers, {}h) ===\n", NUM_RIDERS, NUM_DRIVERS, SIMULATION_HOURS);
+    println!(
+        "=== Large-Scale Scenario ({} riders, {} drivers, {}h) ===\n",
+        NUM_RIDERS, NUM_DRIVERS, SIMULATION_HOURS
+    );
 
     // --- Build phase ---
     let build_start = Instant::now();
@@ -70,24 +73,58 @@ fn main() {
 
     println!("\n--- Simulation Results ---");
     println!("Steps executed:      {}", steps);
-    println!("Simulation time:     {} s ({:.1} min)", sim_time_secs, sim_time_secs as f64 / 60.0);
+    println!(
+        "Simulation time:     {} s ({:.1} min)",
+        sim_time_secs,
+        sim_time_secs as f64 / 60.0
+    );
     println!("Wall-clock time:     {:.2}s", run_elapsed.as_secs_f64());
-    println!("Events per second:   {:.0}", steps as f64 / run_elapsed.as_secs_f64());
+    println!(
+        "Events per second:   {:.0}",
+        steps as f64 / run_elapsed.as_secs_f64()
+    );
 
     println!("\n--- Outcomes ---");
     println!("Completed trips:     {}", completed);
-    println!("Cancelled (pickup):  {}", telemetry.riders_cancelled_pickup_timeout);
-    println!("Abandoned (quote):   {}", telemetry.riders_abandoned_quote_total);
+    println!(
+        "Cancelled (pickup):  {}",
+        telemetry.riders_cancelled_pickup_timeout
+    );
+    println!(
+        "Abandoned (quote):   {}",
+        telemetry.riders_abandoned_quote_total
+    );
     println!("  - price too high:  {}", telemetry.riders_abandoned_price);
     println!("  - ETA too long:    {}", telemetry.riders_abandoned_eta);
-    println!("  - stochastic:      {}", telemetry.riders_abandoned_stochastic);
-    println!("Platform revenue:    ${:.2}", telemetry.platform_revenue_total);
-    println!("Total fares:         ${:.2}", telemetry.total_fares_collected);
+    println!(
+        "  - stochastic:      {}",
+        telemetry.riders_abandoned_stochastic
+    );
+    println!(
+        "Platform revenue:    ${:.2}",
+        telemetry.platform_revenue_total
+    );
+    println!(
+        "Total fares:         ${:.2}",
+        telemetry.total_fares_collected
+    );
 
     if completed > 0 {
-        let mut match_times: Vec<u64> = telemetry.completed_trips.iter().map(|r| r.time_to_match()).collect();
-        let mut pickup_times: Vec<u64> = telemetry.completed_trips.iter().map(|r| r.time_to_pickup()).collect();
-        let mut trip_durations: Vec<u64> = telemetry.completed_trips.iter().map(|r| r.trip_duration()).collect();
+        let mut match_times: Vec<u64> = telemetry
+            .completed_trips
+            .iter()
+            .map(|r| r.time_to_match())
+            .collect();
+        let mut pickup_times: Vec<u64> = telemetry
+            .completed_trips
+            .iter()
+            .map(|r| r.time_to_pickup())
+            .collect();
+        let mut trip_durations: Vec<u64> = telemetry
+            .completed_trips
+            .iter()
+            .map(|r| r.trip_duration())
+            .collect();
         match_times.sort_unstable();
         pickup_times.sort_unstable();
         trip_durations.sort_unstable();
@@ -98,8 +135,12 @@ fn main() {
         let avg = |v: &[u64]| v.iter().sum::<u64>() as f64 / v.len() as f64;
 
         println!("\n--- Timing Distributions (seconds) ---");
-        println!("{:20} {:>8} {:>8} {:>8} {:>8} {:>8}", "", "avg", "p50", "p90", "p99", "max");
-        println!("{:20} {:>8.1} {:>8.1} {:>8.1} {:>8.1} {:>8.1}",
+        println!(
+            "{:20} {:>8} {:>8} {:>8} {:>8} {:>8}",
+            "", "avg", "p50", "p90", "p99", "max"
+        );
+        println!(
+            "{:20} {:>8.1} {:>8.1} {:>8.1} {:>8.1} {:>8.1}",
             "Time to match",
             avg(&match_times) / 1000.0,
             p50(&match_times) as f64 / 1000.0,
@@ -107,7 +148,8 @@ fn main() {
             p99(&match_times) as f64 / 1000.0,
             *match_times.last().unwrap_or(&0) as f64 / 1000.0,
         );
-        println!("{:20} {:>8.1} {:>8.1} {:>8.1} {:>8.1} {:>8.1}",
+        println!(
+            "{:20} {:>8.1} {:>8.1} {:>8.1} {:>8.1} {:>8.1}",
             "Time to pickup",
             avg(&pickup_times) / 1000.0,
             p50(&pickup_times) as f64 / 1000.0,
@@ -115,7 +157,8 @@ fn main() {
             p99(&pickup_times) as f64 / 1000.0,
             *pickup_times.last().unwrap_or(&0) as f64 / 1000.0,
         );
-        println!("{:20} {:>8.1} {:>8.1} {:>8.1} {:>8.1} {:>8.1}",
+        println!(
+            "{:20} {:>8.1} {:>8.1} {:>8.1} {:>8.1} {:>8.1}",
             "Trip duration",
             avg(&trip_durations) / 1000.0,
             p50(&trip_durations) as f64 / 1000.0,

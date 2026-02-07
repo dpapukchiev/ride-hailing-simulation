@@ -50,7 +50,8 @@ pub fn rider_cancel_system(
     rider.matched_driver = None;
     telemetry.riders_cancelled_total = telemetry.riders_cancelled_total.saturating_add(1);
     // Track pickup timeout cancellation
-    telemetry.riders_cancelled_pickup_timeout = telemetry.riders_cancelled_pickup_timeout.saturating_add(1);
+    telemetry.riders_cancelled_pickup_timeout =
+        telemetry.riders_cancelled_pickup_timeout.saturating_add(1);
     commands.entity(rider_entity).despawn();
 }
 
@@ -74,7 +75,7 @@ mod tests {
             .into_iter()
             .find(|c| *c != cell)
             .expect("neighbor cell");
-        
+
         let rider_entity = world
             .spawn((
                 Rider {
@@ -122,9 +123,11 @@ mod tests {
             rider.matched_driver = Some(driver_entity);
         }
 
-        world
-            .resource_mut::<SimulationClock>()
-            .schedule_at_secs(1, EventKind::RiderCancel, Some(EventSubject::Rider(rider_entity)));
+        world.resource_mut::<SimulationClock>().schedule_at_secs(
+            1,
+            EventKind::RiderCancel,
+            Some(EventSubject::Rider(rider_entity)),
+        );
         let event = world
             .resource_mut::<SimulationClock>()
             .pop_next()
@@ -157,7 +160,7 @@ mod tests {
             .into_iter()
             .find(|c| *c != cell)
             .expect("neighbor cell");
-        
+
         let rider_entity = world
             .spawn((
                 Rider {
@@ -173,9 +176,11 @@ mod tests {
             ))
             .id();
 
-        world
-            .resource_mut::<SimulationClock>()
-            .schedule_at_secs(1, EventKind::RiderCancel, Some(EventSubject::Rider(rider_entity)));
+        world.resource_mut::<SimulationClock>().schedule_at_secs(
+            1,
+            EventKind::RiderCancel,
+            Some(EventSubject::Rider(rider_entity)),
+        );
         let event = world
             .resource_mut::<SimulationClock>()
             .pop_next()

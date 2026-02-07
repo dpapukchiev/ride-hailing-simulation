@@ -3,7 +3,10 @@ use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
-use crate::ecs::{Driver, DriverEarnings, DriverFatigue, DriverState, Position, Rider, RiderState, Trip, TripState};
+use crate::ecs::{
+    Driver, DriverEarnings, DriverFatigue, DriverState, Position, Rider, RiderState, Trip,
+    TripState,
+};
 use crate::scenario::{BatchMatchingConfig, DriverDecisionConfig};
 use crate::spatial::distance_km_between_cells;
 
@@ -33,7 +36,9 @@ pub fn driver_decision_system(
     let Some(EventSubject::Driver(driver_entity)) = event.0.subject else {
         return;
     };
-    let Ok((mut driver, driver_pos, driver_earnings, driver_fatigue)) = drivers.get_mut(driver_entity) else {
+    let Ok((mut driver, driver_pos, driver_earnings, driver_fatigue)) =
+        drivers.get_mut(driver_entity)
+    else {
         return;
     };
     if driver.state != DriverState::Evaluating {
@@ -57,7 +62,13 @@ pub fn driver_decision_system(
             };
             let requested_at = rider.requested_at.unwrap_or(clock.now());
             let fare = rider.accepted_fare.unwrap_or(0.0);
-            (pickup, dropoff, requested_at, rider.state == RiderState::Waiting, fare)
+            (
+                pickup,
+                dropoff,
+                requested_at,
+                rider.state == RiderState::Waiting,
+                fare,
+            )
         }
         Err(_) => {
             driver.state = DriverState::Idle;
@@ -76,15 +87,19 @@ pub fn driver_decision_system(
 
     // Calculate logit score based on trip and driver characteristics
     let config = driver_config.as_deref().copied().unwrap_or_default();
-    
+
     let pickup_distance_km = distance_km_between_cells(driver_pos.0, pickup);
     let trip_distance_km = distance_km_between_cells(pickup, dropoff);
-    
+
     // Get driver state metrics
-    let earnings_progress = driver_earnings.daily_earnings / driver_earnings.daily_earnings_target.max(1.0);
-    let session_duration_ms = clock.now().saturating_sub(driver_earnings.session_start_time_ms);
-    let fatigue_ratio = session_duration_ms as f64 / driver_fatigue.fatigue_threshold_ms.max(1) as f64;
-    
+    let earnings_progress =
+        driver_earnings.daily_earnings / driver_earnings.daily_earnings_target.max(1.0);
+    let session_duration_ms = clock
+        .now()
+        .saturating_sub(driver_earnings.session_start_time_ms);
+    let fatigue_ratio =
+        session_duration_ms as f64 / driver_fatigue.fatigue_threshold_ms.max(1) as f64;
+
     // Calculate score: higher score = higher acceptance probability
     let score = config.base_acceptance_score
         + (fare * config.fare_weight)
@@ -120,7 +135,11 @@ pub fn driver_decision_system(
             })
             .id();
 
-        clock.schedule_in_secs(1, EventKind::MoveStep, Some(EventSubject::Trip(trip_entity)));
+        clock.schedule_in_secs(
+            1,
+            EventKind::MoveStep,
+            Some(EventSubject::Trip(trip_entity)),
+        );
     } else {
         let rejected_rider = driver.matched_rider;
         driver.state = DriverState::Idle;
@@ -129,7 +148,7 @@ pub fn driver_decision_system(
             if let Ok((_entity, mut rider, _)) = riders.get_mut(rider_entity) {
                 rider.matched_driver = None;
                 // Only schedule per-rider TryMatch when batch matching is disabled
-                let batch_enabled = batch_config.as_deref().map_or(false, |c| c.enabled);
+                let batch_enabled = batch_config.as_deref().is_some_and(|c| c.enabled);
                 if rider.state == RiderState::Waiting && !batch_enabled {
                     clock.schedule_in_secs(
                         MATCH_RETRY_SECS,
@@ -145,8 +164,8 @@ pub fn driver_decision_system(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy_ecs::schedule::apply_deferred;
     use bevy_ecs::prelude::{Schedule, World};
+    use bevy_ecs::schedule::apply_deferred;
 
     use crate::ecs::{DriverEarnings, DriverFatigue, Position, Rider, RiderState};
 
@@ -165,7 +184,7 @@ mod tests {
             .into_iter()
             .find(|c| *c != cell)
             .expect("neighbor cell");
-        
+
         let rider_entity = world
             .spawn((
                 Rider {
@@ -197,9 +216,11 @@ mod tests {
                 },
             ))
             .id();
-        world
-            .resource_mut::<SimulationClock>()
-            .schedule_at_secs(1, EventKind::DriverDecision, Some(EventSubject::Driver(driver_entity)));
+        world.resource_mut::<SimulationClock>().schedule_at_secs(
+            1,
+            EventKind::DriverDecision,
+            Some(EventSubject::Driver(driver_entity)),
+        );
 
         let event = world
             .resource_mut::<SimulationClock>()
@@ -247,7 +268,7 @@ mod tests {
             .into_iter()
             .find(|c| *c != cell)
             .expect("neighbor cell");
-        
+
         let rider_entity = world
             .spawn((
                 Rider {
@@ -279,9 +300,11 @@ mod tests {
                 },
             ))
             .id();
-        world
-            .resource_mut::<SimulationClock>()
-            .schedule_at_secs(1, EventKind::DriverDecision, Some(EventSubject::Driver(driver_entity)));
+        world.resource_mut::<SimulationClock>().schedule_at_secs(
+            1,
+            EventKind::DriverDecision,
+            Some(EventSubject::Driver(driver_entity)),
+        );
 
         let event = world
             .resource_mut::<SimulationClock>()
@@ -296,7 +319,7 @@ mod tests {
         let driver = world.query::<&Driver>().single(&world);
         assert_eq!(driver.state, DriverState::Idle);
         assert_eq!(driver.matched_rider, None);
-        
+
         let rider = world.query::<&Rider>().single(&world);
         assert_eq!(rider.matched_driver, None);
     }
@@ -305,7 +328,7 @@ mod tests {
     fn driver_decision_is_reproducible_with_same_seed() {
         let mut world1 = World::new();
         let mut world2 = World::new();
-        
+
         for world in [&mut world1, &mut world2] {
             world.insert_resource(SimulationClock::default());
             world.insert_resource(DriverDecisionConfig {
@@ -314,14 +337,14 @@ mod tests {
                 ..Default::default()
             });
         }
-        
+
         let cell = h3o::CellIndex::try_from(0x8a1fb46622dffff).expect("cell");
         let destination = cell
             .grid_disk::<Vec<_>>(1)
             .into_iter()
             .find(|c| *c != cell)
             .expect("neighbor cell");
-        
+
         let rider_entity1 = world1
             .spawn((
                 Rider {
@@ -353,7 +376,7 @@ mod tests {
                 },
             ))
             .id();
-        
+
         let rider_entity2 = world2
             .spawn((
                 Rider {
@@ -385,15 +408,20 @@ mod tests {
                 },
             ))
             .id();
-        
+
         // Ensure driver entities have same index for reproducibility
         assert_eq!(driver_entity1.index(), driver_entity2.index());
-        
-        for (world, driver_entity) in [(&mut world1, driver_entity1), (&mut world2, driver_entity2)] {
-            world.resource_mut::<SimulationClock>()
-                .schedule_at_secs(1, EventKind::DriverDecision, Some(EventSubject::Driver(driver_entity)));
 
-            let event = world.resource_mut::<SimulationClock>()
+        for (world, driver_entity) in [(&mut world1, driver_entity1), (&mut world2, driver_entity2)]
+        {
+            world.resource_mut::<SimulationClock>().schedule_at_secs(
+                1,
+                EventKind::DriverDecision,
+                Some(EventSubject::Driver(driver_entity)),
+            );
+
+            let event = world
+                .resource_mut::<SimulationClock>()
                 .pop_next()
                 .expect("driver decision event");
             world.insert_resource(CurrentEvent(event));
@@ -405,7 +433,7 @@ mod tests {
 
         let driver1 = world1.query::<&Driver>().single(&world1);
         let driver2 = world2.query::<&Driver>().single(&world2);
-        
+
         // Same seed + same driver entity index = same decision
         assert_eq!(driver1.state, driver2.state);
     }

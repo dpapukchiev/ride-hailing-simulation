@@ -78,9 +78,5 @@ pub fn batch_matching_system(
     }
 
     // Schedule next batch run
-    clock.schedule_in_secs(
-        config.interval_secs,
-        EventKind::BatchMatchRun,
-        None,
-    );
+    clock.schedule_in_secs(config.interval_secs, EventKind::BatchMatchRun, None);
 }

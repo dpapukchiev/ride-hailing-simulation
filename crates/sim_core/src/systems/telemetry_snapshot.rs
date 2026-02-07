@@ -7,6 +7,7 @@ use crate::telemetry::{
     SimTelemetry, TripSnapshot,
 };
 
+#[allow(clippy::too_many_arguments)]
 pub fn capture_snapshot_system(
     clock: Res<SimulationClock>,
     config: Res<SimSnapshotConfig>,
@@ -28,11 +29,13 @@ pub fn capture_snapshot_system(
         return;
     }
 
-    let mut counts = SimCounts::default();
-    counts.riders_cancelled_total = telemetry.riders_cancelled_total;
-    counts.riders_completed_total = telemetry.riders_completed_total;
-    counts.riders_abandoned_quote_total = telemetry.riders_abandoned_quote_total;
-    
+    let mut counts = SimCounts {
+        riders_cancelled_total: telemetry.riders_cancelled_total,
+        riders_completed_total: telemetry.riders_completed_total,
+        riders_abandoned_quote_total: telemetry.riders_abandoned_quote_total,
+        ..Default::default()
+    };
+
     // Remove double iteration: collect riders in single pass
     let mut riders = Vec::new();
     for (entity, rider, position) in rider_query.iter() {

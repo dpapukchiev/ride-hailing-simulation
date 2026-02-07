@@ -3,6 +3,7 @@ use bevy_ecs::prelude::{ParamSet, Query, Res, ResMut};
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
 use crate::ecs::{Driver, DriverState, Position, Rider, RiderState, Trip, TripState};
 
+#[allow(clippy::type_complexity)]
 pub fn trip_started_system(
     mut clock: ResMut<SimulationClock>,
     event: Res<CurrentEvent>,
@@ -66,7 +67,7 @@ pub fn trip_started_system(
         // Update rider position to match driver position (rider is now in the vehicle)
         rider_pos.0 = driver_pos;
     }
-    
+
     // Update driver state
     {
         let mut driver_query = queries.p0();
@@ -81,7 +82,11 @@ pub fn trip_started_system(
     }
 
     // Start moving driver toward dropoff; completion is scheduled by movement when driver arrives.
-    clock.schedule_in_secs(1, EventKind::MoveStep, Some(EventSubject::Trip(trip_entity)));
+    clock.schedule_in_secs(
+        1,
+        EventKind::MoveStep,
+        Some(EventSubject::Trip(trip_entity)),
+    );
 }
 
 #[cfg(test)]
@@ -99,7 +104,7 @@ mod tests {
             .into_iter()
             .find(|c| *c != cell)
             .expect("neighbor cell");
-        
+
         let rider_entity = world
             .spawn((
                 Rider {
@@ -147,9 +152,11 @@ mod tests {
             rider.matched_driver = Some(driver_entity);
         }
 
-        world
-            .resource_mut::<SimulationClock>()
-            .schedule_at_secs(3, EventKind::TripStarted, Some(EventSubject::Trip(trip_entity)));
+        world.resource_mut::<SimulationClock>().schedule_at_secs(
+            3,
+            EventKind::TripStarted,
+            Some(EventSubject::Trip(trip_entity)),
+        );
 
         let event = world
             .resource_mut::<SimulationClock>()

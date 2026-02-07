@@ -15,6 +15,7 @@ fn travel_time_ms(distance_km: f64, speed_kmh: f64) -> u64 {
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub fn movement_system(
     mut clock: ResMut<SimulationClock>,
     event: Res<CurrentEvent>,
@@ -42,7 +43,12 @@ pub fn movement_system(
             TripState::OnTrip => trip.dropoff,
             TripState::Completed | TripState::Cancelled => return,
         };
-        (trip.driver, target, trip.state == TripState::EnRoute, trip.rider)
+        (
+            trip.driver,
+            target,
+            trip.state == TripState::EnRoute,
+            trip.rider,
+        )
     };
 
     let expected_state = if is_en_route {
@@ -50,7 +56,7 @@ pub fn movement_system(
     } else {
         DriverState::OnTrip
     };
-    
+
     let driver_pos_cell = {
         let driver_query = queries.p0();
         let Ok((driver, driver_pos)) = driver_query.get(driver_entity) else {
@@ -97,7 +103,7 @@ pub fn movement_system(
         };
         driver_pos.0 = next_driver_cell;
     }
-    
+
     // If trip is OnTrip, update rider position to match driver (rider is in the vehicle)
     if !is_en_route {
         let mut rider_query = queries.p1();
@@ -115,7 +121,11 @@ pub fn movement_system(
                 travel_time_ms(remaining, speed_kmh)
             };
         }
-        clock.schedule_in(0, EventKind::PickupEtaUpdated, Some(EventSubject::Trip(trip_entity)));
+        clock.schedule_in(
+            0,
+            EventKind::PickupEtaUpdated,
+            Some(EventSubject::Trip(trip_entity)),
+        );
     }
     if remaining <= 0.0 {
         let kind = if is_en_route {
@@ -126,17 +136,21 @@ pub fn movement_system(
         clock.schedule_in_secs(1, kind, Some(EventSubject::Trip(trip_entity)));
     } else {
         let step_ms = travel_time_ms(step_distance_km, speed_kmh);
-        clock.schedule_in(step_ms, EventKind::MoveStep, Some(EventSubject::Trip(trip_entity)));
+        clock.schedule_in(
+            step_ms,
+            EventKind::MoveStep,
+            Some(EventSubject::Trip(trip_entity)),
+        );
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy_ecs::prelude::{Schedule, World};
     use crate::clock::ONE_SEC_MS;
     use crate::ecs::{Rider, RiderState};
     use crate::speed::SpeedModel;
+    use bevy_ecs::prelude::{Schedule, World};
 
     #[test]
     fn movement_steps_toward_rider_and_schedules_trip_start() {
@@ -197,9 +211,11 @@ mod tests {
             })
             .id();
 
-        world
-            .resource_mut::<SimulationClock>()
-            .schedule_at_secs(1, EventKind::MoveStep, Some(EventSubject::Trip(trip_entity)));
+        world.resource_mut::<SimulationClock>().schedule_at_secs(
+            1,
+            EventKind::MoveStep,
+            Some(EventSubject::Trip(trip_entity)),
+        );
         let event = world
             .resource_mut::<SimulationClock>()
             .pop_next()
@@ -211,7 +227,10 @@ mod tests {
         schedule.run(&mut world);
 
         let driver_position = {
-            let pos = world.query::<&Position>().get(&world, driver_entity).expect("pos");
+            let pos = world
+                .query::<&Position>()
+                .get(&world, driver_entity)
+                .expect("pos");
             pos.0
         };
         assert_eq!(driver_position, neighbor);

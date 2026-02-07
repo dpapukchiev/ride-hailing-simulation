@@ -6,7 +6,9 @@ use sim_core::ecs::DriverState;
 use sim_core::telemetry::{CompletedTripRecord, SimSnapshots, SimTelemetry};
 
 use crate::app::{MatchingAlgorithmType, SimUiApp};
-use crate::ui::utils::{datetime_from_unix_ms, format_datetime_from_unix_ms, format_hms_from_ms, now_unix_ms};
+use crate::ui::utils::{
+    datetime_from_unix_ms, format_datetime_from_unix_ms, format_hms_from_ms, now_unix_ms,
+};
 
 /// Render the top control panel with simulation controls and parameters.
 pub fn render_control_panel(ui: &mut egui::Ui, app: &mut SimUiApp) {
@@ -18,12 +20,14 @@ pub fn render_control_panel(ui: &mut egui::Ui, app: &mut SimUiApp) {
         {
             app.start_simulation();
         }
-        if ui.button(if app.auto_run { "Pause" } else { "Run" }).clicked() {
-            if app.started {
-                app.auto_run = !app.auto_run;
-                if app.auto_run {
-                    app.last_frame_instant = Some(std::time::Instant::now());
-                }
+        if ui
+            .button(if app.auto_run { "Pause" } else { "Run" })
+            .clicked()
+            && app.started
+        {
+            app.auto_run = !app.auto_run;
+            if app.auto_run {
+                app.last_frame_instant = Some(std::time::Instant::now());
             }
         }
         if ui.button("Step").clicked() {
@@ -68,7 +72,10 @@ pub fn render_control_panel(ui: &mut egui::Ui, app: &mut SimUiApp) {
     ui.horizontal(|ui| {
         ui.checkbox(&mut app.show_riders, "Riders");
         ui.checkbox(&mut app.show_drivers, "Drivers");
-        ui.checkbox(&mut app.show_driver_stats, "Driver stats (earnings/fatigue)");
+        ui.checkbox(
+            &mut app.show_driver_stats,
+            "Driver stats (earnings/fatigue)",
+        );
         ui.checkbox(&mut app.hide_off_duty_drivers, "Hide off-duty drivers");
         ui.checkbox(&mut app.grid_enabled, "Grid");
         ui.label(format!("Steps executed: {}", app.steps_executed));
@@ -81,10 +88,7 @@ pub fn render_control_panel(ui: &mut egui::Ui, app: &mut SimUiApp) {
         .unwrap_or((0, 0));
     let sim_real_ms = sim_epoch_ms.saturating_add(sim_now_ms as i64).max(0) as u64;
     ui.horizontal(|ui| {
-        ui.label(format!(
-            "Sim time: {}",
-            format_hms_from_ms(sim_now_ms)
-        ));
+        ui.label(format!("Sim time: {}", format_hms_from_ms(sim_now_ms)));
         ui.label(format!(
             "Sim datetime (UTC): {}",
             format_datetime_from_unix_ms(sim_real_ms)
@@ -117,7 +121,7 @@ pub fn render_control_panel(ui: &mut egui::Ui, app: &mut SimUiApp) {
 /// Render run outcome counters and optional completed-trip timing stats from SimTelemetry.
 fn render_run_outcomes(ui: &mut egui::Ui, app: &SimUiApp) {
     const PERCENTILES: &[(u8, &str)] = &[(50, "p50"), (90, "p90"), (95, "p95"), (99, "p99")];
-    
+
     let telemetry = match app.world.get_resource::<SimTelemetry>() {
         Some(t) => t,
         None => {
@@ -127,7 +131,8 @@ fn render_run_outcomes(ui: &mut egui::Ui, app: &SimUiApp) {
     };
 
     // Outcome counters: 5 columns
-    let total_resolved = telemetry.riders_completed_total
+    let total_resolved = telemetry
+        .riders_completed_total
         .saturating_add(telemetry.riders_cancelled_total)
         .saturating_add(telemetry.riders_abandoned_quote_total);
     let conversion_pct = if total_resolved > 0 {
@@ -145,11 +150,14 @@ fn render_run_outcomes(ui: &mut egui::Ui, app: &SimUiApp) {
             ui.label("Riders cancelled");
             ui.label(telemetry.riders_cancelled_total.to_string());
             if telemetry.riders_cancelled_total > 0 {
-                let timeout_pct = (telemetry.riders_cancelled_pickup_timeout as f64 / telemetry.riders_cancelled_total as f64) * 100.0;
+                let timeout_pct = (telemetry.riders_cancelled_pickup_timeout as f64
+                    / telemetry.riders_cancelled_total as f64)
+                    * 100.0;
                 ui.add_space(2.0);
-                ui.label(format!("  Timeout: {} ({:.1}%)", 
-                    telemetry.riders_cancelled_pickup_timeout,
-                    timeout_pct));
+                ui.label(format!(
+                    "  Timeout: {} ({:.1}%)",
+                    telemetry.riders_cancelled_pickup_timeout, timeout_pct
+                ));
             }
         });
         columns[2].vertical(|ui| {
@@ -157,13 +165,27 @@ fn render_run_outcomes(ui: &mut egui::Ui, app: &SimUiApp) {
             ui.label(telemetry.riders_abandoned_quote_total.to_string());
             let total_quote_abandoned = telemetry.riders_abandoned_quote_total;
             if total_quote_abandoned > 0 {
-                let price_pct = (telemetry.riders_abandoned_price as f64 / total_quote_abandoned as f64) * 100.0;
-                let eta_pct = (telemetry.riders_abandoned_eta as f64 / total_quote_abandoned as f64) * 100.0;
-                let stochastic_pct = (telemetry.riders_abandoned_stochastic as f64 / total_quote_abandoned as f64) * 100.0;
+                let price_pct = (telemetry.riders_abandoned_price as f64
+                    / total_quote_abandoned as f64)
+                    * 100.0;
+                let eta_pct =
+                    (telemetry.riders_abandoned_eta as f64 / total_quote_abandoned as f64) * 100.0;
+                let stochastic_pct = (telemetry.riders_abandoned_stochastic as f64
+                    / total_quote_abandoned as f64)
+                    * 100.0;
                 ui.add_space(2.0);
-                ui.label(format!("  Price: {} ({:.1}%)", telemetry.riders_abandoned_price, price_pct));
-                ui.label(format!("  ETA: {} ({:.1}%)", telemetry.riders_abandoned_eta, eta_pct));
-                ui.label(format!("  Stochastic: {} ({:.1}%)", telemetry.riders_abandoned_stochastic, stochastic_pct));
+                ui.label(format!(
+                    "  Price: {} ({:.1}%)",
+                    telemetry.riders_abandoned_price, price_pct
+                ));
+                ui.label(format!(
+                    "  ETA: {} ({:.1}%)",
+                    telemetry.riders_abandoned_eta, eta_pct
+                ));
+                ui.label(format!(
+                    "  Stochastic: {} ({:.1}%)",
+                    telemetry.riders_abandoned_stochastic, stochastic_pct
+                ));
             }
         });
         columns[3].vertical(|ui| {
@@ -197,15 +219,24 @@ fn render_run_outcomes(ui: &mut egui::Ui, app: &SimUiApp) {
             ui.columns(3, |columns| {
                 columns[0].vertical(|ui| {
                     ui.label("Riders now:");
-                    ui.label(format!("browsing {} waiting {} in transit {}", c.riders_browsing, c.riders_waiting, c.riders_in_transit));
+                    ui.label(format!(
+                        "browsing {} waiting {} in transit {}",
+                        c.riders_browsing, c.riders_waiting, c.riders_in_transit
+                    ));
                 });
                 columns[1].vertical(|ui| {
                     ui.label("Drivers now:");
-                    ui.label(format!("idle {} en route {} on trip {} off duty {}", c.drivers_idle, c.drivers_en_route, c.drivers_on_trip, c.drivers_off_duty));
+                    ui.label(format!(
+                        "idle {} en route {} on trip {} off duty {}",
+                        c.drivers_idle, c.drivers_en_route, c.drivers_on_trip, c.drivers_off_duty
+                    ));
                 });
                 columns[2].vertical(|ui| {
                     ui.label("Trips now:");
-                    ui.label(format!("en route {} on trip {}", c.trips_en_route, c.trips_on_trip));
+                    ui.label(format!(
+                        "en route {} on trip {}",
+                        c.trips_en_route, c.trips_on_trip
+                    ));
                 });
             });
         }
@@ -217,9 +248,18 @@ fn render_run_outcomes(ui: &mut egui::Ui, app: &SimUiApp) {
     if !telemetry.completed_trips.is_empty() {
         let n = telemetry.completed_trips.len();
 
-        let match_dist = timing_distribution(telemetry.completed_trips.as_slice(), CompletedTripRecord::time_to_match);
-        let pickup_dist = timing_distribution(telemetry.completed_trips.as_slice(), CompletedTripRecord::time_to_pickup);
-        let trip_dist = timing_distribution(telemetry.completed_trips.as_slice(), CompletedTripRecord::trip_duration);
+        let match_dist = timing_distribution(
+            telemetry.completed_trips.as_slice(),
+            CompletedTripRecord::time_to_match,
+        );
+        let pickup_dist = timing_distribution(
+            telemetry.completed_trips.as_slice(),
+            CompletedTripRecord::time_to_pickup,
+        );
+        let trip_dist = timing_distribution(
+            telemetry.completed_trips.as_slice(),
+            CompletedTripRecord::trip_duration,
+        );
 
         let rider_fares: Vec<f64> = telemetry.completed_trips.iter().map(|t| t.fare).collect();
         let driver_takes: Vec<f64> = telemetry
@@ -239,8 +279,7 @@ fn render_run_outcomes(ui: &mut egui::Ui, app: &SimUiApp) {
                 }
             })
             .collect();
-        let (rider_min, rider_max, rider_avg, rider_sorted) =
-            fare_distribution_stats(&rider_fares);
+        let (rider_min, rider_max, rider_avg, rider_sorted) = fare_distribution_stats(&rider_fares);
         let (driver_min, driver_max, driver_avg, driver_sorted) =
             fare_distribution_stats(&driver_takes);
         let (surge_min, surge_max, surge_avg, surge_sorted) =
@@ -250,7 +289,11 @@ fn render_run_outcomes(ui: &mut egui::Ui, app: &SimUiApp) {
         ui.columns(6, |columns| {
             columns[0].vertical(|ui| {
                 ui.label(format!("Time to match (n={})", n));
-                ui.label(format!("min {}  max {}", format_hms_from_ms(match_dist.min), format_hms_from_ms(match_dist.max)));
+                ui.label(format!(
+                    "min {}  max {}",
+                    format_hms_from_ms(match_dist.min),
+                    format_hms_from_ms(match_dist.max)
+                ));
                 for (p, label) in PERCENTILES {
                     if let Some(v) = match_dist.percentile(*p) {
                         ui.label(format!("{} {}", label, format_hms_from_ms(v)));
@@ -260,7 +303,11 @@ fn render_run_outcomes(ui: &mut egui::Ui, app: &SimUiApp) {
             });
             columns[1].vertical(|ui| {
                 ui.label(format!("Time to pickup (n={})", n));
-                ui.label(format!("min {}  max {}", format_hms_from_ms(pickup_dist.min), format_hms_from_ms(pickup_dist.max)));
+                ui.label(format!(
+                    "min {}  max {}",
+                    format_hms_from_ms(pickup_dist.min),
+                    format_hms_from_ms(pickup_dist.max)
+                ));
                 for (p, label) in PERCENTILES {
                     if let Some(v) = pickup_dist.percentile(*p) {
                         ui.label(format!("{} {}", label, format_hms_from_ms(v)));
@@ -270,7 +317,11 @@ fn render_run_outcomes(ui: &mut egui::Ui, app: &SimUiApp) {
             });
             columns[2].vertical(|ui| {
                 ui.label(format!("Trip duration (n={})", n));
-                ui.label(format!("min {}  max {}", format_hms_from_ms(trip_dist.min), format_hms_from_ms(trip_dist.max)));
+                ui.label(format!(
+                    "min {}  max {}",
+                    format_hms_from_ms(trip_dist.min),
+                    format_hms_from_ms(trip_dist.max)
+                ));
                 for (p, label) in PERCENTILES {
                     if let Some(v) = trip_dist.percentile(*p) {
                         ui.label(format!("{} {}", label, format_hms_from_ms(v)));
@@ -356,15 +407,16 @@ fn render_fleet(ui: &mut egui::Ui, app: &SimUiApp) {
         0.0
     };
 
-    let (sum_earnings, sum_target, targets_met) = latest.drivers.iter().fold(
-        (0.0_f64, 0.0_f64, 0_usize),
-        |(sum_e, sum_t, met), d| {
-            let e = d.daily_earnings.unwrap_or(0.0);
-            let t = d.daily_earnings_target.unwrap_or(0.0);
-            let met_inc = if t > 0.0 && e >= t { 1 } else { 0 };
-            (sum_e + e, sum_t + t, met + met_inc)
-        },
-    );
+    let (sum_earnings, sum_target, targets_met) =
+        latest
+            .drivers
+            .iter()
+            .fold((0.0_f64, 0.0_f64, 0_usize), |(sum_e, sum_t, met), d| {
+                let e = d.daily_earnings.unwrap_or(0.0);
+                let t = d.daily_earnings_target.unwrap_or(0.0);
+                let met_inc = if t > 0.0 && e >= t { 1 } else { 0 };
+                (sum_e + e, sum_t + t, met + met_inc)
+            });
     let drivers_with_earnings = latest
         .drivers
         .iter()
@@ -580,7 +632,10 @@ impl TimingDistribution {
 }
 
 /// Compute min, mean, max and sorted values for percentiles. Durations in ms.
-fn timing_distribution(trips: &[CompletedTripRecord], f: fn(&CompletedTripRecord) -> u64) -> TimingDistribution {
+fn timing_distribution(
+    trips: &[CompletedTripRecord],
+    f: fn(&CompletedTripRecord) -> u64,
+) -> TimingDistribution {
     if trips.is_empty() {
         return TimingDistribution {
             min: 0,

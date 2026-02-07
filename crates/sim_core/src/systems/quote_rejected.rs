@@ -42,25 +42,29 @@ pub fn quote_rejected_system(
     } else {
         // Rider gives up - record abandonment reason
         rider.state = RiderState::Cancelled;
-        telemetry.riders_abandoned_quote_total = telemetry.riders_abandoned_quote_total.saturating_add(1);
-        
+        telemetry.riders_abandoned_quote_total =
+            telemetry.riders_abandoned_quote_total.saturating_add(1);
+
         // Track breakdown by reason
         match rider.last_rejection_reason {
             Some(RiderAbandonmentReason::QuotePriceTooHigh) => {
-                telemetry.riders_abandoned_price = telemetry.riders_abandoned_price.saturating_add(1);
+                telemetry.riders_abandoned_price =
+                    telemetry.riders_abandoned_price.saturating_add(1);
             }
             Some(RiderAbandonmentReason::QuoteEtaTooLong) => {
                 telemetry.riders_abandoned_eta = telemetry.riders_abandoned_eta.saturating_add(1);
             }
             Some(RiderAbandonmentReason::QuoteStochasticRejection) => {
-                telemetry.riders_abandoned_stochastic = telemetry.riders_abandoned_stochastic.saturating_add(1);
+                telemetry.riders_abandoned_stochastic =
+                    telemetry.riders_abandoned_stochastic.saturating_add(1);
             }
             _ => {
                 // Fallback: if no reason recorded, count as stochastic (shouldn't happen in normal flow)
-                telemetry.riders_abandoned_stochastic = telemetry.riders_abandoned_stochastic.saturating_add(1);
+                telemetry.riders_abandoned_stochastic =
+                    telemetry.riders_abandoned_stochastic.saturating_add(1);
             }
         }
-        
+
         commands.entity(rider_entity).despawn();
     }
 }
@@ -68,8 +72,8 @@ pub fn quote_rejected_system(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy_ecs::prelude::{Schedule, World};
     use crate::ecs::Position;
+    use bevy_ecs::prelude::{Schedule, World};
 
     #[test]
     fn quote_rejected_under_limit_reschedules_show_quote() {

@@ -1,10 +1,16 @@
 use bevy_ecs::prelude::{Commands, Query, Res, ResMut};
 
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
-use crate::ecs::{Driver, DriverEarnings, DriverFatigue, DriverState, Rider, RiderState, Trip, TripState};
-use crate::pricing::{calculate_driver_earnings, calculate_platform_revenue, calculate_trip_fare_with_config, PricingConfig};
+use crate::ecs::{
+    Driver, DriverEarnings, DriverFatigue, DriverState, Rider, RiderState, Trip, TripState,
+};
+use crate::pricing::{
+    calculate_driver_earnings, calculate_platform_revenue, calculate_trip_fare_with_config,
+    PricingConfig,
+};
 use crate::telemetry::{CompletedTripRecord, SimTelemetry};
 
+#[allow(clippy::too_many_arguments)]
 pub fn trip_completed_system(
     event: Res<CurrentEvent>,
     clock: Res<SimulationClock>,
@@ -39,15 +45,15 @@ pub fn trip_completed_system(
     let fare = trip.agreed_fare.unwrap_or_else(|| {
         calculate_trip_fare_with_config(trip.pickup, trip.dropoff, *pricing_config)
     });
-    
+
     // Calculate base fare (without surge) to determine surge impact
     let base_fare = calculate_trip_fare_with_config(trip.pickup, trip.dropoff, *pricing_config);
     let surge_impact = (fare - base_fare).max(0.0); // Ensure non-negative
-    
+
     let commission = calculate_platform_revenue(fare, pricing_config.commission_rate);
     let driver_earnings_amount = calculate_driver_earnings(fare, pricing_config.commission_rate);
     let mut should_go_offduty = false;
-    
+
     // Update driver state
     if let Ok(mut driver) = drivers.get_mut(driver_entity) {
         if driver.state == DriverState::OnTrip {
@@ -55,16 +61,16 @@ pub fn trip_completed_system(
         }
         driver.matched_rider = None;
     }
-    
+
     // Update earnings and check thresholds
     if let Ok(mut earnings) = driver_earnings.get_mut(driver_entity) {
         earnings.daily_earnings += driver_earnings_amount;
-        
+
         // Check if earnings target reached
         if earnings.daily_earnings >= earnings.daily_earnings_target {
             should_go_offduty = true;
         }
-        
+
         // Check fatigue threshold
         if let Ok(fatigue) = driver_fatigue.get(driver_entity) {
             let session_duration_ms = clock.now().saturating_sub(earnings.session_start_time_ms);
@@ -73,7 +79,7 @@ pub fn trip_completed_system(
             }
         }
     }
-    
+
     // Transition to OffDuty if thresholds exceeded
     if should_go_offduty {
         if let Ok(mut driver) = drivers.get_mut(driver_entity) {
@@ -133,7 +139,7 @@ mod tests {
             .into_iter()
             .find(|c| *c != cell)
             .expect("neighbor cell");
-        
+
         let rider_entity = world
             .spawn(Rider {
                 state: RiderState::InTransit,
@@ -180,9 +186,11 @@ mod tests {
             driver.matched_rider = Some(rider_entity);
         }
 
-        world
-            .resource_mut::<SimulationClock>()
-            .schedule_at_secs(2, EventKind::TripCompleted, Some(EventSubject::Trip(trip_entity)));
+        world.resource_mut::<SimulationClock>().schedule_at_secs(
+            2,
+            EventKind::TripCompleted,
+            Some(EventSubject::Trip(trip_entity)),
+        );
 
         let event = world
             .resource_mut::<SimulationClock>()

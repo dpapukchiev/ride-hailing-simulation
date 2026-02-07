@@ -30,7 +30,9 @@ impl UniformInterArrival {
     /// Create from rate (entities per second).
     pub fn from_rate(rate_per_sec: f64) -> Self {
         if rate_per_sec <= 0.0 {
-            return Self { interval_ms: f64::INFINITY };
+            return Self {
+                interval_ms: f64::INFINITY,
+            };
         }
         Self {
             interval_ms: 1000.0 / rate_per_sec,
@@ -131,19 +133,19 @@ impl TimeOfDayDistribution {
     fn get_rate_multiplier(&self, sim_time_ms: u64) -> f64 {
         // Convert simulation time to real-world time
         let real_ms = self.epoch_ms.saturating_add(sim_time_ms as i64);
-        
+
         // Convert to seconds since Unix epoch
-        let total_secs = (real_ms / 1000) as i64;
-        
+        let total_secs = real_ms / 1000;
+
         // Calculate day of week (0=Monday, 6=Sunday)
         // Unix epoch (1970-01-01) was a Thursday (day 3)
         let days_since_epoch = total_secs / 86400;
         let day_of_week = ((days_since_epoch + 3) % 7) as usize; // +3 because epoch was Thursday
-        
+
         // Calculate hour of day (0-23) in UTC
         let secs_in_day = total_secs % 86400;
         let hour = ((secs_in_day / 3600) % 24) as usize;
-        
+
         self.multipliers[day_of_week][hour]
     }
 }
@@ -152,11 +154,11 @@ impl InterArrivalDistribution for TimeOfDayDistribution {
     fn sample_ms(&self, spawn_count: u64, current_time_ms: u64) -> f64 {
         let multiplier = self.get_rate_multiplier(current_time_ms);
         let adjusted_rate = self.base_rate_per_sec * multiplier;
-        
+
         if adjusted_rate <= 0.0 {
             return f64::INFINITY;
         }
-        
+
         // Use seeded RNG for reproducibility
         let mut rng = StdRng::seed_from_u64(self.seed.wrapping_add(spawn_count));
         // Sample from exponential: -ln(U) / lambda, where U is uniform [0,1)
@@ -165,7 +167,6 @@ impl InterArrivalDistribution for TimeOfDayDistribution {
         -u.ln() / adjusted_rate * 1000.0 // Convert to ms
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -197,5 +198,4 @@ mod tests {
         let dist = ExponentialInterArrival::new(0.0, 42);
         assert_eq!(dist.sample_ms(0, 0), f64::INFINITY);
     }
-
 }

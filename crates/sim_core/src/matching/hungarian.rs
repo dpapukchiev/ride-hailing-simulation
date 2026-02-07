@@ -105,33 +105,31 @@ impl HungarianMatching {
     ) -> Vec<MatchResult> {
         let mut results = Vec::new();
         let mut used_drivers = std::collections::HashSet::new();
-        
+
         for (rider_entity, rider_pos, _) in riders {
             let mut best_driver: Option<(Entity, f64)> = None;
-            
+
             for (driver_entity, driver_pos) in available_drivers {
                 if used_drivers.contains(driver_entity) {
                     continue;
                 }
-                
+
                 // Check grid distance first (cheap)
-                let grid_dist = rider_pos
-                    .grid_distance(*driver_pos)
-                    .unwrap_or(i32::MAX);
+                let grid_dist = rider_pos.grid_distance(*driver_pos).unwrap_or(i32::MAX);
                 if grid_dist < 0 || grid_dist > match_radius as i32 {
                     continue;
                 }
-                
+
                 // Calculate score
                 let distance_km = distance_km_between_cells(*rider_pos, *driver_pos);
                 let eta_ms = self.estimate_pickup_eta_ms(distance_km);
                 let score = self.score_pairing(distance_km, eta_ms);
-                
-                if best_driver.map_or(true, |(_, best_score)| score > best_score) {
+
+                if best_driver.is_none_or(|(_, best_score)| score > best_score) {
                     best_driver = Some((*driver_entity, score));
                 }
             }
-            
+
             if let Some((driver_entity, _)) = best_driver {
                 used_drivers.insert(driver_entity);
                 results.push(MatchResult {
@@ -140,7 +138,7 @@ impl HungarianMatching {
                 });
             }
         }
-        
+
         results
     }
 }
@@ -189,11 +187,12 @@ impl MatchingAlgorithm for HungarianMatching {
         }
 
         // Kuhn-Munkres requires rows <= columns. So we use the smaller set as rows.
-        let (rider_idx_to_entity, _driver_idx_to_entity) = if riders.len() <= available_drivers.len() {
-            (true, false)
-        } else {
-            (false, true)
-        };
+        let (rider_idx_to_entity, _driver_idx_to_entity) =
+            if riders.len() <= available_drivers.len() {
+                (true, false)
+            } else {
+                (false, true)
+            };
 
         let (rows, cols) = if rider_idx_to_entity {
             (riders.len(), available_drivers.len())
@@ -204,13 +203,11 @@ impl MatchingAlgorithm for HungarianMatching {
         // Pre-filter feasible pairs by grid_distance before expensive distance calculations
         // This avoids computing distance_km_between_cells for pairs outside match radius
         let mut feasible_pairs = Vec::new();
-        
+
         if rider_idx_to_entity {
             for (i, (_, rider_pos, _)) in riders.iter().enumerate() {
                 for (j, (_, driver_pos)) in available_drivers.iter().enumerate() {
-                    let grid_dist = rider_pos
-                        .grid_distance(*driver_pos)
-                        .unwrap_or(i32::MAX);
+                    let grid_dist = rider_pos.grid_distance(*driver_pos).unwrap_or(i32::MAX);
                     if grid_dist >= 0 && grid_dist <= match_radius as i32 {
                         feasible_pairs.push((i, j, *rider_pos, *driver_pos));
                     }
@@ -219,9 +216,7 @@ impl MatchingAlgorithm for HungarianMatching {
         } else {
             for (j, (_, rider_pos, _)) in riders.iter().enumerate() {
                 for (i, (_, driver_pos)) in available_drivers.iter().enumerate() {
-                    let grid_dist = rider_pos
-                        .grid_distance(*driver_pos)
-                        .unwrap_or(i32::MAX);
+                    let grid_dist = rider_pos.grid_distance(*driver_pos).unwrap_or(i32::MAX);
                     if grid_dist >= 0 && grid_dist <= match_radius as i32 {
                         feasible_pairs.push((i, j, *rider_pos, *driver_pos));
                     }
@@ -231,7 +226,7 @@ impl MatchingAlgorithm for HungarianMatching {
 
         // Build matrix only for feasible pairs (others remain INFEASIBLE)
         let mut matrix = vec![vec![INFEASIBLE; cols]; rows];
-        
+
         for (i, j, rider_pos, driver_pos) in feasible_pairs {
             let distance_km = distance_km_between_cells(rider_pos, driver_pos);
             let eta_ms = self.estimate_pickup_eta_ms(distance_km);
@@ -264,9 +259,7 @@ impl MatchingAlgorithm for HungarianMatching {
             }
         } else {
             for (driver_idx, &rider_idx) in assignments.iter().enumerate() {
-                if rider_idx < riders.len()
-                    && weights.at(driver_idx, rider_idx) > INFEASIBLE
-                {
+                if rider_idx < riders.len() && weights.at(driver_idx, rider_idx) > INFEASIBLE {
                     results.push(MatchResult {
                         rider_entity: riders[rider_idx].0,
                         driver_entity: available_drivers[driver_idx].0,

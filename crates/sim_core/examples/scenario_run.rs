@@ -49,9 +49,16 @@ fn main() {
     let clock = world.resource::<sim_core::clock::SimulationClock>();
     let sim_time_secs = clock.now() / 1000;
 
-    println!("--- Scenario run ({} riders, {} drivers, {}h request window, seed 123) ---", NUM_RIDERS, NUM_DRIVERS, SIMULATION_HOURS);
+    println!(
+        "--- Scenario run ({} riders, {} drivers, {}h request window, seed 123) ---",
+        NUM_RIDERS, NUM_DRIVERS, SIMULATION_HOURS
+    );
     println!("Steps executed: {}", steps);
-    println!("Simulation time: {} s ({:.1} min)", sim_time_secs, sim_time_secs as f64 / 60.0);
+    println!(
+        "Simulation time: {} s ({:.1} min)",
+        sim_time_secs,
+        sim_time_secs as f64 / 60.0
+    );
     println!("Completed trips: {}", completed);
 
     if completed > 0 {

@@ -19,41 +19,41 @@ pub fn driver_offduty_check_system(
     if event.0.kind == EventKind::CheckDriverOffDuty {
         let now = clock.now();
         let mut has_active_drivers = false;
-        
+
         for (mut driver, earnings, fatigue) in drivers.iter_mut() {
             // Skip drivers already OffDuty
             if driver.state == DriverState::OffDuty {
                 continue;
             }
-            
+
             has_active_drivers = true;
-            
+
             // Enforce earnings and fatigue for all active drivers, including EnRoute/OnTrip,
             // so drivers cannot exceed limits by staying in back-to-back trips between checks.
             let mut should_go_offduty = false;
-            
+
             // Check earnings target
             if earnings.daily_earnings >= earnings.daily_earnings_target {
                 should_go_offduty = true;
             }
-            
+
             // Check fatigue threshold
             let session_duration_ms = now.saturating_sub(earnings.session_start_time_ms);
             if session_duration_ms >= fatigue.fatigue_threshold_ms {
                 should_go_offduty = true;
             }
-            
+
             if should_go_offduty {
                 driver.state = DriverState::OffDuty;
             }
         }
-        
+
         // Only schedule next check if there are active drivers
         if has_active_drivers {
             clock.schedule_in(CHECK_INTERVAL_MS, EventKind::CheckDriverOffDuty, None);
         }
     }
-    
+
     // Initialize periodic checks on simulation start
     if event.0.kind == EventKind::SimulationStarted {
         clock.schedule_in(CHECK_INTERVAL_MS, EventKind::CheckDriverOffDuty, None);
@@ -63,14 +63,14 @@ pub fn driver_offduty_check_system(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy_ecs::prelude::{Schedule, World};
     use crate::clock::SimulationClock;
+    use bevy_ecs::prelude::{Schedule, World};
 
     #[test]
     fn driver_goes_offduty_when_earnings_target_reached() {
         let mut world = World::new();
         world.insert_resource(SimulationClock::default());
-        
+
         let driver_entity = world
             .spawn((
                 Driver {
@@ -87,24 +87,26 @@ mod tests {
                 },
             ))
             .id();
-        
+
         world
             .resource_mut::<SimulationClock>()
             .schedule_at(0, EventKind::SimulationStarted, None);
-        world
-            .resource_mut::<SimulationClock>()
-            .schedule_in(5 * ONE_MIN_MS, EventKind::CheckDriverOffDuty, None);
-        
+        world.resource_mut::<SimulationClock>().schedule_in(
+            5 * ONE_MIN_MS,
+            EventKind::CheckDriverOffDuty,
+            None,
+        );
+
         let event = world
             .resource_mut::<SimulationClock>()
             .pop_next()
             .expect("simulation started event");
         world.insert_resource(CurrentEvent(event));
-        
+
         let mut schedule = Schedule::default();
         schedule.add_systems(driver_offduty_check_system);
         schedule.run(&mut world);
-        
+
         // Process the check event
         let check_event = world
             .resource_mut::<SimulationClock>()
@@ -112,16 +114,16 @@ mod tests {
             .expect("check driver offduty event");
         world.insert_resource(CurrentEvent(check_event));
         schedule.run(&mut world);
-        
+
         let driver = world.entity(driver_entity).get::<Driver>().expect("driver");
         assert_eq!(driver.state, DriverState::OffDuty);
     }
-    
+
     #[test]
     fn driver_goes_offduty_when_fatigue_threshold_exceeded() {
         let mut world = World::new();
         world.insert_resource(SimulationClock::default());
-        
+
         let target_time = 9 * 60 * 60 * 1000; // 9 hours
         let driver_entity = world
             .spawn((
@@ -139,27 +141,29 @@ mod tests {
                 },
             ))
             .id();
-        
+
         // Schedule the check event at target time
-        world
-            .resource_mut::<SimulationClock>()
-            .schedule_at(target_time, EventKind::CheckDriverOffDuty, None);
-        
+        world.resource_mut::<SimulationClock>().schedule_at(
+            target_time,
+            EventKind::CheckDriverOffDuty,
+            None,
+        );
+
         // Pop the event - this will advance clock.now() to target_time
         let event = world
             .resource_mut::<SimulationClock>()
             .pop_next()
             .expect("check driver offduty event");
-        
+
         // Verify clock advanced
         assert_eq!(world.resource::<SimulationClock>().now(), target_time);
-        
+
         world.insert_resource(CurrentEvent(event));
-        
+
         let mut schedule = Schedule::default();
         schedule.add_systems(driver_offduty_check_system);
         schedule.run(&mut world);
-        
+
         let driver = world.entity(driver_entity).get::<Driver>().expect("driver");
         assert_eq!(driver.state, DriverState::OffDuty);
     }
@@ -187,9 +191,11 @@ mod tests {
             ))
             .id();
 
-        world
-            .resource_mut::<SimulationClock>()
-            .schedule_at(target_time, EventKind::CheckDriverOffDuty, None);
+        world.resource_mut::<SimulationClock>().schedule_at(
+            target_time,
+            EventKind::CheckDriverOffDuty,
+            None,
+        );
 
         let event = world
             .resource_mut::<SimulationClock>()

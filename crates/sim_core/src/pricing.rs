@@ -57,9 +57,9 @@ pub fn calculate_platform_revenue(fare: f64, commission_rate: f64) -> f64 {
 }
 
 /// Calculate fare for a trip based on distance.
-/// 
+///
 /// Formula: `fare = base_fare + (distance_km * per_km_rate)`
-/// 
+///
 /// Returns the total fare amount. Commission should be deducted separately.
 pub fn calculate_trip_fare(pickup: CellIndex, dropoff: CellIndex) -> f64 {
     let distance_km = distance_km_between_cells(pickup, dropoff);
@@ -88,14 +88,17 @@ mod tests {
             .into_iter()
             .find(|c| *c != cell)
             .expect("neighbor cell");
-        
+
         let fare = calculate_trip_fare(cell, nearby);
         assert!(fare >= BASE_FARE, "fare should be at least base fare");
-        
+
         // For a very short trip, fare should be close to base
         let distance = distance_km_between_cells(cell, nearby);
         let expected = BASE_FARE + (distance * PER_KM_RATE);
-        assert!((fare - expected).abs() < 0.01, "fare calculation should match formula");
+        assert!(
+            (fare - expected).abs() < 0.01,
+            "fare calculation should match formula"
+        );
     }
 
     #[test]
@@ -114,7 +117,7 @@ mod tests {
             .into_iter()
             .find(|c| *c != cell)
             .expect("neighbor cell");
-        
+
         let config = PricingConfig {
             base_fare: 3.0,
             per_km_rate: 2.0,
@@ -126,23 +129,26 @@ mod tests {
         let fare = calculate_trip_fare_with_config(cell, nearby, config);
         let distance = distance_km_between_cells(cell, nearby);
         let expected = 3.0 + (distance * 2.0);
-        assert!((fare - expected).abs() < 0.01, "fare calculation should match formula");
+        assert!(
+            (fare - expected).abs() < 0.01,
+            "fare calculation should match formula"
+        );
     }
 
     #[test]
     fn commission_calculations() {
         let fare = 100.0;
         let commission_rate = 0.15;
-        
+
         let commission = calculate_commission(fare, commission_rate);
         assert_eq!(commission, 15.0);
-        
+
         let driver_earnings = calculate_driver_earnings(fare, commission_rate);
         assert_eq!(driver_earnings, 85.0);
-        
+
         let platform_revenue = calculate_platform_revenue(fare, commission_rate);
         assert_eq!(platform_revenue, 15.0);
-        
+
         // Verify driver earnings + commission = fare
         assert!((driver_earnings + commission - fare).abs() < 0.01);
     }
@@ -151,10 +157,10 @@ mod tests {
     fn zero_commission() {
         let fare = 100.0;
         let commission_rate = 0.0;
-        
+
         let commission = calculate_commission(fare, commission_rate);
         assert_eq!(commission, 0.0);
-        
+
         let driver_earnings = calculate_driver_earnings(fare, commission_rate);
         assert_eq!(driver_earnings, fare);
     }

@@ -30,7 +30,10 @@ use crate::parameters::ParameterSet;
 /// # Errors
 ///
 /// Returns an error if file creation or Parquet writing fails.
-pub fn export_to_parquet(results: &[SimulationResult], path: impl AsRef<Path>) -> Result<(), Box<dyn std::error::Error>> {
+pub fn export_to_parquet(
+    results: &[SimulationResult],
+    path: impl AsRef<Path>,
+) -> Result<(), Box<dyn std::error::Error>> {
     if results.is_empty() {
         return Err("No results to export".into());
     }
@@ -60,22 +63,36 @@ pub fn export_to_parquet(results: &[SimulationResult], path: impl AsRef<Path>) -
     // Build arrays
     let total_riders: Vec<u64> = results.iter().map(|r| r.total_riders as u64).collect();
     let completed_riders: Vec<u64> = results.iter().map(|r| r.completed_riders as u64).collect();
-    let abandoned_quote_riders: Vec<u64> = results.iter().map(|r| r.abandoned_quote_riders as u64).collect();
+    let abandoned_quote_riders: Vec<u64> = results
+        .iter()
+        .map(|r| r.abandoned_quote_riders as u64)
+        .collect();
     let cancelled_riders: Vec<u64> = results.iter().map(|r| r.cancelled_riders as u64).collect();
     let conversion_rate: Vec<f64> = results.iter().map(|r| r.conversion_rate).collect();
     let platform_revenue: Vec<f64> = results.iter().map(|r| r.platform_revenue).collect();
     let driver_payouts: Vec<f64> = results.iter().map(|r| r.driver_payouts).collect();
     let total_fares_collected: Vec<f64> = results.iter().map(|r| r.total_fares_collected).collect();
     let avg_time_to_match_ms: Vec<f64> = results.iter().map(|r| r.avg_time_to_match_ms).collect();
-    let median_time_to_match_ms: Vec<f64> = results.iter().map(|r| r.median_time_to_match_ms).collect();
+    let median_time_to_match_ms: Vec<f64> =
+        results.iter().map(|r| r.median_time_to_match_ms).collect();
     let p90_time_to_match_ms: Vec<f64> = results.iter().map(|r| r.p90_time_to_match_ms).collect();
     let avg_time_to_pickup_ms: Vec<f64> = results.iter().map(|r| r.avg_time_to_pickup_ms).collect();
-    let median_time_to_pickup_ms: Vec<f64> = results.iter().map(|r| r.median_time_to_pickup_ms).collect();
+    let median_time_to_pickup_ms: Vec<f64> =
+        results.iter().map(|r| r.median_time_to_pickup_ms).collect();
     let p90_time_to_pickup_ms: Vec<f64> = results.iter().map(|r| r.p90_time_to_pickup_ms).collect();
     let completed_trips: Vec<u64> = results.iter().map(|r| r.completed_trips as u64).collect();
-    let riders_abandoned_price: Vec<u64> = results.iter().map(|r| r.riders_abandoned_price as u64).collect();
-    let riders_abandoned_eta: Vec<u64> = results.iter().map(|r| r.riders_abandoned_eta as u64).collect();
-    let riders_abandoned_stochastic: Vec<u64> = results.iter().map(|r| r.riders_abandoned_stochastic as u64).collect();
+    let riders_abandoned_price: Vec<u64> = results
+        .iter()
+        .map(|r| r.riders_abandoned_price as u64)
+        .collect();
+    let riders_abandoned_eta: Vec<u64> = results
+        .iter()
+        .map(|r| r.riders_abandoned_eta as u64)
+        .collect();
+    let riders_abandoned_stochastic: Vec<u64> = results
+        .iter()
+        .map(|r| r.riders_abandoned_stochastic as u64)
+        .collect();
 
     let arrays: Vec<ArrayRef> = vec![
         Arc::new(UInt64Array::from(total_riders)),
@@ -121,7 +138,10 @@ pub fn export_to_parquet(results: &[SimulationResult], path: impl AsRef<Path>) -
 /// # Errors
 ///
 /// Returns an error if file creation or JSON serialization fails.
-pub fn export_to_json(results: &[SimulationResult], path: impl AsRef<Path>) -> Result<(), Box<dyn std::error::Error>> {
+pub fn export_to_json(
+    results: &[SimulationResult],
+    path: impl AsRef<Path>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let file = File::create(path)?;
     serde_json::to_writer_pretty(file, results)?;
     Ok(())
@@ -154,14 +174,15 @@ pub fn export_to_csv(
             "Results length ({}) doesn't match parameter_sets length ({})",
             results.len(),
             parameter_sets.len()
-        ).into());
+        )
+        .into());
     }
 
     let file = File::create(path)?;
     let mut wtr = csv::Writer::from_writer(file);
 
     // Write header
-    wtr.write_record(&[
+    wtr.write_record([
         // Parameter metadata
         "experiment_id",
         "run_id",
@@ -215,27 +236,53 @@ pub fn export_to_csv(
             None => "",
         };
 
-        wtr.write_record(&[
+        wtr.write_record([
             // Parameter metadata
             &param_set.experiment_id,
             &param_set.run_id.to_string(),
             &param_set.seed.to_string(),
             // Pricing parameters
-            &pricing.map(|p| p.commission_rate.to_string()).unwrap_or_default(),
+            &pricing
+                .map(|p| p.commission_rate.to_string())
+                .unwrap_or_default(),
             &pricing.map(|p| p.base_fare.to_string()).unwrap_or_default(),
-            &pricing.map(|p| p.per_km_rate.to_string()).unwrap_or_default(),
-            &pricing.map(|p| p.surge_enabled.to_string()).unwrap_or_default(),
-            &pricing.map(|p| p.surge_radius_k.to_string()).unwrap_or_default(),
-            &pricing.map(|p| p.surge_max_multiplier.to_string()).unwrap_or_default(),
+            &pricing
+                .map(|p| p.per_km_rate.to_string())
+                .unwrap_or_default(),
+            &pricing
+                .map(|p| p.surge_enabled.to_string())
+                .unwrap_or_default(),
+            &pricing
+                .map(|p| p.surge_radius_k.to_string())
+                .unwrap_or_default(),
+            &pricing
+                .map(|p| p.surge_max_multiplier.to_string())
+                .unwrap_or_default(),
             // Scenario parameters
             &param_set.params.num_riders.to_string(),
             &param_set.params.num_drivers.to_string(),
             &param_set.params.match_radius.to_string(),
-            &param_set.params.epoch_ms.map(|e| e.to_string()).unwrap_or_default(),
+            &param_set
+                .params
+                .epoch_ms
+                .map(|e| e.to_string())
+                .unwrap_or_default(),
             matching_alg_str,
-            &param_set.params.batch_matching_enabled.map(|b| b.to_string()).unwrap_or_default(),
-            &param_set.params.batch_interval_secs.map(|i| i.to_string()).unwrap_or_default(),
-            &param_set.params.eta_weight.map(|w| w.to_string()).unwrap_or_default(),
+            &param_set
+                .params
+                .batch_matching_enabled
+                .map(|b| b.to_string())
+                .unwrap_or_default(),
+            &param_set
+                .params
+                .batch_interval_secs
+                .map(|i| i.to_string())
+                .unwrap_or_default(),
+            &param_set
+                .params
+                .eta_weight
+                .map(|w| w.to_string())
+                .unwrap_or_default(),
             // Results
             &result.total_riders.to_string(),
             &result.total_drivers.to_string(),
@@ -335,29 +382,27 @@ mod tests {
 
     #[test]
     fn test_export_to_json() {
-        let results = vec![
-            SimulationResult {
-                total_riders: 100,
-                total_drivers: 20,
-                completed_riders: 80,
-                abandoned_quote_riders: 10,
-                cancelled_riders: 10,
-                conversion_rate: 0.8,
-                platform_revenue: 1000.0,
-                driver_payouts: 5000.0,
-                total_fares_collected: 6000.0,
-                avg_time_to_match_ms: 1000.0,
-                median_time_to_match_ms: 1000.0,
-                p90_time_to_match_ms: 2000.0,
-                avg_time_to_pickup_ms: 5000.0,
-                median_time_to_pickup_ms: 5000.0,
-                p90_time_to_pickup_ms: 10000.0,
-                completed_trips: 80,
-                riders_abandoned_price: 5,
-                riders_abandoned_eta: 3,
-                riders_abandoned_stochastic: 2,
-            },
-        ];
+        let results = vec![SimulationResult {
+            total_riders: 100,
+            total_drivers: 20,
+            completed_riders: 80,
+            abandoned_quote_riders: 10,
+            cancelled_riders: 10,
+            conversion_rate: 0.8,
+            platform_revenue: 1000.0,
+            driver_payouts: 5000.0,
+            total_fares_collected: 6000.0,
+            avg_time_to_match_ms: 1000.0,
+            median_time_to_match_ms: 1000.0,
+            p90_time_to_match_ms: 2000.0,
+            avg_time_to_pickup_ms: 5000.0,
+            median_time_to_pickup_ms: 5000.0,
+            p90_time_to_pickup_ms: 10000.0,
+            completed_trips: 80,
+            riders_abandoned_price: 5,
+            riders_abandoned_eta: 3,
+            riders_abandoned_stochastic: 2,
+        }];
 
         let file = NamedTempFile::new().unwrap();
         export_to_json(&results, file.path()).unwrap();

@@ -129,11 +129,11 @@ pub fn apply_rider_patterns(
     for &day in &[0, 1, 2, 3, 6] {
         dist = dist.set_day_multipliers(day, RIDER_WEEKDAY_PATTERN);
     }
-    
+
     // Apply weekend pattern to Friday (4) and Saturday (5)
     dist = dist.set_day_multipliers(4, RIDER_WEEKEND_PATTERN);
     dist = dist.set_day_multipliers(5, RIDER_WEEKEND_PATTERN);
-    
+
     dist
 }
 
@@ -146,10 +146,10 @@ pub fn apply_driver_patterns(
     for &day in &[0, 1, 2, 3, 6] {
         dist = dist.set_day_multipliers(day, DRIVER_WEEKDAY_PATTERN);
     }
-    
+
     // Apply weekend pattern to Friday (4) and Saturday (5)
     dist = dist.set_day_multipliers(4, DRIVER_WEEKEND_PATTERN);
     dist = dist.set_day_multipliers(5, DRIVER_WEEKEND_PATTERN);
-    
+
     dist
 }

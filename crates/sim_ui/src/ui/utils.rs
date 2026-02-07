@@ -69,18 +69,22 @@ pub fn datetime_to_unix_ms(year: i32, month: u32, day: u32, hour: u32, minute: u
     let y = year as i64;
     let m = month as i64;
     let d = day as i64;
-    
+
     // Adjust for month
     let adjusted_m = if m <= 2 { m + 12 } else { m };
     let adjusted_y = if m <= 2 { y - 1 } else { y };
-    
+
     // Calculate days since epoch (1970-01-01)
-    let era = (if adjusted_y >= 0 { adjusted_y } else { adjusted_y - 399 }) / 400;
+    let era = (if adjusted_y >= 0 {
+        adjusted_y
+    } else {
+        adjusted_y - 399
+    }) / 400;
     let yoe = adjusted_y - era * 400;
     let doy = (153 * (adjusted_m - 3) + 2) / 5 + d - 1;
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     let days = era * 146097 + doe - 719468;
-    
+
     // Add time components
     let total_secs = days * 86400 + hour as i64 * 3600 + minute as i64 * 60;
     total_secs * 1000 // Convert to milliseconds
@@ -144,7 +148,10 @@ pub fn bounds_from_km(size_km: f64) -> (f64, f64, f64, f64) {
     )
 }
 
-pub fn rider_color(state: RiderState, matched_driver: Option<bevy_ecs::prelude::Entity>) -> Color32 {
+pub fn rider_color(
+    state: RiderState,
+    matched_driver: Option<bevy_ecs::prelude::Entity>,
+) -> Color32 {
     match state {
         RiderState::Browsing => Color32::from_rgb(120, 180, 255),
         RiderState::Waiting => {

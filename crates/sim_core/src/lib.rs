@@ -34,21 +34,21 @@
 //! let steps = run_until_empty(&mut world, &mut schedule, 1_000_000);
 //! ```
 
-pub mod spatial;
 pub mod clock;
-pub mod ecs;
-pub mod speed;
-pub mod runner;
-pub mod scenario;
-pub mod systems;
-pub mod telemetry;
-pub mod telemetry_export;
-pub mod matching;
 pub mod distributions;
-pub mod spawner;
+pub mod ecs;
+pub mod matching;
 pub mod patterns;
 pub mod pricing;
 pub mod profiling;
+pub mod runner;
+pub mod scenario;
+pub mod spatial;
+pub mod spawner;
+pub mod speed;
+pub mod systems;
+pub mod telemetry;
+pub mod telemetry_export;
 
 #[cfg(any(test, feature = "test-helpers"))]
 pub mod test_helpers;

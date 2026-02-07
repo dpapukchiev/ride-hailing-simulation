@@ -73,23 +73,13 @@ pub struct CurrentEvent(pub Event);
 
 /// Simulation clock: time in **milliseconds**, advances to the next scheduled event.
 /// Time 0 maps to a real-world datetime via `epoch_ms` (e.g. Unix epoch offset).
-#[derive(Debug, Clone, Resource)]
+#[derive(Debug, Clone, Default, Resource)]
 pub struct SimulationClock {
     /// Current simulation time in ms (updated when an event is popped).
     now: u64,
     /// Real-world ms corresponding to simulation time 0 (e.g. Unix epoch or a fixed datetime).
     epoch_ms: i64,
     events: BinaryHeap<Event>,
-}
-
-impl Default for SimulationClock {
-    fn default() -> Self {
-        Self {
-            now: 0,
-            epoch_ms: 0,
-            events: BinaryHeap::new(),
-        }
-    }
 }
 
 impl SimulationClock {
@@ -142,12 +132,7 @@ impl SimulationClock {
     }
 
     /// Schedule an event at a specific simulation timestamp (ms).
-    pub fn schedule_at(
-        &mut self,
-        at_ms: u64,
-        kind: EventKind,
-        subject: Option<EventSubject>,
-    ) {
+    pub fn schedule_at(&mut self, at_ms: u64, kind: EventKind, subject: Option<EventSubject>) {
         self.schedule(Event {
             timestamp: at_ms,
             kind,
@@ -176,12 +161,7 @@ impl SimulationClock {
     }
 
     /// Schedule an event at `now + delta_ms` (relative, in ms).
-    pub fn schedule_in(
-        &mut self,
-        delta_ms: u64,
-        kind: EventKind,
-        subject: Option<EventSubject>,
-    ) {
+    pub fn schedule_in(&mut self, delta_ms: u64, kind: EventKind, subject: Option<EventSubject>) {
         self.schedule_at(self.now.saturating_add(delta_ms), kind, subject);
     }
 

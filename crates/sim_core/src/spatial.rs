@@ -9,12 +9,12 @@
 //!
 //! Default resolution is 9 (~240m cell size), suitable for city-scale simulations.
 
-use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
 use bevy_ecs::prelude::{Entity, Resource};
 use h3o::{CellIndex, Resolution};
 use lru::LruCache;
+use std::collections::HashMap;
 use std::num::NonZeroUsize;
+use std::sync::{Mutex, OnceLock};
 
 #[derive(Debug, Clone, Copy)]
 pub struct GeoIndex {
@@ -60,7 +60,7 @@ fn get_distance_cache() -> &'static Mutex<LruCache<(CellIndex, CellIndex), f64>>
     static CACHE: OnceLock<Mutex<LruCache<(CellIndex, CellIndex), f64>>> = OnceLock::new();
     CACHE.get_or_init(|| {
         Mutex::new(LruCache::new(
-            NonZeroUsize::new(50_000).expect("cache size must be non-zero")
+            NonZeroUsize::new(50_000).expect("cache size must be non-zero"),
         ))
     })
 }
@@ -74,7 +74,7 @@ impl GridDiskCache {
     fn new() -> Self {
         Self {
             cache: Mutex::new(LruCache::new(
-                NonZeroUsize::new(1_000).expect("cache size must be non-zero")
+                NonZeroUsize::new(1_000).expect("cache size must be non-zero"),
             )),
         }
     }
@@ -84,7 +84,9 @@ impl GridDiskCache {
             Ok(guard) => guard,
             Err(_) => return geo.grid_disk(origin, k), // Fallback: compute without cache if mutex poisoned
         };
-        cache.get_or_insert((origin, k), || geo.grid_disk(origin, k)).clone()
+        cache
+            .get_or_insert((origin, k), || geo.grid_disk(origin, k))
+            .clone()
     }
 }
 
@@ -104,7 +106,7 @@ impl PathCache {
     fn new() -> Self {
         Self {
             cache: Mutex::new(LruCache::new(
-                NonZeroUsize::new(5_000).expect("cache size must be non-zero")
+                NonZeroUsize::new(5_000).expect("cache size must be non-zero"),
             )),
         }
     }
@@ -115,35 +117,33 @@ impl PathCache {
             Err(_) => return Self::compute_path(from, to), // Fallback: compute without cache if mutex poisoned
         };
         let key = if from < to { (from, to) } else { (to, from) };
-        
+
         // Check cache first
         if let Some(cached) = cache.get(&key) {
             return Some(cached.clone());
         }
-        
+
         // Compute path
         let path_result = Self::compute_path(from, to);
-        
+
         // Cache successful paths only
         if let Some(cells) = &path_result {
             cache.put(key, cells.clone());
         }
-        
+
         path_result
     }
 
     /// Compute a grid path between two cells without caching.
     fn compute_path(from: CellIndex, to: CellIndex) -> Option<Vec<CellIndex>> {
-        from.grid_path_cells(to)
-            .ok()
-            .and_then(|path| {
-                let cells: Vec<CellIndex> = path.filter_map(|cell| cell.ok()).collect();
-                if cells.is_empty() {
-                    None
-                } else {
-                    Some(cells)
-                }
-            })
+        from.grid_path_cells(to).ok().and_then(|path| {
+            let cells: Vec<CellIndex> = path.filter_map(|cell| cell.ok()).collect();
+            if cells.is_empty() {
+                None
+            } else {
+                Some(cells)
+            }
+        })
     }
 }
 
@@ -154,7 +154,7 @@ fn get_path_cache() -> &'static PathCache {
 }
 
 /// Spatial index for efficient entity lookups by H3 cell.
-/// 
+///
 /// Maintains mappings from H3 cells to entities (riders and drivers) for O(1) spatial queries
 /// instead of scanning all entities. Updated incrementally as entities move or change state.
 #[derive(Debug, Resource, Default)]
@@ -177,13 +177,13 @@ impl SpatialIndex {
 
     /// Insert a rider entity at the given cell.
     pub fn insert_rider(&mut self, entity: Entity, cell: CellIndex) {
-        self.riders_by_cell.entry(cell).or_insert_with(Vec::new).push(entity);
+        self.riders_by_cell.entry(cell).or_default().push(entity);
         self.rider_entity_to_cell.insert(entity, cell);
     }
 
     /// Insert a driver entity at the given cell.
     pub fn insert_driver(&mut self, entity: Entity, cell: CellIndex) {
-        self.drivers_by_cell.entry(cell).or_insert_with(Vec::new).push(entity);
+        self.drivers_by_cell.entry(cell).or_default().push(entity);
         self.driver_entity_to_cell.insert(entity, cell);
     }
 
@@ -212,7 +212,12 @@ impl SpatialIndex {
     }
 
     /// Update a rider's position (remove from old cell, add to new cell).
-    pub fn update_rider_position(&mut self, entity: Entity, old_cell: CellIndex, new_cell: CellIndex) {
+    pub fn update_rider_position(
+        &mut self,
+        entity: Entity,
+        old_cell: CellIndex,
+        new_cell: CellIndex,
+    ) {
         if old_cell == new_cell {
             return;
         }
@@ -224,12 +229,20 @@ impl SpatialIndex {
             }
         }
         // Add to new cell
-        self.riders_by_cell.entry(new_cell).or_insert_with(Vec::new).push(entity);
+        self.riders_by_cell
+            .entry(new_cell)
+            .or_default()
+            .push(entity);
         self.rider_entity_to_cell.insert(entity, new_cell);
     }
 
     /// Update a driver's position (remove from old cell, add to new cell).
-    pub fn update_driver_position(&mut self, entity: Entity, old_cell: CellIndex, new_cell: CellIndex) {
+    pub fn update_driver_position(
+        &mut self,
+        entity: Entity,
+        old_cell: CellIndex,
+        new_cell: CellIndex,
+    ) {
         if old_cell == new_cell {
             return;
         }
@@ -241,7 +254,10 @@ impl SpatialIndex {
             }
         }
         // Add to new cell
-        self.drivers_by_cell.entry(new_cell).or_insert_with(Vec::new).push(entity);
+        self.drivers_by_cell
+            .entry(new_cell)
+            .or_default()
+            .push(entity);
         self.driver_entity_to_cell.insert(entity, new_cell);
     }
 
@@ -287,18 +303,18 @@ impl SpatialIndex {
 }
 
 /// Calculate distance between two H3 cells with LRU caching.
-/// 
+///
 /// Uses a global LRU cache to avoid repeated H3 cell → LatLng conversions
 /// and Haversine calculations for frequently accessed cell pairs.
 pub fn distance_km_between_cells(a: CellIndex, b: CellIndex) -> f64 {
     // Use symmetric key (smaller cell first) to maximize cache hits
     let key = if a < b { (a, b) } else { (b, a) };
-    
+
     let mut cache = match get_distance_cache().lock() {
         Ok(guard) => guard,
         Err(_) => return distance_km_between_cells_uncached(key.0, key.1), // Fallback: compute without cache if mutex poisoned
     };
-    
+
     // Try to get from cache, compute if missing
     *cache.get_or_insert(key, || distance_km_between_cells_uncached(key.0, key.1))
 }

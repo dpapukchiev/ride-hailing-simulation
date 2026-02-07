@@ -12,23 +12,23 @@
 //! Systems react to the `CurrentEvent` resource, which is inserted by the runner
 //! before each schedule execution.
 
-pub mod spawner;
-pub mod show_quote;
-pub mod quote_decision;
-pub mod quote_accepted;
-pub mod quote_rejected;
-pub mod matching;
 pub mod batch_matching;
-pub mod match_accepted;
 pub mod driver_decision;
+pub mod driver_offduty;
+pub mod match_accepted;
+pub mod matching;
 pub mod movement;
 pub mod pickup_eta_updated;
-pub mod trip_started;
-pub mod trip_completed;
-pub mod telemetry_snapshot;
+pub mod quote_accepted;
+pub mod quote_decision;
+pub mod quote_rejected;
 pub mod rider_cancel;
-pub mod driver_offduty;
+pub mod show_quote;
 pub mod spatial_index;
+pub mod spawner;
+pub mod telemetry_snapshot;
+pub mod trip_completed;
+pub mod trip_started;
 
 #[cfg(test)]
 mod end_to_end_tests {
@@ -39,9 +39,11 @@ mod end_to_end_tests {
     use crate::ecs::{Driver, DriverState, Trip, TripState};
     use crate::pricing::PricingConfig;
     use crate::runner::{initialize_simulation, run_until_empty, simulation_schedule};
-    use crate::scenario::{create_simple_matching, MatchRadius, RiderCancelConfig, RiderQuoteConfig};
-    use crate::spawner::{DriverSpawner, DriverSpawnerConfig, RiderSpawner, RiderSpawnerConfig};
+    use crate::scenario::{
+        create_simple_matching, MatchRadius, RiderCancelConfig, RiderQuoteConfig,
+    };
     use crate::spatial::SpatialIndex;
+    use crate::spawner::{DriverSpawner, DriverSpawnerConfig, RiderSpawner, RiderSpawnerConfig};
     use crate::speed::SpeedModel;
     use crate::telemetry::{SimSnapshotConfig, SimSnapshots, SimTelemetry};
 
@@ -110,8 +112,11 @@ mod end_to_end_tests {
             .iter(&world)
             .find(|entity| world.entity(*entity).contains::<Trip>())
             .expect("trip entity");
-        
-        let drivers: Vec<_> = world.query::<(bevy_ecs::prelude::Entity, &Driver)>().iter(&world).collect();
+
+        let drivers: Vec<_> = world
+            .query::<(bevy_ecs::prelude::Entity, &Driver)>()
+            .iter(&world)
+            .collect();
         assert_eq!(drivers.len(), 1);
         let (driver_entity, driver) = drivers[0];
 
@@ -119,7 +124,10 @@ mod end_to_end_tests {
         assert_eq!(trip.state, TripState::Completed);
         assert_eq!(trip.driver, driver_entity);
         // Note: pickup cell may differ from expected due to spawner randomness within bounds
-        assert_ne!(trip.dropoff, trip.pickup, "dropoff should differ from pickup");
+        assert_ne!(
+            trip.dropoff, trip.pickup,
+            "dropoff should differ from pickup"
+        );
         // Driver should be Idle or OffDuty (if earnings/fatigue thresholds were met)
         assert!(
             driver.state == DriverState::Idle || driver.state == DriverState::OffDuty,
@@ -133,13 +141,25 @@ mod end_to_end_tests {
         let record = &telemetry.completed_trips[0];
         assert_eq!(record.driver_entity, driver_entity);
         assert_eq!(record.trip_entity, trip_entity);
-        assert!(record.completed_at >= ONE_SEC_MS, "completed_at should be in ms (>= 1s)");
+        assert!(
+            record.completed_at >= ONE_SEC_MS,
+            "completed_at should be in ms (>= 1s)"
+        );
         assert!(record.requested_at <= record.matched_at);
         assert!(record.matched_at <= record.pickup_at);
         assert!(record.pickup_at <= record.completed_at);
-        assert_eq!(record.time_to_match(), record.matched_at - record.requested_at);
-        assert_eq!(record.time_to_pickup(), record.pickup_at - record.matched_at);
-        assert_eq!(record.trip_duration(), record.completed_at - record.pickup_at);
+        assert_eq!(
+            record.time_to_match(),
+            record.matched_at - record.requested_at
+        );
+        assert_eq!(
+            record.time_to_pickup(),
+            record.pickup_at - record.matched_at
+        );
+        assert_eq!(
+            record.trip_duration(),
+            record.completed_at - record.pickup_at
+        );
     }
 
     #[test]

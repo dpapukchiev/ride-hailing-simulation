@@ -24,7 +24,7 @@ pub fn update_spatial_index_riders_system(
     let has_added = !added_riders.is_empty();
     let has_changed = !changed_positions.is_empty();
     let has_removed = !removed_riders.is_empty();
-    
+
     if !has_added && !has_changed && !has_removed {
         return;
     }
@@ -75,7 +75,7 @@ pub fn update_spatial_index_drivers_system(
     let has_added = !added_drivers.is_empty();
     let has_changed = !changed_positions.is_empty();
     let has_removed = !removed_drivers.is_empty();
-    
+
     if !has_added && !has_changed && !has_removed {
         return;
     }

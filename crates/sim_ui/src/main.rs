@@ -10,7 +10,10 @@ use sim_core::telemetry::SimSnapshots;
 
 use crate::app::SimUiApp;
 use crate::ui::controls::render_control_panel;
-use crate::ui::rendering::{draw_agent, draw_grid, MapBounds, project_cell, render_map_legend, render_metrics_legend, render_trip_table_all};
+use crate::ui::rendering::{
+    draw_agent, draw_grid, project_cell, render_map_legend, render_metrics_legend,
+    render_trip_table_all, MapBounds,
+};
 use crate::ui::utils::{
     chart_color_abandoned_quote, chart_color_active_trips, chart_color_cancelled_riders,
     chart_color_cancelled_trips, chart_color_completed_trips, chart_color_idle_drivers,
@@ -43,7 +46,7 @@ impl eframe::App for SimUiApp {
             }
             self.matching_algorithm_changed = false;
         }
-        
+
         if self.auto_run && self.started {
             let now = Instant::now();
             let last = self.last_frame_instant.unwrap_or(now);

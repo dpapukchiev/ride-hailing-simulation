@@ -58,7 +58,7 @@ impl SystemTimings {
     pub fn record(&mut self, system_name: &str, duration: Duration) {
         self.timings
             .entry(system_name.to_string())
-            .or_insert_with(SystemTiming::default)
+            .or_default()
             .record(duration);
     }
 

@@ -1,7 +1,7 @@
 //! Performance benchmarks for sim_core using Criterion.rs.
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
 use bevy_ecs::prelude::World;
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use sim_core::runner::{initialize_simulation, run_until_empty, simulation_schedule};
 use sim_core::scenario::{build_scenario, ScenarioParams};
 
@@ -11,7 +11,7 @@ fn bench_simulation_run(c: &mut Criterion) {
         ("medium", 200, 500),
         ("large", 500, 1000),
     ];
-    
+
     let mut group = c.benchmark_group("simulation_run");
     for (name, drivers, riders) in scenarios {
         group.bench_with_input(
@@ -29,7 +29,7 @@ fn bench_simulation_run(c: &mut Criterion) {
                     .with_request_window_hours(1)
                     .with_driver_spread_hours(1)
                     .with_simulation_end_time_ms(60 * 60 * 1000); // 1 hour
-                    
+
                     build_scenario(&mut world, params);
                     initialize_simulation(&mut world);
                     let mut schedule = simulation_schedule();
@@ -42,53 +42,39 @@ fn bench_simulation_run(c: &mut Criterion) {
 }
 
 fn bench_matching_algorithms(c: &mut Criterion) {
-    use sim_core::matching::{CostBasedMatching, HungarianMatching, SimpleMatching};
-    use sim_core::matching::algorithm::MatchingAlgorithm;
-    use sim_core::test_helpers::test_cell;
     use bevy_ecs::prelude::Entity;
-    
+    use sim_core::matching::algorithm::MatchingAlgorithm;
+    use sim_core::matching::{CostBasedMatching, HungarianMatching, SimpleMatching};
+    use sim_core::test_helpers::test_cell;
+
     let rider_pos = test_cell();
     let rider_entity = Entity::from_raw(1);
-    
+
     // Create 100 drivers in nearby cells
     let mut drivers = Vec::new();
     let disk = rider_pos.grid_disk::<Vec<_>>(5);
     for (i, cell) in disk.iter().take(100).enumerate() {
         drivers.push((Entity::from_raw(i as u32 + 2), *cell));
     }
-    
+
     let mut group = c.benchmark_group("matching_algorithms");
-    
+
     // Simple matching
-    let simple = SimpleMatching::default();
+    let simple = SimpleMatching;
     group.bench_function("simple_100_drivers", |b| {
         b.iter(|| {
-            black_box(simple.find_match(
-                rider_entity,
-                rider_pos,
-                None,
-                &drivers,
-                5,
-                0,
-            ));
+            black_box(simple.find_match(rider_entity, rider_pos, None, &drivers, 5, 0));
         });
     });
-    
+
     // Cost-based matching
     let cost_based = CostBasedMatching::default();
     group.bench_function("cost_based_100_drivers", |b| {
         b.iter(|| {
-            black_box(cost_based.find_match(
-                rider_entity,
-                rider_pos,
-                None,
-                &drivers,
-                5,
-                0,
-            ));
+            black_box(cost_based.find_match(rider_entity, rider_pos, None, &drivers, 5, 0));
         });
     });
-    
+
     // Hungarian batch matching
     let hungarian = HungarianMatching::default();
     let riders = vec![(rider_entity, rider_pos, None)];
@@ -100,15 +86,10 @@ fn bench_matching_algorithms(c: &mut Criterion) {
             drivers_200.push((Entity::from_raw(i as u32 + 102), *cell));
         }
         b.iter(|| {
-            black_box(hungarian.find_batch_matches(
-                &riders,
-                &drivers_200,
-                5,
-                0,
-            ));
+            black_box(hungarian.find_batch_matches(&riders, &drivers_200, 5, 0));
         });
     });
-    
+
     group.finish();
 }
 

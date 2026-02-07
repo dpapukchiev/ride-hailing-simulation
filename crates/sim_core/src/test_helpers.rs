@@ -10,18 +10,18 @@ use h3o::CellIndex;
 pub const TEST_CELL: u64 = 0x8a1fb46622dffff;
 
 /// Get the test cell as a `CellIndex`.
-/// 
+///
 /// # Panics
-/// 
+///
 /// Panics if the test cell constant is invalid (should never happen).
 pub fn test_cell() -> CellIndex {
     CellIndex::try_from(TEST_CELL).expect("TEST_CELL should be a valid H3 cell")
 }
 
 /// Get a neighbor cell of the test cell for testing purposes.
-/// 
+///
 /// # Panics
-/// 
+///
 /// Panics if no neighbor can be found (should never happen with a valid test cell).
 pub fn test_neighbor_cell() -> CellIndex {
     test_cell()
@@ -32,9 +32,9 @@ pub fn test_neighbor_cell() -> CellIndex {
 }
 
 /// Get a distant cell from the test cell for testing trip destinations.
-/// 
+///
 /// # Panics
-/// 
+///
 /// Panics if no distant cell can be found (should never happen with a valid test cell).
 pub fn test_distant_cell() -> CellIndex {
     test_cell()
@@ -45,7 +45,7 @@ pub fn test_distant_cell() -> CellIndex {
 }
 
 /// Create a basic test world with essential resources.
-/// 
+///
 /// This is a convenience function for tests that need a minimal world setup.
 /// For more complex scenarios, use the full `build_scenario` function.
 pub fn create_test_world() -> World {

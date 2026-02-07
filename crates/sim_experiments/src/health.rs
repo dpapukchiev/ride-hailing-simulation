@@ -77,7 +77,7 @@ fn normalize_metric(value: f64, min: f64, max: f64) -> f64 {
     if max == min {
         0.5
     } else {
-        ((value - min) / (max - min)).max(0.0).min(1.0)
+        ((value - min) / (max - min)).clamp(0.0, 1.0)
     }
 }
 
@@ -94,10 +94,7 @@ fn normalize_metric(value: f64, min: f64, max: f64) -> f64 {
 /// # Returns
 ///
 /// Vector of health scores in the same order as input results.
-pub fn calculate_health_scores(
-    results: &[SimulationResult],
-    weights: &HealthWeights,
-) -> Vec<f64> {
+pub fn calculate_health_scores(results: &[SimulationResult], weights: &HealthWeights) -> Vec<f64> {
     if results.is_empty() {
         return vec![];
     }
@@ -150,40 +147,28 @@ pub fn calculate_health_scores(
         .iter()
         .map(|result| {
             // Normalize metrics (higher is better for conversion, revenue, payouts)
-            let conversion_norm = normalize_metric(
-                result.conversion_rate,
-                conversion_min,
-                conversion_max,
-            );
-            let revenue_norm = normalize_metric(
-                result.platform_revenue,
-                revenue_min,
-                revenue_max,
-            );
-            let payouts_norm = normalize_metric(
-                result.driver_payouts,
-                payouts_min,
-                payouts_max,
-            );
+            let conversion_norm =
+                normalize_metric(result.conversion_rate, conversion_min, conversion_max);
+            let revenue_norm = normalize_metric(result.platform_revenue, revenue_min, revenue_max);
+            let payouts_norm = normalize_metric(result.driver_payouts, payouts_min, payouts_max);
 
             // Normalize timing metrics (lower is better, so invert)
-            let match_time_norm = 1.0 - normalize_metric(
-                result.avg_time_to_match_ms,
-                match_time_min,
-                match_time_max,
-            );
-            let pickup_time_norm = 1.0 - normalize_metric(
-                result.avg_time_to_pickup_ms,
-                pickup_time_min,
-                pickup_time_max,
-            );
+            let match_time_norm =
+                1.0 - normalize_metric(result.avg_time_to_match_ms, match_time_min, match_time_max);
+            let pickup_time_norm = 1.0
+                - normalize_metric(
+                    result.avg_time_to_pickup_ms,
+                    pickup_time_min,
+                    pickup_time_max,
+                );
 
             // Normalize abandoned rides (lower is better, so invert)
-            let abandoned_norm = 1.0 - normalize_metric(
-                result.abandoned_quote_riders as f64,
-                abandoned_min,
-                abandoned_max,
-            );
+            let abandoned_norm = 1.0
+                - normalize_metric(
+                    result.abandoned_quote_riders as f64,
+                    abandoned_min,
+                    abandoned_max,
+                );
 
             // Calculate weighted sum
             conversion_norm * weights.conversion_weight

@@ -118,9 +118,7 @@ impl MatchingAlgorithm for CostBasedMatching {
         let mut best_match: Option<(Entity, f64)> = None;
 
         for (driver_entity, driver_pos) in available_drivers {
-            let grid_dist = rider_pos
-                .grid_distance(*driver_pos)
-                .unwrap_or(i32::MAX);
+            let grid_dist = rider_pos.grid_distance(*driver_pos).unwrap_or(i32::MAX);
 
             // Filter by match radius
             if grid_dist < 0 || grid_dist > match_radius as i32 {
@@ -152,14 +150,14 @@ mod tests {
     fn selects_closer_driver() {
         let matcher = CostBasedMatching::new(DEFAULT_ETA_WEIGHT);
         let cell = h3o::CellIndex::try_from(0x8a1fb46622dffff).expect("cell");
-        
+
         // Find a nearby cell (grid distance 1)
         let nearby = cell
             .grid_disk::<Vec<_>>(1)
             .into_iter()
             .find(|c| *c != cell)
             .expect("neighbor cell");
-        
+
         // Find a far cell (grid distance 3) that's actually farther in km
         // We need to ensure it's farther in haversine distance, not just grid distance
         let nearby_dist_km = distance_km_between_cells(cell, nearby);
@@ -181,15 +179,25 @@ mod tests {
 
         // Verify nearby is actually closer in km
         let far_dist_km = distance_km_between_cells(cell, far);
-        assert!(nearby_dist_km < far_dist_km, "nearby driver should be closer: nearby={}, far={}", nearby_dist_km, far_dist_km);
+        assert!(
+            nearby_dist_km < far_dist_km,
+            "nearby driver should be closer: nearby={}, far={}",
+            nearby_dist_km,
+            far_dist_km
+        );
 
         // Test with far driver first to ensure we select the better one
         let drivers = vec![far_driver, nearby_driver];
         let result = matcher.find_match(rider_entity, cell, None, &drivers, 5, 0);
 
         // Should select the closer driver (entity 2)
-        assert_eq!(result, Some(bevy_ecs::prelude::Entity::from_raw(2)), 
-                   "Expected nearby driver (entity 2), got {:?}. Nearby dist: {}km, Far dist: {}km", 
-                   result, nearby_dist_km, far_dist_km);
+        assert_eq!(
+            result,
+            Some(bevy_ecs::prelude::Entity::from_raw(2)),
+            "Expected nearby driver (entity 2), got {:?}. Nearby dist: {}km, Far dist: {}km",
+            result,
+            nearby_dist_km,
+            far_dist_km
+        );
     }
 }

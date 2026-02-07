@@ -59,7 +59,7 @@ impl SimulationResult {
         sorted.sort();
 
         let avg = sorted.iter().sum::<u64>() as f64 / sorted.len() as f64;
-        let median = if sorted.len() % 2 == 0 {
+        let median = if sorted.len().is_multiple_of(2) {
             (sorted[sorted.len() / 2 - 1] + sorted[sorted.len() / 2]) as f64 / 2.0
         } else {
             sorted[sorted.len() / 2] as f64
@@ -79,19 +79,28 @@ impl SimulationResult {
 /// and timing statistics.
 pub fn extract_metrics(world: &mut World) -> SimulationResult {
     // Extract telemetry data first (immutable borrow)
-    let (riders_completed_total, riders_cancelled_total, riders_abandoned_quote_total,
-         platform_revenue_total, total_fares_collected,
-         riders_abandoned_price, riders_abandoned_eta, riders_abandoned_stochastic,
-         completed_trips_data) = {
+    let (
+        riders_completed_total,
+        riders_cancelled_total,
+        riders_abandoned_quote_total,
+        platform_revenue_total,
+        total_fares_collected,
+        riders_abandoned_price,
+        riders_abandoned_eta,
+        riders_abandoned_stochastic,
+        completed_trips_data,
+    ) = {
         let telemetry = world
             .get_resource::<SimTelemetry>()
             .expect("SimTelemetry resource not found");
-        
+
         // Clone the completed trips data we need
-        let trips_data: Vec<(u64, u64, u64)> = telemetry.completed_trips.iter()
+        let trips_data: Vec<(u64, u64, u64)> = telemetry
+            .completed_trips
+            .iter()
             .map(|trip| (trip.requested_at, trip.matched_at, trip.pickup_at))
             .collect();
-        
+
         (
             telemetry.riders_completed_total,
             telemetry.riders_cancelled_total,
@@ -113,10 +122,9 @@ pub fn extract_metrics(world: &mut World) -> SimulationResult {
     };
 
     // Calculate total riders (completed + cancelled + abandoned)
-    let total_resolved = riders_completed_total
-        + riders_cancelled_total
-        + riders_abandoned_quote_total;
-    
+    let total_resolved =
+        riders_completed_total + riders_cancelled_total + riders_abandoned_quote_total;
+
     // Calculate conversion rate
     let conversion_rate = if total_resolved > 0 {
         riders_completed_total as f64 / total_resolved as f64

@@ -277,9 +277,9 @@ impl DriverSpawner {
 }
 
 /// Sample a random H3 cell (resolution 9) within the given lat/lng bounds.
-/// 
+///
 /// # Errors
-/// 
+///
 /// Returns an error if the generated coordinates are invalid (out of valid lat/lng range).
 /// This should not happen with reasonable bounds, but can occur with corrupted data.
 pub fn random_cell_in_bounds<R: rand::Rng>(
@@ -305,7 +305,7 @@ pub fn random_cell_in_bounds<R: rand::Rng>(
 
     let lat = rng.gen_range(lat_min..=lat_max);
     let lng = rng.gen_range(lng_min..=lng_max);
-    
+
     let coord = LatLng::new(lat, lng)
         .map_err(|e| format!("Invalid coordinates ({}, {}): {}", lat, lng, e))?;
     Ok(coord.to_cell(Resolution::Nine))

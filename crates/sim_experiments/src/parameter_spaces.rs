@@ -7,7 +7,7 @@ use crate::ParameterSpace;
 use sim_core::scenario::MatchingAlgorithmType;
 
 /// Convert a human-readable date/time to Unix epoch milliseconds (UTC).
-/// 
+///
 /// # Arguments
 /// * `year` - Year (e.g., 2026)
 /// * `month` - Month (1-12)
@@ -20,18 +20,22 @@ fn datetime_to_unix_ms(year: i32, month: u32, day: u32, hour: u32, minute: u32) 
     let y = year as i64;
     let m = month as i64;
     let d = day as i64;
-    
+
     // Adjust for month
     let adjusted_m = if m <= 2 { m + 12 } else { m };
     let adjusted_y = if m <= 2 { y - 1 } else { y };
-    
+
     // Calculate days since epoch (1970-01-01)
-    let era = (if adjusted_y >= 0 { adjusted_y } else { adjusted_y - 399 }) / 400;
+    let era = (if adjusted_y >= 0 {
+        adjusted_y
+    } else {
+        adjusted_y - 399
+    }) / 400;
     let yoe = adjusted_y - era * 400;
     let doy = (153 * (adjusted_m - 3) + 2) / 5 + d - 1;
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     let days = era * 146097 + doe - 719468;
-    
+
     // Add time components
     let total_secs = days * 86400 + hour as i64 * 3600 + minute as i64 * 60;
     total_secs * 1000 // Convert to milliseconds
@@ -53,9 +57,9 @@ pub fn comprehensive_space() -> ParameterSpace {
         ])
         .simulation_duration_hours(vec![Some(8), Some(18)])
         .matching_algorithm_type(vec![
-            MatchingAlgorithmType::Simple, 
-            MatchingAlgorithmType::CostBased, 
-            MatchingAlgorithmType::Hungarian
+            MatchingAlgorithmType::Simple,
+            MatchingAlgorithmType::CostBased,
+            MatchingAlgorithmType::Hungarian,
         ])
         .batch_matching_enabled(vec![false, true])
         .batch_interval_secs(vec![5, 10, 20])
@@ -92,7 +96,7 @@ pub fn surge_pricing_space() -> ParameterSpace {
         .match_radius(vec![10])
         .matching_algorithm_type(vec![MatchingAlgorithmType::Hungarian])
         .batch_matching_enabled(vec![true])
-        .batch_interval_secs(vec![10 ,20, 30])
+        .batch_interval_secs(vec![10, 20, 30])
         .eta_weight(vec![0.1])
 }
 
@@ -107,9 +111,9 @@ pub fn matching_focused_space() -> ParameterSpace {
         .num_riders(vec![500])
         .match_radius(vec![10])
         .matching_algorithm_type(vec![
-            MatchingAlgorithmType::Simple, 
-            MatchingAlgorithmType::CostBased, 
-            MatchingAlgorithmType::Hungarian
+            MatchingAlgorithmType::Simple,
+            MatchingAlgorithmType::CostBased,
+            MatchingAlgorithmType::Hungarian,
         ])
         .batch_matching_enabled(vec![false, true])
         .batch_interval_secs(vec![5, 10, 20])
@@ -166,7 +170,7 @@ pub fn refined_surge_commission_space() -> ParameterSpace {
         .match_radius(vec![5, 10])
         .matching_algorithm_type(vec![
             MatchingAlgorithmType::CostBased,
-            MatchingAlgorithmType::Hungarian
+            MatchingAlgorithmType::Hungarian,
         ])
         .batch_matching_enabled(vec![true])
         .batch_interval_secs(vec![3, 5])

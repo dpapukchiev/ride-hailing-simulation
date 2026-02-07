@@ -19,18 +19,18 @@
 //! be swapped dynamically during simulation execution.
 
 pub mod algorithm;
-pub mod types;
-pub mod simple;
 pub mod cost_based;
 pub mod hungarian;
+pub mod simple;
+pub mod types;
 
 use bevy_ecs::prelude::Resource;
 
 pub use algorithm::MatchingAlgorithm;
-pub use types::{MatchCandidate, MatchResult};
-pub use simple::SimpleMatching;
 pub use cost_based::{CostBasedMatching, DEFAULT_ETA_WEIGHT};
 pub use hungarian::HungarianMatching;
+pub use simple::SimpleMatching;
+pub use types::{MatchCandidate, MatchResult};
 
 /// Resource wrapper for the matching algorithm trait object.
 #[derive(Resource)]

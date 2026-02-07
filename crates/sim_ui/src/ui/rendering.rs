@@ -84,7 +84,10 @@ pub fn draw_grid(painter: &egui::Painter, bounds: &MapBounds, rect: egui::Rect, 
     while lat <= bounds.lat_max {
         let y = (bounds.lat_max - lat) / (bounds.lat_max - bounds.lat_min);
         let py = rect.top() + rect.height() * y as f32;
-        painter.line_segment([egui::pos2(rect.left(), py), egui::pos2(rect.right(), py)], stroke);
+        painter.line_segment(
+            [egui::pos2(rect.left(), py), egui::pos2(rect.right(), py)],
+            stroke,
+        );
         lat += lat_step;
     }
 
@@ -92,7 +95,10 @@ pub fn draw_grid(painter: &egui::Painter, bounds: &MapBounds, rect: egui::Rect, 
     while lng <= bounds.lng_max {
         let x = (lng - bounds.lng_min) / (bounds.lng_max - bounds.lng_min);
         let px = rect.left() + rect.width() * x as f32;
-        painter.line_segment([egui::pos2(px, rect.top()), egui::pos2(px, rect.bottom())], stroke);
+        painter.line_segment(
+            [egui::pos2(px, rect.top()), egui::pos2(px, rect.bottom())],
+            stroke,
+        );
         lng += lng_step;
     }
 }
@@ -111,7 +117,11 @@ pub fn render_map_legend(ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
         ui.label("Riders:");
         legend_item(ui, rider_color(RiderState::Browsing, None), "Browsing");
-        legend_item(ui, rider_color(RiderState::Waiting, None), "Waiting for match");
+        legend_item(
+            ui,
+            rider_color(RiderState::Waiting, None),
+            "Waiting for match",
+        );
         legend_item(ui, rider_color_waiting_for_pickup(), "Waiting for pickup");
         legend_item(ui, rider_color(RiderState::InTransit, None), "In transit");
         legend_item(ui, rider_color(RiderState::Completed, None), "Completed");
@@ -241,7 +251,10 @@ fn render_trip_table_section(
                         ui.label(format_sim_datetime_from_ms(sim_epoch_ms, trip.matched_at));
                         ui.label(format_optional_sim_datetime(sim_epoch_ms, trip.pickup_at));
                         ui.label(format_optional_sim_datetime(sim_epoch_ms, trip.dropoff_at));
-                        ui.label(format_optional_sim_datetime(sim_epoch_ms, trip.cancelled_at));
+                        ui.label(format_optional_sim_datetime(
+                            sim_epoch_ms,
+                            trip.cancelled_at,
+                        ));
                         ui.end_row();
                     }
                 });

@@ -44,26 +44,28 @@ pub fn show_quote_system(
 
     let surge_multiplier = if pricing_config.surge_enabled && pricing_config.surge_radius_k > 0 {
         let cluster_cells = grid_disk_cached(pickup, pricing_config.surge_radius_k);
-        
+
         // Use spatial index if available, otherwise fall back to full scan
         let (demand, supply) = if let Some(index) = spatial_index.as_deref() {
             // Get entities in cluster cells from spatial index
             let rider_entities = index.get_riders_in_cells(&cluster_cells);
             let driver_entities = index.get_drivers_in_cells(&cluster_cells);
-            
+
             // Query only those entities and filter by state
             let demand = rider_entities
                 .iter()
                 .filter_map(|&entity| riders.get(entity).ok())
-                .filter(|(_, r, _)| r.state == RiderState::Browsing || r.state == RiderState::Waiting)
+                .filter(|(_, r, _)| {
+                    r.state == RiderState::Browsing || r.state == RiderState::Waiting
+                })
                 .count();
-            
+
             let supply = driver_entities
                 .iter()
                 .filter_map(|&entity| drivers.get(entity).ok())
                 .filter(|(d, _)| d.state == DriverState::Idle)
                 .count();
-            
+
             (demand, supply)
         } else {
             // Fallback to full scan if spatial index not available
@@ -80,7 +82,7 @@ pub fn show_quote_system(
                 .count();
             (demand, supply)
         };
-        
+
         if demand > supply && supply > 0 {
             let raw = 1.0 + (demand - supply) as f64 / supply as f64;
             raw.min(pricing_config.surge_max_multiplier)

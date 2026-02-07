@@ -31,22 +31,30 @@ pub fn quote_accepted_system(
     }
 
     // Only schedule per-rider TryMatch when batch matching is disabled
-    let batch_enabled = batch_config.as_deref().map_or(false, |c| c.enabled);
+    let batch_enabled = batch_config.as_deref().is_some_and(|c| c.enabled);
     if !batch_enabled {
-        clock.schedule_in_secs(1, EventKind::TryMatch, Some(EventSubject::Rider(rider_entity)));
+        clock.schedule_in_secs(
+            1,
+            EventKind::TryMatch,
+            Some(EventSubject::Rider(rider_entity)),
+        );
     }
 
     let config = cancel_config.as_deref().copied().unwrap_or_default();
     let min_wait_secs = config.min_wait_secs;
     let max_wait_secs = config.max_wait_secs.max(config.min_wait_secs);
-    
+
     // Sample cancellation time from uniform distribution between min and max
     // Use rider entity ID to ensure each rider gets a different sample even with the same seed
     let seed = config.seed.wrapping_add(rider_entity.index() as u64);
     let mut rng = StdRng::seed_from_u64(seed);
     let wait_secs = rng.gen_range(min_wait_secs..=max_wait_secs);
-    
-    clock.schedule_in_secs(wait_secs, EventKind::RiderCancel, Some(EventSubject::Rider(rider_entity)));
+
+    clock.schedule_in_secs(
+        wait_secs,
+        EventKind::RiderCancel,
+        Some(EventSubject::Rider(rider_entity)),
+    );
 }
 
 #[cfg(test)]
@@ -57,12 +65,12 @@ mod tests {
     #[test]
     fn quote_accepted_transitions_rider_state() {
         use crate::test_helpers::test_neighbor_cell;
-        
+
         let mut world = World::new();
         world.insert_resource(SimulationClock::default());
         world.insert_resource(RiderCancelConfig::default());
         let destination = test_neighbor_cell();
-        
+
         let rider_entity = world
             .spawn((
                 Rider {
@@ -74,13 +82,18 @@ mod tests {
                     accepted_fare: None,
                     last_rejection_reason: None,
                 },
-                RiderQuote { fare: 12.5, eta_ms: 60_000 },
+                RiderQuote {
+                    fare: 12.5,
+                    eta_ms: 60_000,
+                },
             ))
             .id();
 
-        world
-            .resource_mut::<SimulationClock>()
-            .schedule_at_secs(1, EventKind::QuoteAccepted, Some(EventSubject::Rider(rider_entity)));
+        world.resource_mut::<SimulationClock>().schedule_at_secs(
+            1,
+            EventKind::QuoteAccepted,
+            Some(EventSubject::Rider(rider_entity)),
+        );
 
         let event = world
             .resource_mut::<SimulationClock>()
@@ -122,6 +135,9 @@ mod tests {
             min_timestamp,
             max_timestamp
         );
-        assert_eq!(cancel_event.subject, Some(EventSubject::Rider(rider_entity)));
+        assert_eq!(
+            cancel_event.subject,
+            Some(EventSubject::Rider(rider_entity))
+        );
     }
 }

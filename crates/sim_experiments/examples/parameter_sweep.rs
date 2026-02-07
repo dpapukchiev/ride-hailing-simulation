@@ -11,10 +11,12 @@
 
 use sim_core::scenario::MatchingAlgorithmType;
 use sim_experiments::{
-    export_to_csv, 
-    // export_to_json, export_to_parquet, 
-    find_best_parameters, find_best_result_index,
-    HealthWeights, run_parallel_experiments,
+    export_to_csv,
+    // export_to_json, export_to_parquet,
+    find_best_parameters,
+    find_best_result_index,
+    run_parallel_experiments,
+    HealthWeights,
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -30,7 +32,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Generating parameter sets...");
     let parameter_sets = space.generate();
-    println!("Generated {} parameter combinations (invalid combinations filtered out)", parameter_sets.len());
+    println!(
+        "Generated {} parameter combinations (invalid combinations filtered out)",
+        parameter_sets.len()
+    );
 
     // Run experiments in parallel (uses all available CPU cores by default)
     println!("Running simulations in parallel...");
@@ -40,16 +45,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Calculate health scores
     println!("Calculating health scores...");
     let weights = HealthWeights::default();
-    let best_idx = find_best_result_index(&results, &weights)
-        .expect("No results to analyze");
+    let best_idx = find_best_result_index(&results, &weights).expect("No results to analyze");
 
     println!("\n=== Best Configuration ===");
     let best_result = &results[best_idx];
-    println!("Conversion rate: {:.2}%", best_result.conversion_rate * 100.0);
+    println!(
+        "Conversion rate: {:.2}%",
+        best_result.conversion_rate * 100.0
+    );
     println!("Platform revenue: ${:.2}", best_result.platform_revenue);
     println!("Driver payouts: ${:.2}", best_result.driver_payouts);
-    println!("Avg time to match: {:.1}s", best_result.avg_time_to_match_ms / 1000.0);
-    println!("Avg time to pickup: {:.1}s", best_result.avg_time_to_pickup_ms / 1000.0);
+    println!(
+        "Avg time to match: {:.1}s",
+        best_result.avg_time_to_match_ms / 1000.0
+    );
+    println!(
+        "Avg time to pickup: {:.1}s",
+        best_result.avg_time_to_pickup_ms / 1000.0
+    );
     println!("Abandoned riders: {}", best_result.abandoned_quote_riders);
 
     if let Some(best_params) = find_best_parameters(&results, &parameter_sets, &weights) {

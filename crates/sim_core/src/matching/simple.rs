@@ -42,9 +42,7 @@ impl MatchingAlgorithm for SimpleMatching {
         available_drivers
             .iter()
             .find(|(_driver_entity, driver_pos)| {
-                let dist = rider_pos
-                    .grid_distance(*driver_pos)
-                    .unwrap_or(i32::MAX);
+                let dist = rider_pos.grid_distance(*driver_pos).unwrap_or(i32::MAX);
                 dist >= 0 && dist <= match_radius as i32
             })
             .map(|(driver_entity, _)| *driver_entity)

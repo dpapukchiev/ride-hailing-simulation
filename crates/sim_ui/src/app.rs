@@ -3,7 +3,7 @@
 use bevy_ecs::prelude::World;
 use std::time::Instant;
 
-use sim_core::matching::{DEFAULT_ETA_WEIGHT, MatchingAlgorithmResource};
+use sim_core::matching::{MatchingAlgorithmResource, DEFAULT_ETA_WEIGHT};
 use sim_core::pricing::PricingConfig;
 use sim_core::runner::{run_next_event, simulation_schedule};
 use sim_core::scenario::{
@@ -154,9 +154,11 @@ impl SimUiApp {
             max_quote_rejections,
             re_quote_delay_secs: 10,
             accept_probability,
-            seed: if seed_enabled { seed_value } else { 0u64 }.wrapping_add(0x711073_beef_u64),
+            seed: if seed_enabled { seed_value } else { 0u64 }.wrapping_add(0x0071_1073_beef_u64),
             max_willingness_to_pay,
-            max_acceptable_eta_ms: max_acceptable_eta_min.saturating_mul(60).saturating_mul(1000),
+            max_acceptable_eta_ms: max_acceptable_eta_min
+                .saturating_mul(60)
+                .saturating_mul(1000),
         })
         .with_driver_decision_config(DriverDecisionConfig {
             seed: if seed_enabled { seed_value } else { 0u64 }.wrapping_add(0xdead_beef_u64),
@@ -303,7 +305,13 @@ impl SimUiApp {
 
     /// Build scenario parameters from current UI state.
     pub fn current_params(&self) -> ScenarioParams {
-        let start_epoch_ms = datetime_to_unix_ms(self.start_year, self.start_month, self.start_day, self.start_hour, self.start_minute);
+        let start_epoch_ms = datetime_to_unix_ms(
+            self.start_year,
+            self.start_month,
+            self.start_day,
+            self.start_hour,
+            self.start_minute,
+        );
         let mut params = ScenarioParams {
             num_riders: self.num_riders,
             num_drivers: self.num_drivers,
@@ -336,12 +344,25 @@ impl SimUiApp {
                 max_quote_rejections: self.max_quote_rejections,
                 re_quote_delay_secs: 10,
                 accept_probability: self.accept_probability,
-                seed: if self.seed_enabled { self.seed_value } else { 0u64 }.wrapping_add(0x711073_beef_u64),
+                seed: if self.seed_enabled {
+                    self.seed_value
+                } else {
+                    0u64
+                }
+                .wrapping_add(0x0071_1073_beef_u64),
                 max_willingness_to_pay: self.max_willingness_to_pay,
-                max_acceptable_eta_ms: self.max_acceptable_eta_min.saturating_mul(60).saturating_mul(1000),
+                max_acceptable_eta_ms: self
+                    .max_acceptable_eta_min
+                    .saturating_mul(60)
+                    .saturating_mul(1000),
             })
             .with_driver_decision_config(DriverDecisionConfig {
-                seed: if self.seed_enabled { self.seed_value } else { 0u64 }.wrapping_add(0xdead_beef_u64),
+                seed: if self.seed_enabled {
+                    self.seed_value
+                } else {
+                    0u64
+                }
+                .wrapping_add(0xdead_beef_u64),
                 base_acceptance_score: self.driver_base_acceptance_score,
                 fare_weight: self.driver_fare_weight,
                 pickup_distance_penalty: self.driver_pickup_distance_penalty,

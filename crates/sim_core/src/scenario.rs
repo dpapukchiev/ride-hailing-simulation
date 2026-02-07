@@ -7,11 +7,13 @@ use bevy_ecs::prelude::{Resource, World};
 
 use crate::clock::SimulationClock;
 use crate::distributions::TimeOfDayDistribution;
-use crate::matching::{CostBasedMatching, HungarianMatching, MatchingAlgorithmResource, SimpleMatching};
+use crate::matching::{
+    CostBasedMatching, HungarianMatching, MatchingAlgorithmResource, SimpleMatching,
+};
 use crate::patterns::{apply_driver_patterns, apply_rider_patterns};
 use crate::pricing::PricingConfig;
-use crate::spawner::{DriverSpawner, DriverSpawnerConfig, RiderSpawner, RiderSpawnerConfig};
 use crate::spatial::SpatialIndex;
+use crate::spawner::{DriverSpawner, DriverSpawnerConfig, RiderSpawner, RiderSpawnerConfig};
 use crate::speed::SpeedModel;
 use crate::telemetry::{SimSnapshotConfig, SimSnapshots, SimTelemetry};
 
@@ -287,7 +289,10 @@ impl ScenarioParams {
     }
 
     /// Set driver decision configuration.
-    pub fn with_driver_decision_config(mut self, driver_decision_config: DriverDecisionConfig) -> Self {
+    pub fn with_driver_decision_config(
+        mut self,
+        driver_decision_config: DriverDecisionConfig,
+    ) -> Self {
         self.driver_decision_config = Some(driver_decision_config);
         self
     }
@@ -302,7 +307,13 @@ const GRID_DISK_THRESHOLD: u32 = 20;
 const MAX_REJECTION_SAMPLING_ATTEMPTS: usize = 2000;
 
 /// Helper function to check if a cell is within geographic bounds.
-fn cell_in_bounds(cell: h3o::CellIndex, lat_min: f64, lat_max: f64, lng_min: f64, lng_max: f64) -> bool {
+fn cell_in_bounds(
+    cell: h3o::CellIndex,
+    lat_min: f64,
+    lat_max: f64,
+    lng_min: f64,
+    lng_max: f64,
+) -> bool {
     let coord: h3o::LatLng = cell.into();
     let lat = coord.lat();
     let lng = coord.lng();
@@ -310,7 +321,12 @@ fn cell_in_bounds(cell: h3o::CellIndex, lat_min: f64, lat_max: f64, lng_min: f64
 }
 
 /// Helper function to check if a cell is within the desired distance range from pickup.
-fn is_valid_destination(cell: h3o::CellIndex, pickup: h3o::CellIndex, min_cells: u32, max_cells: u32) -> bool {
+fn is_valid_destination(
+    cell: h3o::CellIndex,
+    pickup: h3o::CellIndex,
+    min_cells: u32,
+    max_cells: u32,
+) -> bool {
     pickup
         .grid_distance(cell)
         .map(|d| d >= min_cells as i32 && d <= max_cells as i32)
@@ -319,6 +335,7 @@ fn is_valid_destination(cell: h3o::CellIndex, pickup: h3o::CellIndex, min_cells:
 
 /// Strategy for small distances: generate grid disk and filter candidates.
 /// More efficient for small radii where the disk size is manageable.
+#[allow(clippy::too_many_arguments)]
 fn grid_disk_strategy<R: rand::Rng>(
     rng: &mut R,
     pickup: h3o::CellIndex,
@@ -338,7 +355,7 @@ fn grid_disk_strategy<R: rand::Rng>(
                 && cell_in_bounds(*c, lat_min, lat_max, lng_min, lng_max)
         })
         .collect();
-    
+
     if candidates.is_empty() {
         None
     } else {
@@ -361,7 +378,7 @@ fn rejection_sampling_strategy<R: rand::Rng>(
     lng_max: f64,
 ) -> Option<h3o::CellIndex> {
     use crate::spawner::random_cell_in_bounds;
-    
+
     for _ in 0..MAX_REJECTION_SAMPLING_ATTEMPTS {
         let cell = match random_cell_in_bounds(rng, lat_min, lat_max, lng_min, lng_max) {
             Ok(cell) => cell,
@@ -375,17 +392,18 @@ fn rejection_sampling_strategy<R: rand::Rng>(
                     .unwrap_or(pickup)
             }
         };
-        
+
         if is_valid_destination(cell, pickup, min_cells, max_cells) {
             return Some(cell);
         }
     }
-    
+
     None
 }
 
 /// Fallback strategy: use a smaller grid_disk with radius between min and max.
 /// Used when rejection sampling fails to find a valid destination.
+#[allow(clippy::too_many_arguments)]
 fn fallback_grid_disk_strategy<R: rand::Rng>(
     rng: &mut R,
     pickup: h3o::CellIndex,
@@ -407,7 +425,7 @@ fn fallback_grid_disk_strategy<R: rand::Rng>(
                 && cell_in_bounds(*c, lat_min, lat_max, lng_min, lng_max)
         })
         .collect();
-    
+
     if candidates.is_empty() {
         None
     } else {
@@ -419,6 +437,7 @@ fn fallback_grid_disk_strategy<R: rand::Rng>(
 /// Pick a random destination within [min_cells, max_cells] H3 distance from pickup.
 /// Uses rejection sampling for efficiency when max_cells is large (avoids generating huge grid disks).
 /// This function is exported for use by spawner systems.
+#[allow(clippy::too_many_arguments)]
 pub fn random_destination<R: rand::Rng>(
     rng: &mut R,
     pickup: h3o::CellIndex,
@@ -431,7 +450,7 @@ pub fn random_destination<R: rand::Rng>(
     lng_max: f64,
 ) -> h3o::CellIndex {
     let max_cells = max_cells.max(min_cells);
-    
+
     // For small radii, use grid_disk approach (more efficient)
     if max_cells <= GRID_DISK_THRESHOLD {
         if let Some(destination) = grid_disk_strategy(
@@ -441,28 +460,28 @@ pub fn random_destination<R: rand::Rng>(
         }
         // If grid_disk fails, fall through to rejection sampling
     }
-    
+
     // For large radii, use rejection sampling (much faster)
     if let Some(destination) = rejection_sampling_strategy(
         rng, pickup, min_cells, max_cells, lat_min, lat_max, lng_min, lng_max,
     ) {
         return destination;
     }
-    
+
     // Fallback: try a smaller grid_disk
     if let Some(destination) = fallback_grid_disk_strategy(
         rng, pickup, geo, min_cells, max_cells, lat_min, lat_max, lng_min, lng_max,
     ) {
         return destination;
     }
-    
+
     // Last resort: return pickup
     pickup
 }
 
 /// Create a simple matching algorithm (first match within radius).
 pub fn create_simple_matching() -> MatchingAlgorithmResource {
-    MatchingAlgorithmResource::new(Box::new(SimpleMatching::default()))
+    MatchingAlgorithmResource::new(Box::new(SimpleMatching))
 }
 
 /// Create a cost-based matching algorithm with the given ETA weight.
@@ -477,14 +496,22 @@ pub fn create_hungarian_matching(eta_weight: f64) -> MatchingAlgorithmResource {
 
 /// Create a realistic time-of-day pattern for rider demand.
 /// Uses patterns from the patterns module.
-fn create_rider_time_of_day_pattern(base_rate_per_sec: f64, epoch_ms: i64, seed: u64) -> TimeOfDayDistribution {
+fn create_rider_time_of_day_pattern(
+    base_rate_per_sec: f64,
+    epoch_ms: i64,
+    seed: u64,
+) -> TimeOfDayDistribution {
     let dist = TimeOfDayDistribution::new(base_rate_per_sec, epoch_ms, seed);
     apply_rider_patterns(dist)
 }
 
 /// Create a realistic time-of-day pattern for driver supply.
 /// Uses patterns from the patterns module.
-fn create_driver_time_of_day_pattern(base_rate_per_sec: f64, epoch_ms: i64, seed: u64) -> TimeOfDayDistribution {
+fn create_driver_time_of_day_pattern(
+    base_rate_per_sec: f64,
+    epoch_ms: i64,
+    seed: u64,
+) -> TimeOfDayDistribution {
     let dist = TimeOfDayDistribution::new(base_rate_per_sec, epoch_ms, seed);
     apply_driver_patterns(dist)
 }
@@ -497,11 +524,11 @@ pub fn build_scenario(world: &mut World, params: ScenarioParams) {
     let mut clock = SimulationClock::default();
     clock.set_epoch_ms(epoch_ms);
     world.insert_resource(clock);
-    
+
     world.insert_resource(SimTelemetry::default());
     world.insert_resource(SimSnapshotConfig::default());
     world.insert_resource(SimSnapshots::default());
-    
+
     // Only enable spatial index for larger scenarios where it provides benefit
     // Threshold: enable if total entities (riders + drivers) > 200
     // For smaller scenarios, full scans are fast enough and spatial index overhead hurts
@@ -509,7 +536,7 @@ pub fn build_scenario(world: &mut World, params: ScenarioParams) {
     if total_entities > 200 {
         world.insert_resource(SpatialIndex::new());
     }
-    
+
     world.insert_resource(MatchRadius(params.match_radius));
     world.insert_resource(BatchMatchingConfig {
         enabled: params.batch_matching_enabled.unwrap_or(true),
@@ -524,22 +551,35 @@ pub fn build_scenario(world: &mut World, params: ScenarioParams) {
         max_wait_secs: 2400,
         seed: seed.wrapping_add(0xcafe_babe), // Use a different seed offset for cancellation
     });
-    world.insert_resource(params.rider_quote_config.unwrap_or_else(|| RiderQuoteConfig {
-        max_quote_rejections: 3,
-        re_quote_delay_secs: 10,
-        accept_probability: 0.8,
-        seed: seed.wrapping_add(0x711073_beef),
-        max_willingness_to_pay: 100.0,
-        max_acceptable_eta_ms: 600_000,
-    }));
-    world.insert_resource(params.driver_decision_config.unwrap_or_else(|| DriverDecisionConfig {
-        seed: seed.wrapping_add(0xdead_beef),
-        ..Default::default()
-    }));
+    world.insert_resource(
+        params
+            .rider_quote_config
+            .unwrap_or_else(|| RiderQuoteConfig {
+                max_quote_rejections: 3,
+                re_quote_delay_secs: 10,
+                accept_probability: 0.8,
+                seed: seed.wrapping_add(0x0071_1073_beef),
+                max_willingness_to_pay: 100.0,
+                max_acceptable_eta_ms: 600_000,
+            }),
+    );
+    world.insert_resource(
+        params
+            .driver_decision_config
+            .unwrap_or_else(|| DriverDecisionConfig {
+                seed: seed.wrapping_add(0xdead_beef),
+                ..Default::default()
+            }),
+    );
     world.insert_resource(SpeedModel::new(params.seed.map(|seed| seed ^ 0x5eed_cafe)));
     // Set matching algorithm based on params
-    let eta_weight = params.eta_weight.unwrap_or(crate::matching::DEFAULT_ETA_WEIGHT);
-    let algorithm = match params.matching_algorithm_type.unwrap_or(MatchingAlgorithmType::Hungarian) {
+    let eta_weight = params
+        .eta_weight
+        .unwrap_or(crate::matching::DEFAULT_ETA_WEIGHT);
+    let algorithm = match params
+        .matching_algorithm_type
+        .unwrap_or(MatchingAlgorithmType::Hungarian)
+    {
         MatchingAlgorithmType::Simple => create_simple_matching(),
         MatchingAlgorithmType::CostBased => create_cost_based_matching(eta_weight),
         MatchingAlgorithmType::Hungarian => create_hungarian_matching(eta_weight),
@@ -569,9 +609,13 @@ pub fn build_scenario(world: &mut World, params: ScenarioParams) {
     };
     // Adjust base rate to account for multipliers (average multiplier is ~1.3)
     let base_rate_per_sec = avg_rate_per_sec / RIDER_DEMAND_AVERAGE_MULTIPLIER;
-    
+
     let rider_spawner_config = RiderSpawnerConfig {
-        inter_arrival_dist: Box::new(create_rider_time_of_day_pattern(base_rate_per_sec, epoch_ms, seed)),
+        inter_arrival_dist: Box::new(create_rider_time_of_day_pattern(
+            base_rate_per_sec,
+            epoch_ms,
+            seed,
+        )),
         lat_min,
         lat_max,
         lng_min,
@@ -590,15 +634,23 @@ pub fn build_scenario(world: &mut World, params: ScenarioParams) {
     // Drivers spawn continuously over the driver_spread_ms window with time-varying rates
     // Note: initial_driver_count are spawned immediately, so we subtract them from the scheduled count
     let driver_seed = seed.wrapping_add(0xdead_beef);
-    let scheduled_driver_count = params.num_drivers.saturating_sub(params.initial_driver_count);
+    let scheduled_driver_count = params
+        .num_drivers
+        .saturating_sub(params.initial_driver_count);
     let driver_base_rate_per_sec = if driver_spread_ms > 0 && scheduled_driver_count > 0 {
-        (scheduled_driver_count as f64) / (driver_spread_ms as f64 / 1000.0) / DRIVER_SUPPLY_AVERAGE_MULTIPLIER
+        (scheduled_driver_count as f64)
+            / (driver_spread_ms as f64 / 1000.0)
+            / DRIVER_SUPPLY_AVERAGE_MULTIPLIER
     } else {
         0.0
     };
-    
+
     let driver_spawner_config = DriverSpawnerConfig {
-        inter_arrival_dist: Box::new(create_driver_time_of_day_pattern(driver_base_rate_per_sec, epoch_ms, driver_seed)),
+        inter_arrival_dist: Box::new(create_driver_time_of_day_pattern(
+            driver_base_rate_per_sec,
+            epoch_ms,
+            driver_seed,
+        )),
         lat_min,
         lat_max,
         lng_min,

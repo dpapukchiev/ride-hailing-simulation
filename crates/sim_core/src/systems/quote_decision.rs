@@ -71,8 +71,8 @@ pub fn quote_decision_system(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy_ecs::prelude::{Schedule, World};
     use crate::ecs::Position;
+    use bevy_ecs::prelude::{Schedule, World};
 
     #[test]
     fn quote_decision_with_accept_probability_one_schedules_accepted() {

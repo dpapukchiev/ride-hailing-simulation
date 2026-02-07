@@ -4,10 +4,10 @@
 //! multiple simulations in parallel for parameter sweeps.
 
 use bevy_ecs::prelude::World;
+use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use sim_core::runner::{initialize_simulation, run_until_empty, simulation_schedule};
 use sim_core::scenario::build_scenario;
-use indicatif::{ProgressBar, ProgressStyle};
 
 use crate::metrics::{extract_metrics, SimulationResult};
 use crate::parameters::ParameterSet;
@@ -27,7 +27,7 @@ use crate::parameters::ParameterSet;
 pub fn run_single_simulation(param_set: &ParameterSet) -> SimulationResult {
     let mut world = World::new();
     let mut params = param_set.scenario_params();
-    
+
     // Set simulation end time if not already set (fallback to prevent infinite loops)
     // If simulation_duration_hours was set in ParameterSpace, it should already be in params
     if params.simulation_end_time_ms.is_none() {
@@ -36,14 +36,14 @@ pub fn run_single_simulation(param_set: &ParameterSet) -> SimulationResult {
         let end_time_ms = request_window_ms.saturating_add(2 * 60 * 60 * 1000);
         params.simulation_end_time_ms = Some(end_time_ms);
     }
-    
+
     build_scenario(&mut world, params);
     initialize_simulation(&mut world);
-    
+
     let mut schedule = simulation_schedule();
     // Allow enough steps for large simulations (2M should be sufficient)
     let _steps = run_until_empty(&mut world, &mut schedule, 2_000_000);
-    
+
     extract_metrics(&mut world)
 }
 
@@ -91,7 +91,9 @@ pub fn run_parallel_experiments_with_progress(
         let bar = ProgressBar::new(total as u64);
         bar.set_style(
             ProgressStyle::default_bar()
-                .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})")
+                .template(
+                    "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})",
+                )
                 .unwrap()
                 .progress_chars("#>-"),
         );
@@ -111,7 +113,7 @@ pub fn run_parallel_experiments_with_progress(
             .expect("Failed to create thread pool")
     };
 
-    let pb_clone = pb.as_ref().map(|bar| bar.clone());
+    let pb_clone = pb.clone();
     let results = pool.install(|| {
         parameter_sets
             .par_iter()
@@ -144,7 +146,7 @@ mod tests {
             .num_drivers(vec![3]);
         let sets = space.generate();
         let result = run_single_simulation(&sets[0]);
-        
+
         // Basic sanity checks
         assert!(result.total_riders > 0);
         assert!(result.total_drivers > 0);
@@ -157,7 +159,7 @@ mod tests {
             .num_drivers(vec![3, 5]);
         let sets = space.generate();
         let results = run_parallel_experiments_with_progress(sets, Some(2), false);
-        
+
         assert_eq!(results.len(), 4); // 2 * 2 = 4 combinations
         for result in &results {
             assert!(result.total_riders > 0);

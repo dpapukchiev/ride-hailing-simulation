@@ -274,9 +274,9 @@ pub fn write_trips_parquet<P: AsRef<Path>>(
         Arc::new(Float64Array::from(pickup_distance_km_at_accept)),
         Arc::new(UInt64Array::from(requested_at)),
         Arc::new(UInt64Array::from(matched_at)),
-        Arc::new(UInt64Array::from_iter(pickup_at.iter().map(|opt| *opt))),
-        Arc::new(UInt64Array::from_iter(dropoff_at.iter().map(|opt| *opt))),
-        Arc::new(UInt64Array::from_iter(cancelled_at.iter().map(|opt| *opt))),
+        Arc::new(UInt64Array::from_iter(pickup_at.iter().copied())),
+        Arc::new(UInt64Array::from_iter(dropoff_at.iter().copied())),
+        Arc::new(UInt64Array::from_iter(cancelled_at.iter().copied())),
     ];
 
     write_record_batch(path, schema, arrays)
@@ -477,8 +477,8 @@ pub fn validate_trip_timestamp_ordering(trip: &crate::telemetry::TripSnapshot) -
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::telemetry::TripSnapshot;
     use crate::ecs::TripState;
+    use crate::telemetry::TripSnapshot;
     use bevy_ecs::prelude::World;
     use h3o::CellIndex;
 
@@ -495,7 +495,7 @@ mod tests {
         let trip_entity = world.spawn_empty().id();
         let rider_entity = world.spawn_empty().id();
         let driver_entity = world.spawn_empty().id();
-        
+
         let cell = CellIndex::try_from(0x8928308280fffff).unwrap();
         TripSnapshot {
             entity: trip_entity,
@@ -543,11 +543,25 @@ mod tests {
 
     #[test]
     fn validate_completed_trip_timestamps() {
-        let trip = make_test_trip(TripState::Completed, 1000, 2000, Some(3000), Some(4000), None);
+        let trip = make_test_trip(
+            TripState::Completed,
+            1000,
+            2000,
+            Some(3000),
+            Some(4000),
+            None,
+        );
         assert!(validate_trip_timestamp_ordering(&trip).is_none());
 
         // Invalid: pickup_at > dropoff_at
-        let trip = make_test_trip(TripState::Completed, 1000, 2000, Some(4000), Some(3000), None);
+        let trip = make_test_trip(
+            TripState::Completed,
+            1000,
+            2000,
+            Some(4000),
+            Some(3000),
+            None,
+        );
         assert!(validate_trip_timestamp_ordering(&trip).is_some());
 
         // Invalid: Completed should have dropoff_at
@@ -562,7 +576,14 @@ mod tests {
         assert!(validate_trip_timestamp_ordering(&trip).is_none());
 
         // Cancelled after pickup
-        let trip = make_test_trip(TripState::Cancelled, 1000, 2000, Some(3000), None, Some(4000));
+        let trip = make_test_trip(
+            TripState::Cancelled,
+            1000,
+            2000,
+            Some(3000),
+            None,
+            Some(4000),
+        );
         assert!(validate_trip_timestamp_ordering(&trip).is_none());
 
         // Invalid: matched_at > cancelled_at
@@ -570,7 +591,14 @@ mod tests {
         assert!(validate_trip_timestamp_ordering(&trip).is_some());
 
         // Invalid: pickup_at > cancelled_at
-        let trip = make_test_trip(TripState::Cancelled, 1000, 2000, Some(4000), None, Some(3000));
+        let trip = make_test_trip(
+            TripState::Cancelled,
+            1000,
+            2000,
+            Some(4000),
+            None,
+            Some(3000),
+        );
         assert!(validate_trip_timestamp_ordering(&trip).is_some());
 
         // Invalid: Cancelled should have cancelled_at
@@ -580,10 +608,10 @@ mod tests {
 
     #[test]
     fn validate_all_trips_in_snapshots() {
-        use bevy_ecs::prelude::World;
         use crate::runner::{run_until_empty, simulation_schedule};
         use crate::scenario::{build_scenario, ScenarioParams};
         use crate::telemetry::SimSnapshots;
+        use bevy_ecs::prelude::World;
 
         let mut world = World::new();
         build_scenario(

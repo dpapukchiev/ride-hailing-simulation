@@ -20,7 +20,7 @@ pub fn matching_system(
         return;
     }
     // When batch matching is enabled, per-rider matching is not used
-    if batch_config.as_deref().map_or(false, |c| c.enabled) {
+    if batch_config.as_deref().is_some_and(|c| c.enabled) {
         return;
     }
 
@@ -80,27 +80,31 @@ pub fn matching_system(
         driver.matched_rider = Some(rider_entity);
     }
 
-    clock.schedule_in_secs(1, EventKind::MatchAccepted, Some(EventSubject::Driver(driver_entity)));
+    clock.schedule_in_secs(
+        1,
+        EventKind::MatchAccepted,
+        Some(EventSubject::Driver(driver_entity)),
+    );
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy_ecs::prelude::{Schedule, World};
     use crate::matching::{MatchingAlgorithmResource, SimpleMatching};
+    use bevy_ecs::prelude::{Schedule, World};
 
     #[test]
     fn matches_waiting_rider_to_idle_driver() {
         let mut world = World::new();
         world.insert_resource(SimulationClock::default());
-        world.insert_resource(MatchingAlgorithmResource::new(Box::new(SimpleMatching::default())));
+        world.insert_resource(MatchingAlgorithmResource::new(Box::new(SimpleMatching)));
         let cell = h3o::CellIndex::try_from(0x8a1fb46622dffff).expect("cell");
         let destination = cell
             .grid_disk::<Vec<_>>(1)
             .into_iter()
             .find(|c| *c != cell)
             .expect("neighbor cell");
-        
+
         let rider_entity = world
             .spawn((
                 Rider {
@@ -125,9 +129,11 @@ mod tests {
             ))
             .id();
 
-        world
-            .resource_mut::<SimulationClock>()
-            .schedule_at_secs(0, EventKind::TryMatch, Some(EventSubject::Rider(rider_entity)));
+        world.resource_mut::<SimulationClock>().schedule_at_secs(
+            0,
+            EventKind::TryMatch,
+            Some(EventSubject::Rider(rider_entity)),
+        );
         let event = world
             .resource_mut::<SimulationClock>()
             .pop_next()
@@ -158,6 +164,9 @@ mod tests {
             .expect("trip started event");
         assert_eq!(next_event.kind, EventKind::MatchAccepted);
         assert_eq!(next_event.timestamp, crate::clock::ONE_SEC_MS);
-        assert_eq!(next_event.subject, Some(EventSubject::Driver(driver_entity)));
+        assert_eq!(
+            next_event.subject,
+            Some(EventSubject::Driver(driver_entity))
+        );
     }
 }
