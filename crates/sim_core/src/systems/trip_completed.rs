@@ -85,6 +85,9 @@ pub fn trip_completed_system(
         if let Ok(mut driver) = drivers.get_mut(driver_entity) {
             driver.state = DriverState::OffDuty;
         }
+        if let Ok(mut earnings) = driver_earnings.get_mut(driver_entity) {
+            earnings.session_end_time_ms = Some(clock.now());
+        }
     }
 
     if let Ok(mut rider) = riders.get_mut(rider_entity) {

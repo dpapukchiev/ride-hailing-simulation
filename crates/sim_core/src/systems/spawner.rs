@@ -4,7 +4,7 @@ use bevy_ecs::prelude::{Commands, Res, ResMut};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
-use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock, ONE_HOUR_MS};
+use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock, ONE_HOUR_MS, ONE_MIN_MS};
 use crate::ecs::{Driver, DriverEarnings, DriverFatigue, DriverState, Position, Rider, RiderState};
 use crate::scenario::{random_destination, BatchMatchingConfig};
 use crate::spatial::GeoIndex;
@@ -150,6 +150,7 @@ fn spawn_driver(
             daily_earnings: 0.0,
             daily_earnings_target,
             session_start_time_ms: current_time_ms,
+            session_end_time_ms: None,
         },
         DriverFatigue {
             fatigue_threshold_ms,
@@ -314,6 +315,9 @@ pub fn simulation_started_system(
             weighting,
         );
     }
+
+    // Schedule the first periodic OffDuty check (every 5 minutes)
+    clock.schedule_in(5 * ONE_MIN_MS, EventKind::CheckDriverOffDuty, None);
 }
 
 /// System that processes rider spawner and creates riders.

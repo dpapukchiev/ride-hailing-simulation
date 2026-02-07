@@ -266,8 +266,8 @@ Components and state enums:
 - `RiderQuote` component (optional, attached while viewing a quote): `{ fare: f64, eta_ms: u64 }` — current quote shown to the rider (for UI/telemetry).
 - `DriverState`: `Idle`, `Evaluating`, `EnRoute`, `OnTrip`, `OffDuty`
 - `Driver` component: `{ state: DriverState, matched_rider: Option<Entity> }`
-- `DriverEarnings` component: `{ daily_earnings: f64, daily_earnings_target: f64, session_start_time_ms: u64 }`
-  - Tracks accumulated earnings for the current day, earnings target at which driver goes OffDuty, and session start time for fatigue calculation.
+- `DriverEarnings` component: `{ daily_earnings: f64, daily_earnings_target: f64, session_start_time_ms: u64, session_end_time_ms: Option<u64> }`
+  - Tracks accumulated earnings for the current day, earnings target at which driver goes OffDuty, session start time for fatigue calculation, and session end time (set when the driver goes OffDuty, `None` while active).
 - `DriverFatigue` component: `{ fatigue_threshold_ms: u64 }`
   - Maximum time on duty (in milliseconds) before driver goes OffDuty.
 - `TripState`: `EnRoute`, `OnTrip`, `Completed`, `Cancelled`
@@ -365,7 +365,7 @@ See [CONFIG.md](./CONFIG.md) for detailed configuration parameters, formulas, ti
 - **`SimSnapshots`** (ECS `Resource`): rolling `VecDeque<SimSnapshot>` plus `last_snapshot_at`; populated by the snapshot system.
 - **`SimSnapshot`**: `{ timestamp_ms, counts, riders, drivers, trips }` with state-aware position snapshots plus trip state snapshots for visualization/export; counts include cumulative rider totals (including `riders_abandoned_quote_total`) to account for despawns.
 - **`RiderSnapshot`**: `{ entity, cell, state, matched_driver: Option<Entity> }` captures rider state and position; `matched_driver` is `Some(driver_entity)` when a driver is matched (rider is waiting for pickup) and `None` when waiting for match.
-- **`DriverSnapshot`**: `{ entity, cell, state, daily_earnings: Option<f64>, daily_earnings_target: Option<f64>, session_start_time_ms: Option<u64>, fatigue_threshold_ms: Option<u64> }` captures driver state, position, and earnings/fatigue data (if available) for visualization/export.
+- **`DriverSnapshot`**: `{ entity, cell, state, daily_earnings: Option<f64>, daily_earnings_target: Option<f64>, session_start_time_ms: Option<u64>, session_end_time_ms: Option<u64>, fatigue_threshold_ms: Option<u64> }` captures driver state, position, and earnings/fatigue data (if available) for visualization/export. `session_end_time_ms` is set when the driver goes OffDuty and `None` while active.
 
 ### `sim_core::telemetry_export`
 
@@ -393,7 +393,7 @@ Spawner systems: react to spawn events and create riders/drivers dynamically.
   - Advances spawner to next spawn time using inter-arrival distribution.
   - Schedules next `SpawnRider` event if spawning should continue.
 - **`driver_spawner_system`**: Reacts to `EventKind::SpawnDriver`. Similar to `rider_spawner_system` but spawns drivers in `Idle` state (no destination needed). Drivers spawn with random positions within configured bounds. Each driver is initialized with:
-  - `DriverEarnings` component: `daily_earnings = 0.0`, `daily_earnings_target` sampled from $100-$300 range, `session_start_time_ms = current_time_ms`.
+  - `DriverEarnings` component: `daily_earnings = 0.0`, `daily_earnings_target` sampled from $100-$300 range, `session_start_time_ms = current_time_ms`, `session_end_time_ms = None`.
   - `DriverFatigue` component: `fatigue_threshold_ms` sampled from 8-12 hours range.
 
 See [CONFIG.md](./CONFIG.md#driver-behavior) for driver earnings target and fatigue threshold sampling formulas.
@@ -599,12 +599,10 @@ System: `driver_offduty_check_system`
     - Checks if `daily_earnings >= daily_earnings_target` (earnings target reached).
     - Checks if `session_duration_ms >= fatigue_threshold_ms` (fatigue threshold exceeded).
   - Transitions drivers to `OffDuty` if either threshold is exceeded. A driver marked OffDuty while `EnRoute` or `OnTrip` still finishes the current trip (movement and trip completion are unchanged); they simply receive no new matches afterward.
-  - Schedules next check in 5 minutes (`CHECK_INTERVAL_MS`) if there are active drivers remaining.
-  - Stops scheduling periodic checks when no active drivers remain (prevents infinite event queue).
+  - Always schedules the next check in 5 minutes (`CHECK_INTERVAL_MS`) to ensure newly spawned drivers are checked even if all current drivers are OffDuty.
 
 See [CONFIG.md](./CONFIG.md#driver-behavior) for OffDuty transition rules and threshold formulas.
-- On `EventKind::SimulationStarted`:
-  - Initializes periodic checks by scheduling the first `CheckDriverOffDuty` event 5 minutes from simulation start.
+- The first `CheckDriverOffDuty` event is scheduled by `simulation_started_system` during simulation initialization.
 
 ### `sim_core::systems::telemetry_snapshot`
 
@@ -613,7 +611,7 @@ System: `capture_snapshot_system`
 - Runs conditionally after each event (via schedule condition) and captures a snapshot when `interval_ms` has elapsed.
 - Records rider/driver positions and state counts into `SimSnapshots` (rolling buffer).
 - For drivers, includes earnings and fatigue data if available:
-  - `daily_earnings`, `daily_earnings_target`, `session_start_time_ms` from `DriverEarnings` component
+  - `daily_earnings`, `daily_earnings_target`, `session_start_time_ms`, `session_end_time_ms` from `DriverEarnings` component
   - `fatigue_threshold_ms` from `DriverFatigue` component
 - Optimized to collect riders, drivers, and trips in single passes (removed double iteration).
 

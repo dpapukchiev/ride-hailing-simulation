@@ -210,6 +210,7 @@ mod tests {
                     daily_earnings: 0.0,
                     daily_earnings_target: 200.0,
                     session_start_time_ms: 0,
+                    session_end_time_ms: None,
                 },
                 DriverFatigue {
                     fatigue_threshold_ms: 8 * 3600 * 1000, // 8 hours
@@ -294,6 +295,7 @@ mod tests {
                     daily_earnings: 0.0,
                     daily_earnings_target: 200.0,
                     session_start_time_ms: 0,
+                    session_end_time_ms: None,
                 },
                 DriverFatigue {
                     fatigue_threshold_ms: 8 * 3600 * 1000,
@@ -370,6 +372,7 @@ mod tests {
                     daily_earnings: 0.0,
                     daily_earnings_target: 200.0,
                     session_start_time_ms: 0,
+                    session_end_time_ms: None,
                 },
                 DriverFatigue {
                     fatigue_threshold_ms: 8 * 3600 * 1000,
@@ -402,6 +405,7 @@ mod tests {
                     daily_earnings: 0.0,
                     daily_earnings_target: 200.0,
                     session_start_time_ms: 0,
+                    session_end_time_ms: None,
                 },
                 DriverFatigue {
                     fatigue_threshold_ms: 8 * 3600 * 1000,

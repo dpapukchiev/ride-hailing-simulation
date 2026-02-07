@@ -96,6 +96,8 @@ pub struct DriverSnapshot {
     pub daily_earnings_target: Option<f64>,
     /// Session start time in ms (if available)
     pub session_start_time_ms: Option<u64>,
+    /// Session end time in ms (set when driver goes OffDuty; `None` while active)
+    pub session_end_time_ms: Option<u64>,
     /// Fatigue threshold in ms (if available)
     pub fatigue_threshold_ms: Option<u64>,
 }

@@ -18,15 +18,12 @@ pub fn driver_offduty_check_system(
     // Handle periodic check event
     if event.0.kind == EventKind::CheckDriverOffDuty {
         let now = clock.now();
-        let mut has_active_drivers = false;
 
-        for (mut driver, earnings, fatigue) in drivers.iter_mut() {
+        for (mut driver, mut earnings, fatigue) in drivers.iter_mut() {
             // Skip drivers already OffDuty
             if driver.state == DriverState::OffDuty {
                 continue;
             }
-
-            has_active_drivers = true;
 
             // Enforce earnings and fatigue for all active drivers, including EnRoute/OnTrip,
             // so drivers cannot exceed limits by staying in back-to-back trips between checks.
@@ -45,17 +42,12 @@ pub fn driver_offduty_check_system(
 
             if should_go_offduty {
                 driver.state = DriverState::OffDuty;
+                earnings.session_end_time_ms = Some(now);
             }
         }
 
-        // Only schedule next check if there are active drivers
-        if has_active_drivers {
-            clock.schedule_in(CHECK_INTERVAL_MS, EventKind::CheckDriverOffDuty, None);
-        }
-    }
-
-    // Initialize periodic checks on simulation start
-    if event.0.kind == EventKind::SimulationStarted {
+        // Always schedule next check so newly spawned drivers get checked
+        // even if all current drivers are OffDuty at this moment.
         clock.schedule_in(CHECK_INTERVAL_MS, EventKind::CheckDriverOffDuty, None);
     }
 }
@@ -81,6 +73,7 @@ mod tests {
                     daily_earnings: 150.0,
                     daily_earnings_target: 100.0,
                     session_start_time_ms: 0,
+                    session_end_time_ms: None,
                 },
                 DriverFatigue {
                     fatigue_threshold_ms: 8 * 60 * 60 * 1000, // 8 hours
@@ -135,6 +128,7 @@ mod tests {
                     daily_earnings: 50.0,
                     daily_earnings_target: 200.0,
                     session_start_time_ms: 0, // Started at time 0
+                    session_end_time_ms: None,
                 },
                 DriverFatigue {
                     fatigue_threshold_ms: 8 * 60 * 60 * 1000, // 8 hours
@@ -184,6 +178,7 @@ mod tests {
                     daily_earnings: 50.0,
                     daily_earnings_target: 200.0,
                     session_start_time_ms: 0,
+                    session_end_time_ms: None,
                 },
                 DriverFatigue {
                     fatigue_threshold_ms: 8 * 60 * 60 * 1000, // 8 hours

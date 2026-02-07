@@ -176,7 +176,8 @@ impl eframe::App for SimUiApp {
                                                 driver.session_start_time_ms,
                                                 driver.fatigue_threshold_ms,
                                             ) {
-                                                let session_duration_ms = current_time.saturating_sub(session_start);
+                                                let end = driver.session_end_time_ms.unwrap_or(current_time);
+                                                let session_duration_ms = end.saturating_sub(session_start);
                                                 let current_hours = (session_duration_ms as f64 / (60.0 * 60.0 * 1000.0)).round() as u32;
                                                 let max_hours = (fatigue_threshold as f64 / (60.0 * 60.0 * 1000.0)).round() as u32;
                                                 label.push_str(&format!("[{}/{}h]", current_hours, max_hours));

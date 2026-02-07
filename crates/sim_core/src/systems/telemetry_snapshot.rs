@@ -61,6 +61,7 @@ pub fn capture_snapshot_system(
             daily_earnings: earnings.map(|e| e.daily_earnings),
             daily_earnings_target: earnings.map(|e| e.daily_earnings_target),
             session_start_time_ms: earnings.map(|e| e.session_start_time_ms),
+            session_end_time_ms: earnings.and_then(|e| e.session_end_time_ms),
             fatigue_threshold_ms: fatigue.map(|f| f.fatigue_threshold_ms),
         });
     }

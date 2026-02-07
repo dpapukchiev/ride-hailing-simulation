@@ -71,6 +71,8 @@ pub struct DriverEarnings {
     pub daily_earnings_target: f64,
     /// Simulation time when driver started their current session (for fatigue calculation).
     pub session_start_time_ms: u64,
+    /// Simulation time when driver went OffDuty (`None` while still active).
+    pub session_end_time_ms: Option<u64>,
 }
 
 /// Tracks driver fatigue thresholds.

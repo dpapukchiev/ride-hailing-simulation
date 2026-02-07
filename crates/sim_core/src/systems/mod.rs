@@ -42,6 +42,7 @@ mod end_to_end_tests {
     use crate::runner::{initialize_simulation, run_until_empty, simulation_schedule};
     use crate::scenario::{
         create_simple_matching, MatchRadius, RiderCancelConfig, RiderQuoteConfig,
+        SimulationEndTimeMs,
     };
     use crate::spatial::SpatialIndex;
     use crate::spawner::{DriverSpawner, DriverSpawnerConfig, RiderSpawner, RiderSpawnerConfig};
@@ -106,6 +107,8 @@ mod end_to_end_tests {
             seed: 42, // Test seed
         };
         world.insert_resource(DriverSpawner::new(driver_spawner_config));
+        // OffDuty checks run indefinitely; set an end time so the event queue drains.
+        world.insert_resource(SimulationEndTimeMs(3_600_000)); // 1 hour
 
         initialize_simulation(&mut world);
 
@@ -225,6 +228,8 @@ mod end_to_end_tests {
             seed: 42, // Test seed
         };
         world.insert_resource(DriverSpawner::new(driver_spawner_config));
+        // OffDuty checks run indefinitely; set an end time so the event queue drains.
+        world.insert_resource(SimulationEndTimeMs(3_600_000)); // 1 hour
 
         initialize_simulation(&mut world);
 

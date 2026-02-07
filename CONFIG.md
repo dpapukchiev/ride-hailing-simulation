@@ -305,6 +305,8 @@ Driver transitions to `OffDuty` when:
 
 Where `session_duration_ms = current_time_ms - session_start_time_ms`
 
+When a driver transitions to `OffDuty`, `session_end_time_ms` is recorded so that the session duration is frozen for display purposes.
+
 **Note**: Drivers already `EnRoute` or `OnTrip` finish their current trip before going OffDuty.
 
 ---

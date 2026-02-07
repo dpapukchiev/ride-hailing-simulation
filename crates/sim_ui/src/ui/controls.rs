@@ -2,7 +2,6 @@
 
 use eframe::egui;
 
-use sim_core::ecs::DriverState;
 use sim_core::telemetry::{CompletedTripRecord, SimSnapshots, SimTelemetry};
 
 use crate::app::{MatchingAlgorithmType, RoutingMode, SimUiApp, SpawnMode, TrafficProfileMode};
@@ -487,11 +486,8 @@ fn render_fleet(ui: &mut egui::Ui, app: &SimUiApp) {
     let mut fatigue_thresholds: Vec<u64> = Vec::new();
     for d in &latest.drivers {
         if let (Some(start), Some(threshold)) = (d.session_start_time_ms, d.fatigue_threshold_ms) {
-            let mut session_ms = sim_now_ms.saturating_sub(start);
-            // OffDuty drivers went off at or before threshold; cap so we don't count time after they went off
-            if d.state == DriverState::OffDuty {
-                session_ms = session_ms.min(threshold);
-            }
+            let end = d.session_end_time_ms.unwrap_or(sim_now_ms);
+            let session_ms = end.saturating_sub(start);
             if session_ms >= threshold {
                 at_fatigue_limit += 1;
             }

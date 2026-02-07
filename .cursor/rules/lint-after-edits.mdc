@@ -1,0 +1,11 @@
+---
+description: Always check the linter after editing files
+alwaysApply: true
+---
+
+# Lint After Edits
+
+- After making substantive code edits, **always** run the linter on the edited files using the ReadLints tool.
+- If new linter errors are introduced by your changes, fix them before moving on.
+- Do not call the linter on files you have not edited.
+- Pre-existing linter warnings that are unrelated to your changes can be ignored unless fixing them is trivial.
