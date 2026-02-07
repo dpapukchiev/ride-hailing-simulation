@@ -13,9 +13,6 @@ use crate::matching::{
 use crate::patterns::{apply_driver_patterns, apply_rider_patterns};
 use crate::pricing::PricingConfig;
 use crate::routing::{build_route_provider, RouteProviderKind, RouteProviderResource};
-use crate::traffic::{
-    CongestionZones, DynamicCongestionConfig, TrafficProfile, TrafficProfileKind,
-};
 use crate::spatial::SpatialIndex;
 use crate::spawner::{
     DriverSpawner, DriverSpawnerConfig, RiderSpawner, RiderSpawnerConfig, SpawnWeighting,
@@ -23,6 +20,9 @@ use crate::spawner::{
 };
 use crate::speed::SpeedModel;
 use crate::telemetry::{SimSnapshotConfig, SimSnapshots, SimTelemetry};
+use crate::traffic::{
+    CongestionZones, DynamicCongestionConfig, TrafficProfile, TrafficProfileKind,
+};
 
 /// Default bounding box: Berlin, Germany (approx).
 const DEFAULT_LAT_MIN: f64 = 52.34;

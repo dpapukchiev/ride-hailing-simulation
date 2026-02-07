@@ -49,8 +49,8 @@ pub mod spawner;
 pub mod speed;
 pub mod systems;
 pub mod telemetry;
-pub mod traffic;
 pub mod telemetry_export;
+pub mod traffic;
 
 #[cfg(any(test, feature = "test-helpers"))]
 pub mod test_helpers;

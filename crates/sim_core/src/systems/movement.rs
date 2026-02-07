@@ -180,10 +180,7 @@ pub fn movement_system(
 
     // Resolve next cell from route provider or cached route
     let next_driver_cell = {
-        let mut trip_route = trips
-            .get_mut(trip_entity)
-            .ok()
-            .and_then(|(_, route)| route);
+        let mut trip_route = trips.get_mut(trip_entity).ok().and_then(|(_, route)| route);
 
         let trip_route_ref = trip_route.as_deref_mut();
 

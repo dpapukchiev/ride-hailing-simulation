@@ -4,7 +4,9 @@ use bevy_ecs::prelude::{Commands, Res, ResMut};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
-use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock, ONE_HOUR_MS, ONE_MIN_MS};
+use crate::clock::{
+    CurrentEvent, EventKind, EventSubject, SimulationClock, ONE_HOUR_MS, ONE_MIN_MS,
+};
 use crate::ecs::{Driver, DriverEarnings, DriverFatigue, DriverState, Position, Rider, RiderState};
 use crate::scenario::{random_destination, BatchMatchingConfig};
 use crate::spatial::GeoIndex;
