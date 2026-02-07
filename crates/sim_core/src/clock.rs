@@ -16,7 +16,7 @@ pub const ONE_MIN_MS: u64 = 60 * ONE_SEC_MS;
 /// One hour in simulation milliseconds.
 pub const ONE_HOUR_MS: u64 = 60 * ONE_MIN_MS;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum EventKind {
     SimulationStarted,
     SpawnRider,

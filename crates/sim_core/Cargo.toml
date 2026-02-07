@@ -10,3 +10,15 @@ rand = "0.8"
 parquet = "57.2.0"
 arrow = "57.2.0"
 pathfinding = "4.14"
+lru = "0.12"
+
+[features]
+default = ["test-helpers"]
+test-helpers = []
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "performance"
+harness = false

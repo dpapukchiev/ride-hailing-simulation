@@ -118,6 +118,7 @@ crates/
       spatial.rs
       telemetry.rs
       pricing.rs
+      profiling.rs
       systems/
         mod.rs
         show_quote.rs
@@ -132,6 +133,12 @@ crates/
         trip_started.rs
         trip_completed.rs
         driver_offduty.rs
+        telemetry_snapshot.rs
+    benches/
+      performance.rs
+      README.md
+    tests/
+      load_tests.rs
     examples/
       scenario_run.rs
   sim_experiments/
@@ -167,6 +174,8 @@ crates/
 - `bevy_ecs = "0.13"` for ECS world, components, and systems.
 - `rand = "0.8"` for scenario randomisation (positions, request times, destinations).
 - `arrow` + `parquet` for Parquet export of completed trips and snapshots.
+- `pathfinding = "4.14"` for Hungarian matching algorithm (Kuhn-Munkres).
+- `lru = "0.12"` for distance calculation caching.
 
 `crates/sim_ui/Cargo.toml`:
 
@@ -187,7 +196,7 @@ crates/
 - `grid_disk(origin, k)` wraps `h3o::CellIndex::grid_disk` and asserts the
   resolution matches the index resolution.
 - Default resolution is `Resolution::Nine`.
-- `distance_km_between_cells(a, b)` calculates haversine distance between two H3 cells in kilometers.
+- `distance_km_between_cells(a, b)` calculates haversine distance between two H3 cells in kilometers. Uses a global LRU cache (10,000 entries, ~160KB memory) to avoid repeated H3 cell → LatLng conversions and Haversine calculations for frequently accessed cell pairs. Cache keys use symmetric ordering (smaller cell first) to maximize cache hits.
 
 ### `sim_core::pricing`
 
@@ -261,13 +270,15 @@ Clock progression and event routing are implemented here (outside systems):
   inserts it as `CurrentEvent`, runs the schedule. Returns `true` if an event was
   processed, `false` if the clock was empty or if the next event is at or past
   `SimulationEndTimeMs` (when that resource is present). **Executes sequentially**—one event
-  at a time.
+  at a time. If an `EventMetrics` resource exists, records the event kind for performance tracking.
+- **`run_next_event_with_hook(world, schedule, hook)`**: Similar to `run_next_event` but invokes `hook` after the schedule completes. Useful for custom per-event processing.
 - **`run_until_empty(world, schedule, max_steps)`**: Repeatedly calls
   `run_next_event` until the event queue is empty or `max_steps` is reached.
   Returns the number of steps executed.
+- **`run_until_empty_with_hook(world, schedule, max_steps, hook)`**: Similar to `run_until_empty` but invokes `hook` after each step.
 - **`simulation_schedule()`**: Builds the default schedule with all event-reacting
   systems (including spawner systems) plus `apply_deferred` so that spawned entities (e.g. `Trip`) are
-  applied before the next step. Systems are added in a specific order and **execute
+  applied before the next step. Systems are conditionally executed based on event type using `run_if` conditions to reduce overhead (only systems relevant to the current event type run). Systems **execute
   sequentially** for each event. While bevy_ecs may parallelize queries within a
   system, the systems themselves run one after another in the defined order.
 - **`initialize_simulation(world)`**: Schedules `SimulationStarted` event at time 0. Call this after building the scenario and before running events.
@@ -582,11 +593,21 @@ See [CONFIG.md](./CONFIG.md#driver-behavior) for OffDuty transition rules and th
 
 System: `capture_snapshot_system`
 
-- Runs after each event and captures a snapshot when `interval_ms` has elapsed.
+- Runs conditionally after each event (via schedule condition) and captures a snapshot when `interval_ms` has elapsed.
 - Records rider/driver positions and state counts into `SimSnapshots` (rolling buffer).
 - For drivers, includes earnings and fatigue data if available:
   - `daily_earnings`, `daily_earnings_target`, `session_start_time_ms` from `DriverEarnings` component
   - `fatigue_threshold_ms` from `DriverFatigue` component
+- Optimized to collect riders, drivers, and trips in single passes (removed double iteration).
+
+### `sim_core::profiling`
+
+Performance profiling infrastructure: system timing, event rate tracking, and metrics collection.
+
+- **`SystemTiming`**: Per-system timing metrics with total duration, call count, min/max durations, and average calculation.
+- **`SystemTimings`** (ECS `Resource`): Aggregated system timing metrics, keyed by system name. Provides `record(system_name, duration)` to track execution time, `get(system_name)` to retrieve timing data, and `print_summary()` to display statistics sorted by total duration.
+- **`EventMetrics`** (ECS `Resource`): Event processing rate metrics. Tracks total events processed, events per kind, and calculates events per second. Automatically records events when present in the world (integrated into `run_next_event`). Provides `record_event(kind)` to manually track events, `events_per_second()` for current rate, and `print_summary()` to display statistics.
+- **`time_system!` macro**: Helper macro to time a system execution. Usage: `time_system!(system_name, timings_resource, { system_body })`. Records timing if `SystemTimings` resource exists.
 
 ## Tests
 
@@ -622,6 +643,28 @@ Unit tests exist in each module to confirm behavior:
 
 All per-system unit tests emulate the runner by popping one event, inserting
 `CurrentEvent`, then running the ECS schedule.
+
+## Benchmarks
+
+Performance benchmarks are located in `crates/sim_core/benches/` using Criterion.rs:
+
+- **`performance.rs`**: Benchmark suite with two groups:
+  - `simulation_run`: Full simulation runs for small/medium/large scenarios (50/200/500 drivers, 100/500/1000 riders)
+  - `matching_algorithms`: Matching algorithm performance comparison (Simple, Cost-based, Hungarian)
+- **Baseline storage**: Criterion.rs automatically stores baseline data in `target/criterion/` (git-ignored) for automatic comparison across runs.
+- **HTML reports**: Generated in `target/criterion/<benchmark_name>/report/index.html` for detailed performance analysis.
+
+Run benchmarks with `cargo bench --package sim_core`. See `crates/sim_core/benches/README.md` for details.
+
+## Load Tests
+
+Load tests are located in `crates/sim_core/tests/load_tests.rs`:
+
+- **`test_sustained_load`**: Validates performance under sustained load (500 drivers, 1000 riders, 1 hour simulation). Requires >1000 events/sec.
+- **`test_peak_load`**: Tests sudden demand spikes (200 drivers, 1000 riders in 1 hour). Requires >500 events/sec.
+- **`test_long_running`**: Long-running stability test (200 drivers, 500 riders, 24-hour simulation). Tests for memory leaks and consistent performance. Requires >500 events/sec.
+
+Load tests are marked with `#[ignore]` and must be run explicitly: `cargo test --package sim_core --test load_tests -- --ignored`.
 
 ## Example
 

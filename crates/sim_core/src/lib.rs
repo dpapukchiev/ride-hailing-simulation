@@ -48,6 +48,7 @@ pub mod distributions;
 pub mod spawner;
 pub mod patterns;
 pub mod pricing;
+pub mod profiling;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-helpers"))]
 pub mod test_helpers;

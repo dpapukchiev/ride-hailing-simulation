@@ -5,9 +5,11 @@
 //! then runs the schedule.
 
 use bevy_ecs::prelude::{Schedule, World};
-use bevy_ecs::schedule::apply_deferred;
+use bevy_ecs::schedule::{apply_deferred, IntoSystemConfigs};
+use bevy_ecs::prelude::Res;
 
 use crate::clock::{CurrentEvent, Event, EventKind, SimulationClock};
+use crate::profiling::EventMetrics;
 use crate::scenario::SimulationEndTimeMs;
 use crate::systems::{
     batch_matching::batch_matching_system,
@@ -22,6 +24,92 @@ use crate::systems::{
     telemetry_snapshot::capture_snapshot_system, trip_completed::trip_completed_system,
     trip_started::trip_started_system,
 };
+
+// Condition functions for each event kind
+fn is_simulation_started(event: Option<Res<CurrentEvent>>) -> bool {
+    event.map(|e| e.0.kind == EventKind::SimulationStarted).unwrap_or(false)
+}
+
+fn is_spawn_rider(event: Option<Res<CurrentEvent>>) -> bool {
+    event.map(|e| e.0.kind == EventKind::SpawnRider).unwrap_or(false)
+}
+
+fn is_spawn_driver(event: Option<Res<CurrentEvent>>) -> bool {
+    event.map(|e| e.0.kind == EventKind::SpawnDriver).unwrap_or(false)
+}
+
+fn is_show_quote(event: Option<Res<CurrentEvent>>) -> bool {
+    event.map(|e| e.0.kind == EventKind::ShowQuote).unwrap_or(false)
+}
+
+fn is_quote_decision(event: Option<Res<CurrentEvent>>) -> bool {
+    event.map(|e| e.0.kind == EventKind::QuoteDecision).unwrap_or(false)
+}
+
+fn is_quote_accepted(event: Option<Res<CurrentEvent>>) -> bool {
+    event.map(|e| e.0.kind == EventKind::QuoteAccepted).unwrap_or(false)
+}
+
+fn is_quote_rejected(event: Option<Res<CurrentEvent>>) -> bool {
+    event.map(|e| e.0.kind == EventKind::QuoteRejected).unwrap_or(false)
+}
+
+fn is_try_match(event: Option<Res<CurrentEvent>>) -> bool {
+    event.map(|e| e.0.kind == EventKind::TryMatch).unwrap_or(false)
+}
+
+fn is_batch_match_run(event: Option<Res<CurrentEvent>>) -> bool {
+    event.map(|e| e.0.kind == EventKind::BatchMatchRun).unwrap_or(false)
+}
+
+fn is_match_accepted(event: Option<Res<CurrentEvent>>) -> bool {
+    event.map(|e| e.0.kind == EventKind::MatchAccepted).unwrap_or(false)
+}
+
+fn is_driver_decision(event: Option<Res<CurrentEvent>>) -> bool {
+    event.map(|e| e.0.kind == EventKind::DriverDecision).unwrap_or(false)
+}
+
+fn is_rider_cancel(event: Option<Res<CurrentEvent>>) -> bool {
+    event.map(|e| e.0.kind == EventKind::RiderCancel).unwrap_or(false)
+}
+
+fn is_move_step(event: Option<Res<CurrentEvent>>) -> bool {
+    event.map(|e| e.0.kind == EventKind::MoveStep).unwrap_or(false)
+}
+
+fn is_pickup_eta_updated(event: Option<Res<CurrentEvent>>) -> bool {
+    event.map(|e| e.0.kind == EventKind::PickupEtaUpdated).unwrap_or(false)
+}
+
+fn is_trip_started(event: Option<Res<CurrentEvent>>) -> bool {
+    event.map(|e| e.0.kind == EventKind::TripStarted).unwrap_or(false)
+}
+
+fn is_trip_completed(event: Option<Res<CurrentEvent>>) -> bool {
+    event.map(|e| e.0.kind == EventKind::TripCompleted).unwrap_or(false)
+}
+
+fn is_check_driver_offduty(event: Option<Res<CurrentEvent>>) -> bool {
+    event.map(|e| e.0.kind == EventKind::CheckDriverOffDuty).unwrap_or(false)
+}
+
+/// Condition: telemetry snapshot interval has elapsed.
+fn should_capture_snapshot(
+    clock: Option<Res<SimulationClock>>,
+    config: Option<Res<crate::telemetry::SimSnapshotConfig>>,
+    snapshots: Option<Res<crate::telemetry::SimSnapshots>>,
+) -> bool {
+    let Some(clock) = clock else { return false; };
+    let Some(config) = config else { return false; };
+    let Some(snapshots) = snapshots else { return false; };
+    
+    let now = clock.now();
+    match snapshots.last_snapshot_at {
+        None => true,
+        Some(last) => now.saturating_sub(last) >= config.interval_ms,
+    }
+}
 
 /// Runs one simulation step: pops the next event, inserts it as [CurrentEvent], then runs the schedule.
 /// Returns `true` if an event was processed, `false` if the clock was empty or if the next event
@@ -42,6 +130,12 @@ pub fn run_next_event(world: &mut World, schedule: &mut Schedule) -> bool {
         None => return false,
     };
     world.insert_resource(CurrentEvent(event));
+    
+    // Track event metrics if EventMetrics resource exists
+    if let Some(mut metrics) = world.get_resource_mut::<EventMetrics>() {
+        metrics.record_event(event.kind);
+    }
+    
     schedule.run(world);
     true
 }
@@ -66,6 +160,12 @@ where
         None => return false,
     };
     world.insert_resource(CurrentEvent(event));
+    
+    // Track event metrics if EventMetrics resource exists
+    if let Some(mut metrics) = world.get_resource_mut::<EventMetrics>() {
+        metrics.record_event(event.kind);
+    }
+    
     schedule.run(world);
     hook(world, &event);
     true
@@ -100,29 +200,71 @@ where
 
 /// Builds the default simulation schedule: all event-reacting systems plus [apply_deferred]
 /// so that spawned entities (e.g. [crate::ecs::Trip]) are applied before the next step.
+/// 
+/// Systems are conditionally executed based on event type to reduce overhead.
 pub fn simulation_schedule() -> Schedule {
     let mut schedule = Schedule::default();
+    
+    // Group systems by event type using conditions to avoid running all systems on every event
     schedule.add_systems((
-        simulation_started_system,
-        rider_spawner_system,
-        driver_spawner_system,
-        show_quote_system,
-        quote_decision_system,
-        quote_accepted_system,
-        quote_rejected_system,
-        matching_system,
-        batch_matching_system,
-        match_accepted_system,
-        driver_decision_system,
-        rider_cancel_system,
-        movement_system,
-        pickup_eta_updated_system,
-        trip_started_system,
-        trip_completed_system,
-        driver_offduty_check_system,
+        // SimulationStarted
+        simulation_started_system.run_if(is_simulation_started),
+        
+        // SpawnRider
+        rider_spawner_system.run_if(is_spawn_rider),
+        
+        // SpawnDriver
+        driver_spawner_system.run_if(is_spawn_driver),
+        
+        // ShowQuote
+        show_quote_system.run_if(is_show_quote),
+        
+        // QuoteDecision
+        quote_decision_system.run_if(is_quote_decision),
+        
+        // QuoteAccepted
+        quote_accepted_system.run_if(is_quote_accepted),
+        
+        // QuoteRejected
+        quote_rejected_system.run_if(is_quote_rejected),
+        
+        // TryMatch
+        matching_system.run_if(is_try_match),
+        
+        // BatchMatchRun
+        batch_matching_system.run_if(is_batch_match_run),
+        
+        // MatchAccepted
+        match_accepted_system.run_if(is_match_accepted),
+        
+        // DriverDecision
+        driver_decision_system.run_if(is_driver_decision),
+        
+        // RiderCancel
+        rider_cancel_system.run_if(is_rider_cancel),
+        
+        // MoveStep
+        movement_system.run_if(is_move_step),
+        
+        // PickupEtaUpdated
+        pickup_eta_updated_system.run_if(is_pickup_eta_updated),
+        
+        // TripStarted
+        trip_started_system.run_if(is_trip_started),
+        
+        // TripCompleted
+        trip_completed_system.run_if(is_trip_completed),
+        
+        // CheckDriverOffDuty
+        driver_offduty_check_system.run_if(is_check_driver_offduty),
+        
+        // Always run apply_deferred to ensure spawned entities are available
         apply_deferred,
     ));
-    schedule.add_systems(capture_snapshot_system);
+    
+    // Telemetry snapshot runs conditionally based on interval to avoid overhead
+    schedule.add_systems(capture_snapshot_system.run_if(should_capture_snapshot));
+    
     schedule
 }
 

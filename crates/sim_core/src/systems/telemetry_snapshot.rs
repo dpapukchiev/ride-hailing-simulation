@@ -18,6 +18,7 @@ pub fn capture_snapshot_system(
     driver_fatigue_query: Query<&DriverFatigue>,
     trip_query: Query<(Entity, &Trip)>,
 ) {
+    // Interval check is now done via schedule condition, but keep for safety
     let now = clock.now();
     let should_capture = match snapshots.last_snapshot_at {
         None => true,
@@ -31,7 +32,9 @@ pub fn capture_snapshot_system(
     counts.riders_cancelled_total = telemetry.riders_cancelled_total;
     counts.riders_completed_total = telemetry.riders_completed_total;
     counts.riders_abandoned_quote_total = telemetry.riders_abandoned_quote_total;
-    let mut riders = Vec::with_capacity(rider_query.iter().count());
+    
+    // Remove double iteration: collect riders in single pass
+    let mut riders = Vec::new();
     for (entity, rider, position) in rider_query.iter() {
         counts.add_rider(rider.state);
         riders.push(RiderSnapshot {
@@ -42,7 +45,8 @@ pub fn capture_snapshot_system(
         });
     }
 
-    let mut drivers = Vec::with_capacity(driver_query.iter().count());
+    // Remove double iteration: collect drivers in single pass
+    let mut drivers = Vec::new();
     for (entity, driver, position) in driver_query.iter() {
         counts.add_driver(driver.state);
         let earnings = driver_earnings_query.get(entity).ok().copied();
@@ -58,7 +62,8 @@ pub fn capture_snapshot_system(
         });
     }
 
-    let mut trips = Vec::with_capacity(trip_query.iter().count());
+    // Remove double iteration: collect trips in single pass
+    let mut trips = Vec::new();
     for (entity, trip) in trip_query.iter() {
         counts.add_trip(trip.state);
         trips.push(TripSnapshot {

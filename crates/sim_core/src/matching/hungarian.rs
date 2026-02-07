@@ -146,21 +146,19 @@ impl MatchingAlgorithm for HungarianMatching {
             (available_drivers.len(), riders.len())
         };
 
-        let mut matrix = vec![vec![INFEASIBLE; cols]; rows];
-
+        // Pre-filter feasible pairs by grid_distance before expensive distance calculations
+        // This avoids computing distance_km_between_cells for pairs outside match radius
+        let mut feasible_pairs = Vec::new();
+        
         if rider_idx_to_entity {
             for (i, (_, rider_pos, _)) in riders.iter().enumerate() {
                 for (j, (_, driver_pos)) in available_drivers.iter().enumerate() {
                     let grid_dist = rider_pos
                         .grid_distance(*driver_pos)
                         .unwrap_or(i32::MAX);
-                    if grid_dist < 0 || grid_dist > match_radius as i32 {
-                        continue;
+                    if grid_dist >= 0 && grid_dist <= match_radius as i32 {
+                        feasible_pairs.push((i, j, *rider_pos, *driver_pos));
                     }
-                    let distance_km = distance_km_between_cells(*rider_pos, *driver_pos);
-                    let eta_ms = self.estimate_pickup_eta_ms(distance_km);
-                    let score = self.score_pairing(distance_km, eta_ms);
-                    matrix[i][j] = Self::score_to_weight(score);
                 }
             }
         } else {
@@ -169,15 +167,21 @@ impl MatchingAlgorithm for HungarianMatching {
                     let grid_dist = rider_pos
                         .grid_distance(*driver_pos)
                         .unwrap_or(i32::MAX);
-                    if grid_dist < 0 || grid_dist > match_radius as i32 {
-                        continue;
+                    if grid_dist >= 0 && grid_dist <= match_radius as i32 {
+                        feasible_pairs.push((i, j, *rider_pos, *driver_pos));
                     }
-                    let distance_km = distance_km_between_cells(*rider_pos, *driver_pos);
-                    let eta_ms = self.estimate_pickup_eta_ms(distance_km);
-                    let score = self.score_pairing(distance_km, eta_ms);
-                    matrix[i][j] = Self::score_to_weight(score);
                 }
             }
+        }
+
+        // Build matrix only for feasible pairs (others remain INFEASIBLE)
+        let mut matrix = vec![vec![INFEASIBLE; cols]; rows];
+        
+        for (i, j, rider_pos, driver_pos) in feasible_pairs {
+            let distance_km = distance_km_between_cells(rider_pos, driver_pos);
+            let eta_ms = self.estimate_pickup_eta_ms(distance_km);
+            let score = self.score_pairing(distance_km, eta_ms);
+            matrix[i][j] = Self::score_to_weight(score);
         }
 
         let weights = I64Weights(matrix);
