@@ -7,6 +7,7 @@ use bevy_ecs::prelude::World;
 use rayon::prelude::*;
 use sim_core::runner::{initialize_simulation, run_until_empty, simulation_schedule};
 use sim_core::scenario::build_scenario;
+use indicatif::{ProgressBar, ProgressStyle};
 
 use crate::metrics::{extract_metrics, SimulationResult};
 use crate::parameters::ParameterSet;
@@ -63,6 +64,42 @@ pub fn run_parallel_experiments(
     parameter_sets: Vec<ParameterSet>,
     num_threads: Option<usize>,
 ) -> Vec<SimulationResult> {
+    run_parallel_experiments_with_progress(parameter_sets, num_threads, true)
+}
+
+/// Run multiple simulations in parallel with optional progress bar.
+///
+/// Uses rayon to execute simulations concurrently across available CPU cores.
+/// Each simulation runs independently with no shared state.
+///
+/// # Arguments
+///
+/// * `parameter_sets` - Vector of parameter sets to run
+/// * `num_threads` - Optional number of threads to use. If None, uses rayon's default.
+/// * `show_progress` - Whether to display a progress bar
+///
+/// # Returns
+///
+/// Vector of `SimulationResult` in the same order as input parameter sets.
+pub fn run_parallel_experiments_with_progress(
+    parameter_sets: Vec<ParameterSet>,
+    num_threads: Option<usize>,
+    show_progress: bool,
+) -> Vec<SimulationResult> {
+    let total = parameter_sets.len();
+    let pb = if show_progress && total > 0 {
+        let bar = ProgressBar::new(total as u64);
+        bar.set_style(
+            ProgressStyle::default_bar()
+                .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})")
+                .unwrap()
+                .progress_chars("#>-"),
+        );
+        Some(bar)
+    } else {
+        None
+    };
+
     let pool = if let Some(threads) = num_threads {
         rayon::ThreadPoolBuilder::new()
             .num_threads(threads)
@@ -74,14 +111,25 @@ pub fn run_parallel_experiments(
             .expect("Failed to create thread pool")
     };
 
-    pool.install(|| {
+    let pb_clone = pb.as_ref().map(|bar| bar.clone());
+    let results = pool.install(|| {
         parameter_sets
             .par_iter()
             .map(|param_set| {
-                run_single_simulation(param_set)
+                let result = run_single_simulation(param_set);
+                if let Some(ref progress_bar) = pb_clone {
+                    progress_bar.inc(1);
+                }
+                result
             })
             .collect()
-    })
+    });
+
+    if let Some(ref progress_bar) = pb {
+        progress_bar.finish_with_message("Completed");
+    }
+
+    results
 }
 
 #[cfg(test)]
@@ -108,7 +156,7 @@ mod tests {
             .num_riders(vec![10, 20])
             .num_drivers(vec![3, 5]);
         let sets = space.generate();
-        let results = run_parallel_experiments(sets, Some(2));
+        let results = run_parallel_experiments_with_progress(sets, Some(2), false);
         
         assert_eq!(results.len(), 4); // 2 * 2 = 4 combinations
         for result in &results {
