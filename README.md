@@ -15,6 +15,13 @@ This simulation models a ride-hailing marketplace (similar to Uber/Bolt) with re
 
 The simulation supports thousands of concurrent riders and drivers, realistic time-of-day demand patterns (rush hours, day/night variations), and multiple matching algorithms for driver-rider pairing.
 
+## Documentation
+
+- **[SPEC.md](./SPEC.md)** -- High-level specification and system overview
+- **[CONFIG.md](./CONFIG.md)** -- All configurable parameters, formulas, and rules
+- **[documentation/](./documentation/)** -- Per-topic technical docs and user stories (core-sim, drivers, riders, matching, pricing, telemetry, experiments, ui, testing, project)
+- **[DEVELOPMENT.md](./DEVELOPMENT.md)** -- Development narrative and methodology
+
 ## Development Story
 
 **Built in ~1 week without prior Rust experience** -- this project demonstrates rapid learning, effective AI collaboration, and multi-disciplinary engineering skills.
@@ -295,12 +302,6 @@ ride-hailing-simulation/
 │   │       ├── scenario_run.rs
 │   │       └── scenario_run_large.rs
 │   ├── sim_experiments/   # Parallel experimentation framework
-│   │   ├── src/
-│   │   │   ├── parameters.rs  # Parameter variation
-│   │   │   ├── runner.rs      # Parallel execution
-│   │   │   ├── metrics.rs     # Metrics extraction
-│   │   │   ├── health.rs      # Health scoring
-│   │   │   └── export.rs      # Result export
 │   │   └── examples/
 │   │       └── parameter_sweep.rs
 │   └── sim_ui/            # Visualization UI
@@ -308,7 +309,21 @@ ride-hailing-simulation/
 │           ├── app.rs     # Application state
 │           ├── ui/        # UI modules
 │           └── main.rs    # Entry point
-├── SPEC.md                # Detailed specification
+├── documentation/         # Per-topic docs and user stories
+│   ├── core-sim/          # Clock, ECS, runner, spawner, movement
+│   ├── drivers/           # Driver decision, off-duty, earnings
+│   ├── riders/            # Quote flow, cancellation, pickup ETA
+│   ├── matching/          # Algorithms (Simple, Cost-based, Hungarian)
+│   ├── pricing/           # Fare calculation, surge pricing
+│   ├── telemetry/         # Metrics, Parquet export, snapshots
+│   ├── experiments/       # Parameter sweeps, health scores
+│   ├── ui/                # Native UI controls and charts
+│   ├── testing/           # Unit tests, benchmarks, load tests
+│   └── project/           # Workspace layout, deps, tooling, CI
+├── xtask/                 # Cross-platform task runner (cargo xtask)
+├── infra/osrm/            # OSRM Docker setup for Berlin routing
+├── SPEC.md                # High-level specification and overview
+├── CONFIG.md              # Configuration parameters and formulas
 └── README.md              # This file
 ```
 
