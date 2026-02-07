@@ -651,7 +651,7 @@ Performance benchmarks are located in `crates/sim_core/benches/` using Criterion
 - **`performance.rs`**: Benchmark suite with two groups:
   - `simulation_run`: Full simulation runs for small/medium/large scenarios (50/200/500 drivers, 100/500/1000 riders)
   - `matching_algorithms`: Matching algorithm performance comparison (Simple, Cost-based, Hungarian)
-- **Baseline storage**: Criterion.rs automatically stores baseline data in `target/criterion/` (git-ignored) for automatic comparison across runs.
+- **Baseline storage**: Criterion.rs automatically stores baseline data in `target/criterion/` (git-ignored). Each run replaces the previous baseline, so comparisons are always against the most recent run. Use named baselines (`--save-baseline`/`--baseline`) to compare against specific earlier versions.
 - **HTML reports**: Generated in `target/criterion/<benchmark_name>/report/index.html` for detailed performance analysis.
 
 Run benchmarks with `cargo bench --package sim_core`. See `crates/sim_core/benches/README.md` for details.

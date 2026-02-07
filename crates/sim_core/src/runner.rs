@@ -21,6 +21,7 @@ use crate::systems::{
     rider_cancel::rider_cancel_system,
     spawner::{driver_spawner_system, rider_spawner_system, simulation_started_system},
     matching::matching_system,
+    spatial_index::{update_spatial_index_drivers_system, update_spatial_index_riders_system},
     telemetry_snapshot::capture_snapshot_system, trip_completed::trip_completed_system,
     trip_started::trip_started_system,
 };
@@ -260,6 +261,13 @@ pub fn simulation_schedule() -> Schedule {
         
         // Always run apply_deferred to ensure spawned entities are available
         apply_deferred,
+    ));
+    
+    // Spatial index updates run after apply_deferred so spawned entities are available
+    // These run on every event to keep the index in sync
+    schedule.add_systems((
+        update_spatial_index_riders_system,
+        update_spatial_index_drivers_system,
     ));
     
     // Telemetry snapshot runs conditionally based on interval to avoid overhead

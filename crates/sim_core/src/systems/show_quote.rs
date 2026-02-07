@@ -5,7 +5,7 @@ use bevy_ecs::prelude::{Commands, Entity, Query, Res, ResMut};
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
 use crate::ecs::{Driver, DriverState, Position, Rider, RiderQuote, RiderState};
 use crate::pricing::{calculate_trip_fare_with_config, PricingConfig};
-use crate::spatial::{distance_km_between_cells, GeoIndex};
+use crate::spatial::{distance_km_between_cells, grid_disk_cached, SpatialIndex};
 
 /// Default ETA in ms when no idle drivers are available (5 minutes).
 const DEFAULT_ETA_MS: u64 = 300 * 1000;
@@ -17,6 +17,7 @@ pub fn show_quote_system(
     mut clock: ResMut<SimulationClock>,
     event: Res<CurrentEvent>,
     pricing_config: Res<PricingConfig>,
+    spatial_index: Option<Res<SpatialIndex>>,
     riders: Query<(Entity, &Rider, &Position)>,
     drivers: Query<(&Driver, &Position)>,
 ) {
@@ -42,19 +43,44 @@ pub fn show_quote_system(
     let base_fare = calculate_trip_fare_with_config(pickup, dropoff, *pricing_config);
 
     let surge_multiplier = if pricing_config.surge_enabled && pricing_config.surge_radius_k > 0 {
-        let geo = GeoIndex::default();
-        let cluster_cells = geo.grid_disk(pickup, pricing_config.surge_radius_k);
-        let demand = riders
-            .iter()
-            .filter(|(_, r, pos)| {
-                (r.state == RiderState::Browsing || r.state == RiderState::Waiting)
-                    && cluster_cells.contains(&pos.0)
-            })
-            .count();
-        let supply = drivers
-            .iter()
-            .filter(|(d, pos)| d.state == DriverState::Idle && cluster_cells.contains(&pos.0))
-            .count();
+        let cluster_cells = grid_disk_cached(pickup, pricing_config.surge_radius_k);
+        
+        // Use spatial index if available, otherwise fall back to full scan
+        let (demand, supply) = if let Some(index) = spatial_index.as_deref() {
+            // Get entities in cluster cells from spatial index
+            let rider_entities = index.get_riders_in_cells(&cluster_cells);
+            let driver_entities = index.get_drivers_in_cells(&cluster_cells);
+            
+            // Query only those entities and filter by state
+            let demand = rider_entities
+                .iter()
+                .filter_map(|&entity| riders.get(entity).ok())
+                .filter(|(_, r, _)| r.state == RiderState::Browsing || r.state == RiderState::Waiting)
+                .count();
+            
+            let supply = driver_entities
+                .iter()
+                .filter_map(|&entity| drivers.get(entity).ok())
+                .filter(|(d, _)| d.state == DriverState::Idle)
+                .count();
+            
+            (demand, supply)
+        } else {
+            // Fallback to full scan if spatial index not available
+            let demand = riders
+                .iter()
+                .filter(|(_, r, pos)| {
+                    (r.state == RiderState::Browsing || r.state == RiderState::Waiting)
+                        && cluster_cells.contains(&pos.0)
+                })
+                .count();
+            let supply = drivers
+                .iter()
+                .filter(|(d, pos)| d.state == DriverState::Idle && cluster_cells.contains(&pos.0))
+                .count();
+            (demand, supply)
+        };
+        
         if demand > supply && supply > 0 {
             let raw = 1.0 + (demand - supply) as f64 / supply as f64;
             raw.min(pricing_config.surge_max_multiplier)

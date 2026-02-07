@@ -28,6 +28,7 @@ pub mod trip_completed;
 pub mod telemetry_snapshot;
 pub mod rider_cancel;
 pub mod driver_offduty;
+pub mod spatial_index;
 
 #[cfg(test)]
 mod end_to_end_tests {
@@ -40,6 +41,7 @@ mod end_to_end_tests {
     use crate::runner::{initialize_simulation, run_until_empty, simulation_schedule};
     use crate::scenario::{create_simple_matching, MatchRadius, RiderCancelConfig, RiderQuoteConfig};
     use crate::spawner::{DriverSpawner, DriverSpawnerConfig, RiderSpawner, RiderSpawnerConfig};
+    use crate::spatial::SpatialIndex;
     use crate::speed::SpeedModel;
     use crate::telemetry::{SimSnapshotConfig, SimSnapshots, SimTelemetry};
 
@@ -59,6 +61,7 @@ mod end_to_end_tests {
             ..Default::default()
         });
         world.insert_resource(PricingConfig::default());
+        world.insert_resource(SpatialIndex::new());
 
         let cell = h3o::CellIndex::try_from(0x8a1fb46622dffff).expect("cell");
 
@@ -155,6 +158,7 @@ mod end_to_end_tests {
             ..Default::default()
         });
         world.insert_resource(PricingConfig::default());
+        world.insert_resource(SpatialIndex::new());
 
         let cell = h3o::CellIndex::try_from(0x8a1fb46622dffff).expect("cell");
 

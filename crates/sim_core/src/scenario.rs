@@ -11,6 +11,7 @@ use crate::matching::{CostBasedMatching, HungarianMatching, MatchingAlgorithmRes
 use crate::patterns::{apply_driver_patterns, apply_rider_patterns};
 use crate::pricing::PricingConfig;
 use crate::spawner::{DriverSpawner, DriverSpawnerConfig, RiderSpawner, RiderSpawnerConfig};
+use crate::spatial::SpatialIndex;
 use crate::speed::SpeedModel;
 use crate::telemetry::{SimSnapshotConfig, SimSnapshots, SimTelemetry};
 
@@ -500,6 +501,15 @@ pub fn build_scenario(world: &mut World, params: ScenarioParams) {
     world.insert_resource(SimTelemetry::default());
     world.insert_resource(SimSnapshotConfig::default());
     world.insert_resource(SimSnapshots::default());
+    
+    // Only enable spatial index for larger scenarios where it provides benefit
+    // Threshold: enable if total entities (riders + drivers) > 200
+    // For smaller scenarios, full scans are fast enough and spatial index overhead hurts
+    let total_entities = params.num_riders + params.num_drivers;
+    if total_entities > 200 {
+        world.insert_resource(SpatialIndex::new());
+    }
+    
     world.insert_resource(MatchRadius(params.match_radius));
     world.insert_resource(BatchMatchingConfig {
         enabled: params.batch_matching_enabled.unwrap_or(true),

@@ -94,6 +94,55 @@ impl HungarianMatching {
             w as i64
         }
     }
+
+    /// Greedy batch matching for small batches (O(n*m) instead of O(n³)).
+    /// For each rider, finds the best available driver within radius.
+    fn greedy_batch_matches(
+        &self,
+        riders: &[(Entity, CellIndex, Option<CellIndex>)],
+        available_drivers: &[(Entity, CellIndex)],
+        match_radius: u32,
+    ) -> Vec<MatchResult> {
+        let mut results = Vec::new();
+        let mut used_drivers = std::collections::HashSet::new();
+        
+        for (rider_entity, rider_pos, _) in riders {
+            let mut best_driver: Option<(Entity, f64)> = None;
+            
+            for (driver_entity, driver_pos) in available_drivers {
+                if used_drivers.contains(driver_entity) {
+                    continue;
+                }
+                
+                // Check grid distance first (cheap)
+                let grid_dist = rider_pos
+                    .grid_distance(*driver_pos)
+                    .unwrap_or(i32::MAX);
+                if grid_dist < 0 || grid_dist > match_radius as i32 {
+                    continue;
+                }
+                
+                // Calculate score
+                let distance_km = distance_km_between_cells(*rider_pos, *driver_pos);
+                let eta_ms = self.estimate_pickup_eta_ms(distance_km);
+                let score = self.score_pairing(distance_km, eta_ms);
+                
+                if best_driver.map_or(true, |(_, best_score)| score > best_score) {
+                    best_driver = Some((*driver_entity, score));
+                }
+            }
+            
+            if let Some((driver_entity, _)) = best_driver {
+                used_drivers.insert(driver_entity);
+                results.push(MatchResult {
+                    rider_entity: *rider_entity,
+                    driver_entity,
+                });
+            }
+        }
+        
+        results
+    }
 }
 
 impl Default for HungarianMatching {
@@ -131,6 +180,12 @@ impl MatchingAlgorithm for HungarianMatching {
     ) -> Vec<MatchResult> {
         if riders.is_empty() || available_drivers.is_empty() {
             return Vec::new();
+        }
+
+        // Early termination: use greedy matching for very small batches
+        // Hungarian algorithm O(n³) overhead not worth it for small batches
+        if riders.len() <= 10 && available_drivers.len() <= 20 {
+            return self.greedy_batch_matches(riders, available_drivers, match_radius);
         }
 
         // Kuhn-Munkres requires rows <= columns. So we use the smaller set as rows.

@@ -2,7 +2,7 @@ use bevy_ecs::prelude::{ParamSet, Query, Res, ResMut, With};
 
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock, ONE_SEC_MS};
 use crate::ecs::{Driver, DriverState, Position, Rider, Trip, TripState};
-use crate::spatial::distance_km_between_cells;
+use crate::spatial::{distance_km_between_cells, grid_path_cells_cached};
 use crate::speed::{SpeedFactors, SpeedModel};
 
 fn travel_time_ms(distance_km: f64, speed_kmh: f64) -> u64 {
@@ -81,10 +81,9 @@ pub fn movement_system(
 
     let mut step_distance_km = remaining_km;
     let mut next_driver_cell = driver_pos_cell;
-    if let Ok(path) = driver_pos_cell.grid_path_cells(target_cell) {
-        let mut iter = path.filter_map(|cell| cell.ok());
-        let _current = iter.next();
-        if let Some(next_cell) = iter.next() {
+    // Use cached path lookup
+    if let Some(path) = grid_path_cells_cached(driver_pos_cell, target_cell) {
+        if let Some(next_cell) = path.get(1).copied() {
             step_distance_km = distance_km_between_cells(driver_pos_cell, next_cell);
             next_driver_cell = next_cell;
         }
