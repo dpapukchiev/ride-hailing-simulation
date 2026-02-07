@@ -1,19 +1,18 @@
-use bevy_ecs::prelude::{Commands, Query, Res, ResMut};
+use bevy_ecs::prelude::{Query, Res, ResMut};
 
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
-use crate::ecs::{Driver, DriverState, Rider, RiderState, Trip, TripState};
+use crate::ecs::{Rider, RiderState, Trip, TripState};
 use crate::scenario::RiderCancelConfig;
-use crate::telemetry::SimTelemetry;
 
+/// Pure patience check: if the projected pickup time exceeds the rider's wait
+/// deadline, schedules a `RiderCancel` event at delta 0 so `rider_cancel_system`
+/// handles all cancellation mutations. No direct state changes here.
 pub fn pickup_eta_updated_system(
     event: Res<CurrentEvent>,
-    clock: Res<SimulationClock>,
+    mut clock: ResMut<SimulationClock>,
     cancel_config: Option<Res<RiderCancelConfig>>,
-    mut commands: Commands,
-    mut telemetry: ResMut<SimTelemetry>,
-    mut trips: Query<&mut Trip>,
-    mut riders: Query<&mut Rider>,
-    mut drivers: Query<&mut Driver>,
+    trips: Query<&Trip>,
+    riders: Query<&Rider>,
 ) {
     if event.0.kind != EventKind::PickupEtaUpdated {
         return;
@@ -23,7 +22,7 @@ pub fn pickup_eta_updated_system(
         return;
     };
 
-    let Ok(mut trip) = trips.get_mut(trip_entity) else {
+    let Ok(trip) = trips.get(trip_entity) else {
         return;
     };
     if trip.state != TripState::EnRoute {
@@ -32,20 +31,13 @@ pub fn pickup_eta_updated_system(
 
     let rider_entity = trip.rider;
     let driver_entity = trip.driver;
-    let Ok(mut rider) = riders.get_mut(rider_entity) else {
+    let Ok(rider) = riders.get(rider_entity) else {
         return;
     };
     if rider.state != RiderState::Waiting {
         return;
     }
     if rider.matched_driver != Some(driver_entity) {
-        return;
-    }
-
-    let Ok(mut driver) = drivers.get_mut(driver_entity) else {
-        return;
-    };
-    if driver.state != DriverState::EnRoute {
         return;
     }
 
@@ -67,12 +59,10 @@ pub fn pickup_eta_updated_system(
         return;
     }
 
-    trip.state = TripState::Cancelled;
-    trip.cancelled_at = Some(now);
-    driver.state = DriverState::Idle;
-    driver.matched_rider = None;
-    rider.state = RiderState::Cancelled;
-    rider.matched_driver = None;
-    telemetry.riders_cancelled_total = telemetry.riders_cancelled_total.saturating_add(1);
-    commands.entity(rider_entity).despawn();
+    // Patience exceeded — delegate cancellation to rider_cancel_system
+    clock.schedule_in(
+        0,
+        EventKind::RiderCancel,
+        Some(EventSubject::Rider(rider_entity)),
+    );
 }

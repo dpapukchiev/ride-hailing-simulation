@@ -515,6 +515,9 @@ System: `rider_cancel_system`
 
 - Reacts to `CurrentEvent`.
 - On `EventKind::RiderCancel` with subject `Rider(rider_entity)`:
+  - Handles both rider-initiated timeout cancels (scheduled by `quote_accepted_system`) and
+    ETA-triggered cancels (delegated by `pickup_eta_updated_system` at delta 0). Uses
+    `rider.assigned_trip` for O(1) trip lookup (no full trip scan).
   - Rider must be in `Waiting`. Sets rider state to `Cancelled`, increments `SimTelemetry::riders_cancelled_total` and `SimTelemetry::riders_cancelled_pickup_timeout`, despawns rider entity. If rider has a matched driver, cancels the associated trip and resets driver state.
   - If the rider is still `Waiting`:
     - Rider: `Waiting` → `Cancelled`, clears `matched_driver`, then the rider entity is despawned
@@ -543,10 +546,12 @@ System: `pickup_eta_updated_system`
 
 - Reacts to `CurrentEvent`.
 - On `EventKind::PickupEtaUpdated` with subject `Trip(trip_entity)`:
+  - Pure patience check — read-only queries, no direct state mutations.
   - If the trip is `EnRoute` and the rider is still `Waiting`, compares projected pickup time
     (`now + trip.pickup_eta_ms`) to the rider’s wait window (`RiderCancelConfig`).
-  - If the projected pickup exceeds the wait deadline (after min wait), cancels the trip, marks
-    the rider cancelled, despawns the rider, and returns the driver to `Idle`.
+  - If the projected pickup exceeds the wait deadline (after min wait), schedules a
+    `RiderCancel` event at delta 0 with `EventSubject::Rider(rider_entity)` so that
+    `rider_cancel_system` handles all cancellation mutations.
   - **Cancelled/Completed**: no-op.
 - ETA in ms: derived from haversine distance and a stochastic speed sample
   (default 20–60 km/h), with a 1 second minimum (`ONE_SEC_MS`).
