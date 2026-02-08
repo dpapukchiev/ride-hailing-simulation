@@ -40,6 +40,20 @@ impl GeoIndex {
     }
 }
 
+/// Return `true` if the given H3 cell lies within the provided latitude/longitude bounds.
+pub fn cell_in_bounds(
+    cell: CellIndex,
+    lat_min: f64,
+    lat_max: f64,
+    lng_min: f64,
+    lng_max: f64,
+) -> bool {
+    let coord: LatLng = cell.into();
+    let lat = coord.lat();
+    let lng = coord.lng();
+    lat >= lat_min && lat <= lat_max && lng >= lng_min && lng <= lng_max
+}
+
 /// Uncached distance calculation (internal use).
 fn distance_km_between_cells_uncached(a: CellIndex, b: CellIndex) -> f64 {
     let a: h3o::LatLng = a.into();

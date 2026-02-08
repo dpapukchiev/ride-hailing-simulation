@@ -11,7 +11,7 @@ use crate::ecs::{
     Browsing, Driver, DriverEarnings, DriverFatigue, GeoPosition, Idle, Position, Rider,
 };
 use crate::scenario::{random_destination, BatchMatchingConfig};
-use crate::spatial::GeoIndex;
+use crate::spatial::{cell_in_bounds, GeoIndex};
 use crate::spawner::{random_cell_in_bounds, DriverSpawner, RiderSpawner, SpawnWeighting};
 use h3o::CellIndex;
 
@@ -50,6 +50,24 @@ fn generate_spawn_position<R: Rng>(
     })
 }
 
+fn bounded_weighted_spawn_cell<R, F>(
+    weighting: Option<&SpawnWeighting>,
+    rng: &mut R,
+    sampler: F,
+    lat_min: f64,
+    lat_max: f64,
+    lng_min: f64,
+    lng_max: f64,
+) -> Option<CellIndex>
+where
+    R: Rng,
+    F: Fn(&SpawnWeighting, &mut R) -> Option<CellIndex>,
+{
+    weighting
+        .and_then(|w| sampler(w, rng))
+        .filter(|cell| cell_in_bounds(*cell, lat_min, lat_max, lng_min, lng_max))
+}
+
 /// Helper function to spawn a single rider.
 fn spawn_rider(
     commands: &mut Commands,
@@ -61,18 +79,22 @@ fn spawn_rider(
     // Create RNG for position/destination generation
     let mut rng = create_spawn_rng(spawner.config.seed, spawner.spawned_count());
 
+    let lat_min = spawner.config.lat_min;
+    let lat_max = spawner.config.lat_max;
+    let lng_min = spawner.config.lng_min;
+    let lng_max = spawner.config.lng_max;
+
     // Generate position: try weighted cell first, then fall back to uniform random
-    let position = weighting
-        .and_then(|w| w.sample_rider_cell(&mut rng))
-        .unwrap_or_else(|| {
-            generate_spawn_position(
-                &mut rng,
-                spawner.config.lat_min,
-                spawner.config.lat_max,
-                spawner.config.lng_min,
-                spawner.config.lng_max,
-            )
-        });
+    let position = bounded_weighted_spawn_cell(
+        weighting,
+        &mut rng,
+        |w, rng| w.sample_rider_cell(rng),
+        lat_min,
+        lat_max,
+        lng_min,
+        lng_max,
+    )
+    .unwrap_or_else(|| generate_spawn_position(&mut rng, lat_min, lat_max, lng_min, lng_max));
 
     let geo = GeoIndex::default();
     let destination = random_destination(
@@ -125,18 +147,22 @@ fn spawn_driver(
     // Create RNG for position generation
     let mut rng = create_spawn_rng(spawner.config.seed, spawner.spawned_count());
 
+    let lat_min = spawner.config.lat_min;
+    let lat_max = spawner.config.lat_max;
+    let lng_min = spawner.config.lng_min;
+    let lng_max = spawner.config.lng_max;
+
     // Generate position: try weighted cell first, then fall back to uniform random
-    let position = weighting
-        .and_then(|w| w.sample_driver_cell(&mut rng))
-        .unwrap_or_else(|| {
-            generate_spawn_position(
-                &mut rng,
-                spawner.config.lat_min,
-                spawner.config.lat_max,
-                spawner.config.lng_min,
-                spawner.config.lng_max,
-            )
-        });
+    let position = bounded_weighted_spawn_cell(
+        weighting,
+        &mut rng,
+        |w, rng| w.sample_driver_cell(rng),
+        lat_min,
+        lat_max,
+        lng_min,
+        lng_max,
+    )
+    .unwrap_or_else(|| generate_spawn_position(&mut rng, lat_min, lat_max, lng_min, lng_max));
 
     // Sample earnings target: $100-$300 range
     let daily_earnings_target = rng.gen_range(100.0..=300.0);
@@ -372,4 +398,42 @@ pub fn driver_spawner_system(
         current_time_ms,
         weighting,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::SeedableRng;
+
+    #[test]
+    fn bounded_weighted_spawn_cell_rejects_out_of_bounds() {
+        let weighting = SpawnWeighting::berlin_hotspots();
+        let mut rng = StdRng::seed_from_u64(0);
+        let result = bounded_weighted_spawn_cell(
+            Some(&weighting),
+            &mut rng,
+            |w, rng| w.sample_rider_cell(rng),
+            0.0,
+            1.0,
+            0.0,
+            1.0,
+        );
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn bounded_weighted_spawn_cell_allows_in_bounds() {
+        let weighting = SpawnWeighting::berlin_hotspots();
+        let mut rng = StdRng::seed_from_u64(0);
+        let result = bounded_weighted_spawn_cell(
+            Some(&weighting),
+            &mut rng,
+            |w, rng| w.sample_rider_cell(rng),
+            52.2,
+            52.6,
+            13.0,
+            13.6,
+        );
+        assert!(result.is_some());
+    }
 }

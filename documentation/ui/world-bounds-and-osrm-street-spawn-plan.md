@@ -16,7 +16,7 @@ keep each session small, testable, and reviewable.
 
 | Session | Title | Status | Last updated | Notes |
 |---|---|---|---|---|
-| 1 | Lock world-bounds behavior at spawn time | Not started | - | - |
+| 1 | Lock world-bounds behavior at spawn time | In progress | 2026-02-08 | See notes below |
 | 2 | Add OSRM match-service spawn snap utility | Not started | - | - |
 | 3 | Build spawn position resolver for routing mode | Not started | - | - |
 | 4 | Add graceful fallback chain for OSRM spawn failures | Not started | - | - |
@@ -58,6 +58,21 @@ Blockers:
   - uniform random
   - weighted hotspots
 - If a weighted spawn cell is out of bounds, fall back to bounded random spawn.
+
+#### Session 1 progress
+```
+Status: In progress
+Completed:
+- Added `spatial::cell_in_bounds` helper and reused it in scenario/spawner logic.
+- Guarded weighted rider/driver cells with `bounded_weighted_spawn_cell` and added regression tests.
+Remaining:
+- Run `./ci.sh check` to verify the session and mark it done.
+CI:
+- Ran: not yet (pending `./ci.sh check`)
+- Result: pending
+Blockers:
+- None
+```
 
 ### Suggested files
 - `crates/sim_core/src/systems/spawner.rs`

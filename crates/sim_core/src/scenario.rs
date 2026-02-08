@@ -13,7 +13,7 @@ use crate::matching::{
 use crate::patterns::{apply_driver_patterns, apply_rider_patterns};
 use crate::pricing::PricingConfig;
 use crate::routing::{build_route_provider, RouteProviderKind, RouteProviderResource};
-use crate::spatial::SpatialIndex;
+use crate::spatial::{cell_in_bounds, SpatialIndex};
 use crate::spawner::{
     DriverSpawner, DriverSpawnerConfig, RiderSpawner, RiderSpawnerConfig, SpawnWeighting,
     SpawnWeightingKind,
@@ -331,20 +331,6 @@ const GRID_DISK_THRESHOLD: u32 = 20;
 
 /// Maximum attempts for rejection sampling before falling back to grid_disk.
 const MAX_REJECTION_SAMPLING_ATTEMPTS: usize = 2000;
-
-/// Helper function to check if a cell is within geographic bounds.
-fn cell_in_bounds(
-    cell: h3o::CellIndex,
-    lat_min: f64,
-    lat_max: f64,
-    lng_min: f64,
-    lng_max: f64,
-) -> bool {
-    let coord: h3o::LatLng = cell.into();
-    let lat = coord.lat();
-    let lng = coord.lng();
-    lat >= lat_min && lat <= lat_max && lng >= lng_min && lng <= lng_max
-}
 
 /// Helper function to check if a cell is within the desired distance range from pickup.
 fn is_valid_destination(
