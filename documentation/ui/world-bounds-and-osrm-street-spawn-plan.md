@@ -3,6 +3,47 @@
 This plan is split into sessions so you can implement one chunk at a time and
 keep each session small, testable, and reviewable.
 
+## How to use this plan across sessions
+- At the start of each new session, read this file first and continue from the
+  first session marked `Not started` or `In progress`.
+- At the end of each session, update the status block in this file before
+  ending work so the next agent can resume without extra context.
+- Always include a short note with what changed, what remains, and any blockers.
+- Do not mark a session as `Done` unless `./ci.sh check` ends with
+  `✓ CI job 'check' passed.`
+
+## Session status board
+
+| Session | Title | Status | Last updated | Notes |
+|---|---|---|---|---|
+| 1 | Lock world-bounds behavior at spawn time | Not started | - | - |
+| 2 | Add OSRM match-service spawn snap utility | Not started | - | - |
+| 3 | Build spawn position resolver for routing mode | Not started | - | - |
+| 4 | Add graceful fallback chain for OSRM spawn failures | Not started | - | - |
+| 5 | Prevent out-of-bounds drift during movement (policy pass) | Not started | - | - |
+| 6 | UI/Docs alignment | Not started | - | - |
+| 7 | End-to-end validation and perf guardrails | Not started | - | - |
+
+Status values: `Not started`, `In progress`, `Blocked`, `Done`.
+
+## Session handoff template
+Use this template in the `Notes` column (or directly below a session) when you
+finish a session:
+
+```
+Status: Done | In progress | Blocked
+Completed:
+- <short bullet>
+- <short bullet>
+Remaining:
+- <short bullet>
+CI:
+- Ran: ./ci.sh check
+- Result: ✓ CI job 'check' passed.
+Blockers:
+- <none or blocker>
+```
+
 ## Goals
 - `Map size (km)` must bound the simulation world, not only the viewport.
 - In `RoutingMode::Osrm`, rider and driver spawns should land on real streets
