@@ -17,7 +17,7 @@ keep each session small, testable, and reviewable.
 | Session | Title | Status | Last updated | Notes |
 |---|---|---|---|---|
 | 1 | Lock world-bounds behavior at spawn time | Done | 2026-02-08 | See status section below |
-| 2 | Add OSRM match-service spawn snap utility | Not started | - | - |
+| 2 | Add OSRM match-service spawn snap utility | Done | 2026-02-08 | See status block below. |
 | 3 | Build spawn position resolver for routing mode | Not started | - | - |
 | 4 | Add graceful fallback chain for OSRM spawn failures | Not started | - | - |
 | 5 | Prevent out-of-bounds drift during movement (policy pass) | Not started | - | - |
@@ -106,6 +106,21 @@ Blockers:
   - `confidence` from selected matching
   - optional snapped distance/name metadata when available
 - Add timeout + error handling so failures degrade gracefully.
+
+#### Session 2 progress
+```
+Status: Done
+Completed:
+- Added `osrm_spawn` helper that calls OSRM `/match` for spawn candidates and returns deterministic snaps.
+- Added unit tests for selection/radius helpers and ensured formatting/clippy compliance before running `./ci.sh check`.
+Remaining:
+- Wire the helper into the spawn resolver and fallbacks in Session 3/4.
+CI:
+- Ran: ./ci.sh check
+- Result: ✓ CI job 'check' passed.
+Blockers:
+- None
+```
 
 ### Suggested files
 - `crates/sim_core/src/routing.rs` (or a new `routing/osrm_spawn.rs` module)
