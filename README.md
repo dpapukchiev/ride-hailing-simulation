@@ -116,7 +116,7 @@ agents within a single simulation.
 
 **ECS (`sim_core::ecs`)**
 - Components: `Rider`, `Driver`, `Trip`, `Position`
-- States: `RiderState`, `DriverState`, `TripState`
+  - State markers: `Browsing`, `Waiting`, `InTransit`, `RiderCompleted`, `RiderCancelled`, `Idle`, `Evaluating`, `EnRoute`, `OnTrip`, `OffDuty`, `TripEnRoute`, `TripOnTrip`, `TripCompleted`, `TripCancelled`
 - Resources: `SimulationClock`, `MatchRadius`, `MatchingAlgorithm`
 
 **Systems (`sim_core::systems`)**
@@ -293,7 +293,7 @@ ride-hailing-simulation/
 │   ├── sim_core/          # Core simulation engine
 │   │   ├── src/
 │   │   │   ├── clock.rs   # Event scheduling
-│   │   │   ├── ecs.rs     # Components and states
+│   │   │   ├── ecs.rs     # Components and state markers
 │   │   │   ├── systems/   # Event-driven systems
 │   │   │   ├── matching/  # Matching algorithms
 │   │   │   ├── spatial.rs # H3 spatial operations

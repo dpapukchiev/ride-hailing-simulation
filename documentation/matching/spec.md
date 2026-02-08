@@ -21,12 +21,12 @@ System: `matching_system`
 
 - Reacts to `CurrentEvent`. When **batch matching is enabled** (via `BatchMatchingConfig`), this system does nothing (per-rider matching is not used).
 - On `EventKind::TryMatch` with subject `Rider(rider_entity)` (only when batch matching disabled):
-  - If that rider is `Waiting`, queries the `MatchingAlgorithm` resource (required) to find a match.
-  - Collects all `Idle` drivers with their positions as candidates (excludes `OffDuty` drivers).
+  - If that rider has the `Waiting` marker, queries the `MatchingAlgorithm` resource (required) to find a match.
+  - Collects all drivers with the `Idle` marker with their positions as candidates (excludes `OffDuty` drivers).
   - Calls `find_match()` on the algorithm with the rider and available drivers.
   - If a match is found:
     - Rider stores `matched_driver = Some(driver_entity)`
-    - Driver: `Idle` → `Evaluating` and stores `matched_rider = Some(rider_entity)`
+    - Driver: `Idle` → `Evaluating` via `DriverStateCommands::set_driver_state_evaluating()` and stores `matched_rider = Some(rider_entity)`
     - Schedules `MatchAccepted` 1 second from now (`schedule_in_secs(1, ...)`) with subject `Driver(driver_entity)`.
   - If no driver is found, reschedules `TryMatch` after a short delay (30s).
 
@@ -36,7 +36,7 @@ System: `batch_matching_system`
 
 - Reacts to `CurrentEvent`.
 - On `EventKind::BatchMatchRun` (no subject; global event):
-  - When `BatchMatchingConfig` is present and enabled: collects all riders in `Waiting` with `matched_driver == None`, and all `Idle` drivers; calls `find_batch_matches()` on the matching algorithm; for each `MatchResult`, sets rider `matched_driver`, driver `matched_rider`, driver state to `Evaluating`, and schedules `MatchAccepted` 1s later for the driver. Schedules the next `BatchMatchRun` at `now + interval_secs`. Unmatched riders remain waiting for the next batch.
+  - When `BatchMatchingConfig` is present and enabled: collects all riders in `Waiting` with `matched_driver == None`, and all `Idle` drivers; calls `find_batch_matches()` on the matching algorithm; for each `MatchResult`, sets rider `matched_driver`, driver `matched_rider`, transitions the driver to `Evaluating` via `DriverStateCommands`, and schedules `MatchAccepted` 1s later for the driver. Schedules the next `BatchMatchRun` at `now + interval_secs`. Unmatched riders remain waiting for the next batch.
 
 ## `sim_core::systems::match_accepted`
 
@@ -54,5 +54,6 @@ System: `match_rejected_system`
 - On `EventKind::MatchRejected` with subject `Rider(rider_entity)`:
   - Handles rider-side cleanup after a driver rejects the match (scheduled by `driver_decision_system` at delta 0).
   - Clears the rider's `matched_driver` link.
-  - If batch matching is **disabled** and rider is still `Waiting`, schedules `TryMatch` after 30 seconds so the rider can be re-matched.
+  - If batch matching is **disabled** and rider still has the `Waiting` marker, schedules `TryMatch` after 30 seconds so the rider can be re-matched.
   - If batch matching is **enabled**, no retry is scheduled; the rider remains waiting and is included in the next `BatchMatchRun`.
+

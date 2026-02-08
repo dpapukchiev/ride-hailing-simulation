@@ -36,10 +36,10 @@ reacting to `SimulationStarted` and spawn events. Spawners use inter-arrival tim
 distributions to control spawn rates, enabling variable supply and demand patterns.
 The default distributions vary rates based on time of day (hour) and day of week,
 creating realistic patterns with rush hours (7-9 AM, 5-7 PM) and lower demand at night.
-Riders spawn in `Browsing` state. One second after spawn, `ShowQuote` runs: the sim computes a quote (fare from trip distance, ETA from nearest idle driver or a default), attaches a `RiderQuote` component, and schedules `QuoteDecision` 1s later. On `QuoteDecision`, the rider stochastically accepts or rejects (configurable probability). If the rider **accepts** (`QuoteAccepted`), they transition to `Waiting` and pickup-timeout cancellation is scheduled. When batch matching is **disabled**, `TryMatch` is scheduled 1s later for that rider; when batch matching is **enabled**, the rider remains waiting until the next `BatchMatchRun`. If the rider **rejects** (`QuoteRejected`), their quote rejection count increments; if under the configured max, `ShowQuote` is rescheduled after a delay (re-quote); otherwise the rider gives up (marked cancelled, despawned, and counted in `riders_abandoned_quote_total`). Drivers spawn
-in `Idle` state continuously over the simulation window with earnings targets ($100-$300)
+Riders spawn with the `Browsing` marker. One second after spawn, `ShowQuote` runs: the sim computes a quote (fare from trip distance, ETA from nearest idle driver or a default), attaches a `RiderQuote` component, and schedules `QuoteDecision` 1s later. On `QuoteDecision`, the rider stochastically accepts or rejects (configurable probability). If the rider **accepts** (`QuoteAccepted`), they transition to `Waiting` and pickup-timeout cancellation is scheduled. When batch matching is **disabled**, `TryMatch` is scheduled 1s later for that rider; when batch matching is **enabled**, the rider remains waiting until the next `BatchMatchRun`. If the rider **rejects** (`QuoteRejected`), their quote rejection count increments; if under the configured max, `ShowQuote` is rescheduled after a delay (re-quote); otherwise the rider gives up (marked cancelled, despawned, and counted in `riders_abandoned_quote_total`). Drivers spawn
+in `Idle` (marker) continuously over the simulation window with earnings targets ($100-$300)
 and fatigue thresholds (8-12 hours), evaluate a match offer, drive en route to pickup, and then move into
-an on-trip state. If
+an on-trip marker. If
 a rider waits past a randomized pickup window, the ride is cancelled, the trip
 is marked cancelled, and the driver returns to idle. When the trip completes,
 the rider is despawned, the driver earns fare based on trip distance, and the driver returns to idle
@@ -88,10 +88,10 @@ All time is in **milliseconds** (simulation ms). Time 0 maps to a real-world dat
 
 ## `sim_core::ecs`
 
-Components and state enums:
+Components and state markers:
 
-- `RiderState`: `Browsing`, `Waiting`, `InTransit`, `Completed`, `Cancelled`
-- `Rider` component: `{ state, matched_driver, assigned_trip: Option<Entity>, destination: Option<CellIndex>, requested_at: Option<u64>, quote_rejections: u32, accepted_fare: Option<f64>, last_rejection_reason: Option<RiderAbandonmentReason> }`
+- Rider state markers: `Browsing`, `Waiting`, `InTransit`, `RiderCompleted`, `RiderCancelled`
+- `Rider` component: `{ matched_driver, assigned_trip: Option<Entity>, destination: Option<CellIndex>, requested_at: Option<u64>, quote_rejections: u32, accepted_fare: Option<f64>, last_rejection_reason: Option<RiderAbandonmentReason> }`
   - `assigned_trip`: backlink to the active Trip entity. Set when a Trip is spawned (driver_decision_system), cleared on trip completion/cancellation. Enables O(1) trip lookup instead of scanning all Trip entities.
   - `destination`: requested dropoff cell. Must be set; riders without a destination will be rejected by the driver decision system.
   - `requested_at`: simulation time (ms) when the rider was spawned (set by spawner when spawning).
@@ -99,15 +99,16 @@ Components and state enums:
   - `accepted_fare`: fare the rider accepted when transitioning to Waiting; used for driver earnings and trip completion.
   - `last_rejection_reason`: tracks the reason for the most recent quote rejection (`QuotePriceTooHigh`, `QuoteEtaTooLong`, `QuoteStochasticRejection`); used to record abandonment reason when rider gives up.
 - `RiderQuote` component (optional, attached while viewing a quote): `{ fare: f64, eta_ms: u64 }` — current quote shown to the rider (for UI/telemetry).
-- `DriverState`: `Idle`, `Evaluating`, `EnRoute`, `OnTrip`, `OffDuty`
-- `Driver` component: `{ state: DriverState, matched_rider: Option<Entity>, assigned_trip: Option<Entity> }`
+- Driver state markers: `Idle`, `Evaluating`, `EnRoute`, `OnTrip`, `OffDuty`
+- `Driver` component: `{ matched_rider: Option<Entity>, assigned_trip: Option<Entity> }`
   - `assigned_trip`: backlink to the active Trip entity (same as Rider). Enables O(1) trip lookup.
+- `DriverStateCommands` (extension trait for `EntityCommands`): helper methods to transition a driver to a single marker by clearing all driver state markers and inserting the target (`set_driver_state_idle`, `set_driver_state_evaluating`, `set_driver_state_en_route`, `set_driver_state_on_trip`, `set_driver_state_off_duty`).
 - `DriverEarnings` component: `{ daily_earnings: f64, daily_earnings_target: f64, session_start_time_ms: u64, session_end_time_ms: Option<u64> }`
   - Tracks accumulated earnings for the current day, earnings target at which driver goes OffDuty, session start time for fatigue calculation, and session end time (set when the driver goes OffDuty, `None` while active).
 - `DriverFatigue` component: `{ fatigue_threshold_ms: u64 }`
   - Maximum time on duty (in milliseconds) before driver goes OffDuty.
-- `TripState`: `EnRoute`, `OnTrip`, `Completed`, `Cancelled`
-- `Trip` component (core identity + spatial): `{ state, rider: Entity, driver: Entity, pickup: CellIndex, dropoff: CellIndex }`
+- Trip state markers: `TripEnRoute`, `TripOnTrip`, `TripCompleted`, `TripCancelled`
+- `Trip` component (core identity + spatial): `{ rider: Entity, driver: Entity, pickup: CellIndex, dropoff: CellIndex }`
   - `pickup` / `dropoff`: trip is completed when the driver reaches `dropoff` (not a fixed +1 tick).
 - `TripTiming` component (lifecycle timestamps): `{ requested_at: u64, matched_at: u64, pickup_at: Option<u64>, dropoff_at: Option<u64>, cancelled_at: Option<u64> }`
   - `requested_at` / `matched_at` / `pickup_at` / `dropoff_at`: simulation time in ms; used for KPIs. `dropoff_at` is set in `trip_completed_system`.
@@ -121,6 +122,7 @@ Components and state enums:
 - `Position` component: `{ CellIndex }` H3 cell position for spatial matching
 
 These are minimal placeholders to validate state transitions via systems.
+Telemetry snapshots/export use enum states defined in `sim_core::telemetry` and are derived from the marker components at snapshot time.
 
 ## `sim_core::runner`
 
@@ -204,11 +206,11 @@ Spawner systems: react to spawn events and create riders/drivers dynamically.
 - **`simulation_started_system`**: Reacts to `EventKind::SimulationStarted` (scheduled at time 0). When `BatchMatchingConfig` is present and enabled, schedules the first `BatchMatchRun` at time 0. Initializes `RiderSpawner` and `DriverSpawner` resources if present. Spawns initial entities immediately (`initial_rider_count` riders and `initial_driver_count` drivers) at time 0, then schedules their first `SpawnRider`/`SpawnDriver` events if scheduled spawning should continue.
 - **`rider_spawner_system`**: Reacts to `EventKind::SpawnRider`. If the spawner should spawn at current time:
   - Generates random position and destination using seeded RNG (deterministic based on current time and spawn count).
-  - Spawns rider entity in `Browsing` state with position, destination, `requested_at = Some(clock.now())`, and `quote_rejections = 0`.
+  - Spawns rider entity with `Browsing` marker, position, destination, `requested_at = Some(clock.now())`, and `quote_rejections = 0`.
   - Schedules `ShowQuote` 1 second from now for the newly spawned rider.
   - Advances spawner to next spawn time using inter-arrival distribution.
   - Schedules next `SpawnRider` event if spawning should continue.
-- **`driver_spawner_system`**: Reacts to `EventKind::SpawnDriver`. Similar to `rider_spawner_system` but spawns drivers in `Idle` state (no destination needed). Drivers spawn with random positions within configured bounds. Each driver is initialized with:
+- **`driver_spawner_system`**: Reacts to `EventKind::SpawnDriver`. Similar to `rider_spawner_system` but spawns drivers with the `Idle` marker (no destination needed). Drivers spawn with random positions within configured bounds. Each driver is initialized with:
   - `DriverEarnings` component: `daily_earnings = 0.0`, `daily_earnings_target` sampled from $100-$300 range, `session_start_time_ms = current_time_ms`, `session_end_time_ms = None`.
   - `DriverFatigue` component: `fatigue_threshold_ms` sampled from 8-12 hours range.
 
@@ -220,12 +222,12 @@ System: `movement_system`
 
 - Reacts to `CurrentEvent`.
 - On `EventKind::MoveStep` with subject `Trip(trip_entity)`:
-  - **EnRoute**: moves the trip's driver one H3 hop toward `trip.pickup` (rider cell), updates
+  - **EnRoute (`TripEnRoute`)**: moves the trip's driver one H3 hop toward `trip.pickup` (rider cell), updates
     `trip.pickup_eta_ms` using remaining haversine distance and a stochastic speed sample
     (default 20–60 km/h), and emits `PickupEtaUpdated` for the trip. If still en route, reschedules
     `MoveStep` based on the time to traverse the next hop; when driver reaches pickup, schedules
     `TripStarted` 1 second from now (`schedule_in_secs(1, ...)`).
-  - **OnTrip**: moves the trip's driver one H3 hop toward `trip.dropoff`. On each movement step,
+  - **OnTrip (`TripOnTrip`)**: moves the trip's driver one H3 hop toward `trip.dropoff`. On each movement step,
     the rider's position is updated to match the driver's position (rider is in the vehicle).
     If still en route, reschedules `MoveStep` based on the time to traverse the next hop; when
     driver reaches dropoff, schedules `TripCompleted` 1 second from now (`schedule_in_secs(1, ...)`).
@@ -236,12 +238,12 @@ System: `trip_started_system`
 
 - Reacts to `CurrentEvent`.
 - On `EventKind::TripStarted` with subject `Trip(trip_entity)`:
-  - If trip is `EnRoute` and the driver is co-located with the rider (who is `Waiting`
+  - If trip has `TripEnRoute` and the driver is co-located with the rider (who has `Waiting`
     and matched back to this driver), transitions:
-    - Rider: `Waiting` → `InTransit`; rider's position is updated to match the driver's position
+    - Rider: `Waiting` → `InTransit` (marker swap); rider's position is updated to match the driver's position
       (rider is now in the vehicle).
-    - Driver: `EnRoute` → `OnTrip`
-    - Trip: `EnRoute` → `OnTrip`; sets `pickup_at = Some(clock.now())`.
+    - Driver: `EnRoute` → `OnTrip` (via `DriverStateCommands`)
+    - Trip: `TripEnRoute` → `TripOnTrip`; sets `pickup_at = Some(clock.now())`.
   - Schedules `MoveStep` 1 second from now (`schedule_in_secs(1, ...)`) for the same trip so the driver moves toward dropoff; completion is scheduled by the movement system when the driver reaches dropoff.
 
 ## `sim_core::systems::trip_completed`
@@ -254,10 +256,10 @@ System: `trip_completed_system`
   - Calculates commission and driver net earnings (fare minus commission).
   - Adds driver net earnings to driver's `daily_earnings`.
   - Accumulates commission to `telemetry.platform_revenue_total` and fare to `telemetry.total_fares_collected`.
-  - Driver: `OnTrip` → `Idle` and clears `matched_rider` and `assigned_trip`
+  - Driver: `OnTrip` → `Idle` (marker swap) and clears `matched_rider` and `assigned_trip`
   - Schedules `CheckDriverOffDuty` at delta 0 for the driver so `driver_offduty_check_system` handles the earnings/fatigue threshold check and potential `OffDuty` transition.
-  - Rider: `InTransit` → `Completed` and clears `matched_driver`, then the rider entity is despawned
-  - Trip: `OnTrip` → `Completed`
+  - Rider: `InTransit` → `RiderCompleted` (marker swap) and clears `matched_driver`, then the rider entity is despawned
+  - Trip: `TripOnTrip` → `TripCompleted`
   - Pushes a `CompletedTripRecord` to `SimTelemetry` with trip/rider/driver entities, timestamps (requested_at, matched_at, pickup_at, completed_at), and fare for KPIs.
 
 ## `sim_core::profiling`
@@ -268,3 +270,5 @@ Performance profiling infrastructure: system timing, event rate tracking, and me
 - **`SystemTimings`** (ECS `Resource`): Aggregated system timing metrics, keyed by system name. Provides `record(system_name, duration)` to track execution time, `get(system_name)` to retrieve timing data, and `print_summary()` to display statistics sorted by total duration.
 - **`EventMetrics`** (ECS `Resource`): Event processing rate metrics. Tracks total events processed, events per kind, and calculates events per second. Automatically records events when present in the world (integrated into `run_next_event`). Provides `record_event(kind)` to manually track events, `events_per_second()` for current rate, and `print_summary()` to display statistics.
 - **`time_system!` macro**: Helper macro to time a system execution. Usage: `time_system!(system_name, timings_resource, { system_body })`. Records timing if `SystemTimings` resource exists.
+
+

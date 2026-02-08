@@ -21,12 +21,12 @@ Unit tests exist in each module to confirm behavior:
 - `driver_offduty`: periodic earnings/fatigue threshold checks and OffDuty transitions.
 - `telemetry_export`: timestamp ordering validation for all trip states (EnRoute, OnTrip, Completed, Cancelled); integration test validates all trips in snapshots follow funnel order.
 - **End-to-end (single ride)**: Inserts `SimulationClock`, `SimTelemetry`, spawners configured to spawn one rider and one driver in the same cell. Calls `initialize_simulation()` to schedule `SimulationStarted` at time 0. Runs `run_until_empty` with `simulation_schedule()`.
-  Asserts: one `Trip` in `Completed` with correct rider/driver and pickup/dropoff;
-  rider `Completed`, driver `Idle` or `OffDuty` (if thresholds exceeded); `SimTelemetry.completed_trips.len() == 1`, record
+  Asserts: one `Trip` in `TripCompleted` with correct rider/driver and pickup/dropoff;
+  rider entity despawned after `RiderCompleted`, driver `Idle` or `OffDuty` (if thresholds exceeded); `SimTelemetry.completed_trips.len() == 1`, record
   matches rider/driver, and KPI timestamps are ordered (requested_at <= matched_at <= pickup_at <= completed_at); `time_to_match()`, `time_to_pickup()`, `trip_duration()` are consistent.
 - **End-to-end (concurrent trips)**: Same setup with spawners configured for two riders and two drivers
   (same cell), riders spawning at t=1s and t=2s. Calls `initialize_simulation()` and runs until empty. Asserts: two
-  `Trip` entities in `Completed`, both riders `Completed`, both drivers `Idle` or `OffDuty` (if thresholds exceeded);
+  `Trip` entities in `TripCompleted`, both riders completed/despawned, both drivers `Idle` or `OffDuty` (if thresholds exceeded);
   `SimTelemetry.completed_trips.len() == 2`.
 - **Scenario**: `build_scenario` with 10 riders, 3 drivers, seed 42; asserts
   spawner configurations are correct (max_count matches params). Large scenarios (e.g.

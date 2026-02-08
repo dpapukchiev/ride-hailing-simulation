@@ -2,9 +2,10 @@
 
 ## ECS Components
 
-- `DriverState`: `Idle`, `Evaluating`, `EnRoute`, `OnTrip`, `OffDuty`
-- `Driver` component: `{ state: DriverState, matched_rider: Option<Entity>, assigned_trip: Option<Entity> }`
+- Driver state markers: `Idle`, `Evaluating`, `EnRoute`, `OnTrip`, `OffDuty`
+- `Driver` component: `{ matched_rider: Option<Entity>, assigned_trip: Option<Entity> }`
   - `assigned_trip`: backlink to the active Trip entity. Enables O(1) trip lookup.
+- `DriverStateCommands` (`EntityCommands` extension trait): helper methods to transition a driver by clearing all driver state markers, then inserting one target marker (`set_driver_state_idle`, `set_driver_state_evaluating`, `set_driver_state_en_route`, `set_driver_state_on_trip`, `set_driver_state_off_duty`).
 - `DriverEarnings` component: `{ daily_earnings: f64, daily_earnings_target: f64, session_start_time_ms: u64, session_end_time_ms: Option<u64> }`
   - Tracks accumulated earnings for the current day, earnings target at which driver goes OffDuty, session start time for fatigue calculation, and session end time (set when the driver goes OffDuty, `None` while active).
 - `DriverFatigue` component: `{ fatigue_threshold_ms: u64 }`
@@ -26,11 +27,11 @@ System: `driver_decision_system`
   - Converts score to probability using logit function: `probability = 1 / (1 + exp(-score))`
   - Samples stochastically using seeded RNG (seed: `driver_decision_config.seed + driver_entity_id`)
   - Applies logit accept rule:
-    - Accept: `Evaluating` → `EnRoute`, **spawns a Trip entity bundle** (`Trip` + `TripTiming` + `TripFinancials` + `TripLiveData`) with `pickup` =
+    - Accept: `Evaluating` → `EnRoute` (via `DriverStateCommands`), **spawns a Trip entity bundle** (`Trip` + `TripEnRoute` + `TripTiming` + `TripFinancials` + `TripLiveData`) with `pickup` =
       rider's position, `dropoff` = rider's `destination` or a neighbor of pickup,
       `requested_at` = rider's `requested_at`, `matched_at` = clock.now(), `pickup_at` = None;
       schedules `MoveStep` 1 second from now (`schedule_in_secs(1, ...)`) for that trip (`subject: Trip(trip_entity)`).
-    - Reject: `Evaluating` → `Idle`, clears `matched_rider`. Schedules `MatchRejected` at delta 0 for the rider, which delegates rider-side cleanup (clearing `matched_driver`, rescheduling `TryMatch`) to `match_rejected_system`.
+    - Reject: `Evaluating` → `Idle` (via `DriverStateCommands`), clears `matched_rider`. Schedules `MatchRejected` at delta 0 for the rider, which delegates rider-side cleanup (clearing `matched_driver`, rescheduling `TryMatch`) to `match_rejected_system`.
 
 ## `sim_core::systems::driver_offduty`
 

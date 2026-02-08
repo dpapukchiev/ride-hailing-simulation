@@ -2,6 +2,10 @@
 
 ## `sim_core::telemetry`
 
+- **Lifecycle state enums** used by snapshots/export/UI: `RiderState`, `DriverState`, `TripState`.
+  - These enums now live in `sim_core::telemetry` (not `sim_core::ecs`).
+  - ECS runtime state is represented by marker components (`Browsing`, `Idle`, `TripEnRoute`, etc.).
+  - `capture_snapshot_system` derives telemetry enum states from those markers at snapshot time.
 - **`RiderAbandonmentReason`** enum: `QuotePriceTooHigh`, `QuoteEtaTooLong`, `QuoteStochasticRejection`, `PickupTimeout`. Used to track why riders abandoned their ride requests. Stored in `Rider.last_rejection_reason` when quotes are rejected, and used to increment the appropriate breakdown counter in `SimTelemetry` when riders give up.
 - **`SimTelemetry`** (ECS `Resource`, default): holds `completed_trips: Vec<CompletedTripRecord>` plus cumulative rider totals (`riders_cancelled_total`, `riders_completed_total`, `riders_abandoned_quote_total`), breakdown fields for abandonment reasons (`riders_abandoned_price`, `riders_abandoned_eta`, `riders_abandoned_stochastic`, `riders_cancelled_pickup_timeout`), `platform_revenue_total: f64`, and `total_fares_collected: f64`. `riders_abandoned_quote_total` counts riders who gave up after rejecting too many quotes (distinct from pickup-timeout cancels), with breakdown by reason: `riders_abandoned_price` (rejected due to price too high), `riders_abandoned_eta` (rejected due to ETA too long), `riders_abandoned_stochastic` (stochastic rejection). `riders_cancelled_pickup_timeout` counts riders who cancelled while waiting for pickup. `platform_revenue_total` accumulates commission revenue from completed trips. `total_fares_collected` is the sum of agreed fares for completed trips.
 - **`CompletedTripRecord`**: `{ trip_entity, rider_entity, driver_entity, completed_at, requested_at, matched_at, pickup_at, fare, surge_impact }` (timestamps in **simulation ms**, `fare` is agreed fare paid, `surge_impact` is additional cost due to surge pricing calculated as `fare - base_fare`). Helper methods: **`time_to_match()`**, **`time_to_pickup()`**, **`trip_duration()`** (all in ms).

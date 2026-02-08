@@ -46,8 +46,8 @@ Where:
 When `surge_enabled = true`:
 
 ```
-demand = count(riders in Browsing or Waiting state within grid_disk(pickup, surge_radius_k))
-supply = count(drivers in Idle state within grid_disk(pickup, surge_radius_k))
+demand = count(riders with Browsing or Waiting markers within grid_disk(pickup, surge_radius_k))
+supply = count(drivers with Idle marker within grid_disk(pickup, surge_radius_k))
 
 IF demand > supply AND supply > 0:
     multiplier = min(1.0 + (demand - supply) / supply, surge_max_multiplier)
@@ -351,7 +351,7 @@ IF quote_rejections < max_quote_rejections:
     quote_rejections++
     schedule ShowQuote after re_quote_delay_secs
 ELSE:
-    rider.state = Cancelled
+    insert RiderCancelled marker
     rider despawned
     riders_abandoned_quote_total++
 ```
