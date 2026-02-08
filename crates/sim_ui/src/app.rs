@@ -286,14 +286,11 @@ impl MapTileState {
         }
     }
 
-    pub fn projected(&self, key: &TileKey) -> Option<&CachedProjection> {
-        self.projection_cache.get(key)
-    }
-
-    pub fn touch_projection(&mut self, key: &TileKey) {
-        if let Some(entry) = self.projection_cache.get_mut(key) {
+    pub fn cached_projection_lines(&mut self, key: &TileKey) -> Option<&[Vec<(f32, f32)>]> {
+        self.projection_cache.get_mut(key).map(|entry| {
             entry.last_used = Instant::now();
-        }
+            entry.normalized_lines.as_slice()
+        })
     }
 
     pub fn cache_projection_from_geometry(&mut self, key: TileKey, geometry: &TileGeometry) {

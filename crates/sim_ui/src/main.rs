@@ -66,6 +66,7 @@ impl eframe::App for SimUiApp {
 
         egui::CentralPanel::default().show(ctx, |ui| {
             self.map_tiles.drain_results();
+            self.map_tiles.evict_stale_projections();
             let (
                 latest_snapshot,
                 active_trips_points,
@@ -161,8 +162,25 @@ impl eframe::App for SimUiApp {
                                         .request_missing_tiles(&self.osrm_endpoint, tiles.iter().copied());
                                 }
                                 let road_stroke = egui::Stroke::new(1.0, egui::Color32::from_gray(80));
+                                let rect_left = map_rect.left();
+                                let rect_top = map_rect.top();
+                                let rect_width = map_rect.width();
+                                let rect_height = map_rect.height();
                                 for tile in &tiles {
-                                    if let Some(geometry) = self.map_tiles.tile(tile) {
+                                    if let Some(lines) = self.map_tiles.cached_projection_lines(tile) {
+                                        for line in lines {
+                                            let mut points: Vec<egui::Pos2> = Vec::with_capacity(line.len());
+                                            for (nx, ny) in line {
+                                                let px = rect_left + rect_width * nx;
+                                                let py = rect_top + rect_height * ny;
+                                                points.push(egui::pos2(px, py));
+                                            }
+                                            if points.len() >= 2 {
+                                                painter.add(egui::Shape::line(points, road_stroke));
+                                            }
+                                        }
+                                        tiles_drawn += 1;
+                                    } else if let Some(geometry) = self.map_tiles.tile(tile).cloned() {
                                         for line in &geometry.lines {
                                             let mut points = Vec::with_capacity(line.len());
                                             for (lat, lng) in line {
@@ -177,6 +195,8 @@ impl eframe::App for SimUiApp {
                                             }
                                         }
                                         tiles_drawn += 1;
+                                        self.map_tiles
+                                            .cache_projection_from_geometry(*tile, &geometry);
                                     }
                                 }
                                 if tiles_drawn == 0 {

@@ -39,6 +39,12 @@ behaviour changes (geometry, projection, caching, controls, legends, etc.).
 - The cached map background prevents a full re-render each frame. Describe the
   tile projection cache, the criteria that invalidate it (bounds, zoom, geometry
   updates), and how caches map to `egui` textures.
+- `MapTileState` projects each decoded OSRM segment into normalized screen space
+  once per `MapSignature` and keeps a short-lived cache (~5s since last access)
+  so the UI can reuse those projections without re-running the math every frame.
+  Call out that caches clear whenever bounds or zoom change and that tiles start
+  with only four inflight requests until at least six cached tiles are available
+  before the throttle relaxes back toward 12 concurrent downloads.
 - Document any simplification/sampling rules that reduce geometry density at a
   given zoom level and how optional filters (major road classes, metadata) should
   influence the drawn streets.
