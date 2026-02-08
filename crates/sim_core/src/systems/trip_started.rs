@@ -1,14 +1,16 @@
 use bevy_ecs::prelude::{Commands, ParamSet, Query, Res, ResMut};
 
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
-use crate::ecs::{Driver, DriverState, Position, Rider, RiderState, Trip, TripRoute, TripState};
+use crate::ecs::{
+    Driver, DriverState, Position, Rider, RiderState, Trip, TripRoute, TripState, TripTiming,
+};
 
 #[allow(clippy::type_complexity)]
 pub fn trip_started_system(
     mut commands: Commands,
     mut clock: ResMut<SimulationClock>,
     event: Res<CurrentEvent>,
-    mut trips: Query<&mut Trip>,
+    mut trips: Query<(&mut Trip, &mut TripTiming)>,
     mut queries: ParamSet<(
         Query<(&mut Driver, &Position)>,
         Query<(&mut Rider, &mut Position)>,
@@ -23,7 +25,7 @@ pub fn trip_started_system(
     };
 
     let (driver_entity, rider_entity) = {
-        let Ok(trip) = trips.get(trip_entity) else {
+        let Ok((trip, _)) = trips.get(trip_entity) else {
             return;
         };
         if trip.state != TripState::EnRoute {
@@ -77,9 +79,9 @@ pub fn trip_started_system(
         };
         driver.state = DriverState::OnTrip;
     }
-    if let Ok(mut trip) = trips.get_mut(trip_entity) {
+    if let Ok((mut trip, mut timing)) = trips.get_mut(trip_entity) {
         trip.state = TripState::OnTrip;
-        trip.pickup_at = Some(clock.now());
+        timing.pickup_at = Some(clock.now());
     }
 
     // Remove the pickup-leg TripRoute so the movement system will resolve a
@@ -136,21 +138,27 @@ mod tests {
             ))
             .id();
         let trip_entity = world
-            .spawn(Trip {
-                state: TripState::EnRoute,
-                rider: rider_entity,
-                driver: driver_entity,
-                pickup: cell,
-                dropoff: destination,
-                pickup_distance_km_at_accept: 0.0,
-                requested_at: 0,
-                matched_at: 0,
-                pickup_at: None,
-                pickup_eta_ms: 0,
-                dropoff_at: None,
-                cancelled_at: None,
-                agreed_fare: None,
-            })
+            .spawn((
+                Trip {
+                    state: TripState::EnRoute,
+                    rider: rider_entity,
+                    driver: driver_entity,
+                    pickup: cell,
+                    dropoff: destination,
+                },
+                TripTiming {
+                    requested_at: 0,
+                    matched_at: 0,
+                    pickup_at: None,
+                    dropoff_at: None,
+                    cancelled_at: None,
+                },
+                crate::ecs::TripFinancials {
+                    agreed_fare: None,
+                    pickup_distance_km_at_accept: 0.0,
+                },
+                crate::ecs::TripLiveData { pickup_eta_ms: 0 },
+            ))
             .id();
 
         {

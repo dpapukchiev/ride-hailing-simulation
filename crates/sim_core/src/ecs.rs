@@ -98,6 +98,7 @@ pub enum TripState {
     Cancelled,
 }
 
+/// Core trip identity and spatial data (slimmed from the original 13-field Trip).
 #[derive(Debug, Clone, Copy, PartialEq, Component)]
 pub struct Trip {
     pub state: TripState,
@@ -105,22 +106,37 @@ pub struct Trip {
     pub driver: Entity,
     pub pickup: CellIndex,
     pub dropoff: CellIndex,
-    /// Distance (km) from driver to pickup at match acceptance time.
-    pub pickup_distance_km_at_accept: f64,
+}
+
+/// Trip timing data: timestamps for the trip lifecycle funnel.
+#[derive(Debug, Clone, Copy, PartialEq, Component)]
+pub struct TripTiming {
     /// Simulation time when the rider's request was received (Rider.requested_at).
     pub requested_at: u64,
     /// Simulation time when the driver accepted (Trip created).
     pub matched_at: u64,
     /// Simulation time when the driver reached pickup and trip started; set in trip_started_system.
     pub pickup_at: Option<u64>,
-    /// Estimated time to pickup from current driver position (ms), updated in movement_system.
-    pub pickup_eta_ms: u64,
     /// Simulation time when the driver reached dropoff (trip completed); set in trip_completed_system.
     pub dropoff_at: Option<u64>,
     /// Simulation time when the trip was cancelled; set in rider_cancel_system.
     pub cancelled_at: Option<u64>,
+}
+
+/// Trip financial data: fare and distance metrics.
+#[derive(Debug, Clone, Copy, PartialEq, Component)]
+pub struct TripFinancials {
     /// Agreed fare (quoted at accept time, may include surge). Used for driver earnings and platform revenue.
     pub agreed_fare: Option<f64>,
+    /// Distance (km) from driver to pickup at match acceptance time.
+    pub pickup_distance_km_at_accept: f64,
+}
+
+/// Trip live data: actively updated during en-route phase.
+#[derive(Debug, Clone, Copy, PartialEq, Component)]
+pub struct TripLiveData {
+    /// Estimated time to pickup from current driver position (ms), updated in movement_system.
+    pub pickup_eta_ms: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]

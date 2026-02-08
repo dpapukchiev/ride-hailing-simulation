@@ -26,7 +26,7 @@ System: `driver_decision_system`
   - Converts score to probability using logit function: `probability = 1 / (1 + exp(-score))`
   - Samples stochastically using seeded RNG (seed: `driver_decision_config.seed + driver_entity_id`)
   - Applies logit accept rule:
-    - Accept: `Evaluating` → `EnRoute`, **spawns a `Trip` entity** with `pickup` =
+    - Accept: `Evaluating` → `EnRoute`, **spawns a Trip entity bundle** (`Trip` + `TripTiming` + `TripFinancials` + `TripLiveData`) with `pickup` =
       rider's position, `dropoff` = rider's `destination` or a neighbor of pickup,
       `requested_at` = rider's `requested_at`, `matched_at` = clock.now(), `pickup_at` = None;
       schedules `MoveStep` 1 second from now (`schedule_in_secs(1, ...)`) for that trip (`subject: Trip(trip_entity)`).

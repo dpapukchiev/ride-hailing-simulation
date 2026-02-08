@@ -1,7 +1,10 @@
 use bevy_ecs::prelude::{Commands, Query, Res, ResMut};
 
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
-use crate::ecs::{Driver, DriverEarnings, DriverState, Rider, RiderState, Trip, TripState};
+use crate::ecs::{
+    Driver, DriverEarnings, DriverState, Rider, RiderState, Trip, TripFinancials, TripState,
+    TripTiming,
+};
 use crate::pricing::{
     calculate_driver_earnings, calculate_platform_revenue, calculate_trip_fare_with_config,
     PricingConfig,
@@ -15,7 +18,7 @@ pub fn trip_completed_system(
     pricing_config: Res<PricingConfig>,
     mut telemetry: ResMut<SimTelemetry>,
     mut commands: Commands,
-    mut trips: Query<&mut Trip>,
+    mut trips: Query<(&mut Trip, &mut TripTiming, &TripFinancials)>,
     mut riders: Query<&mut Rider>,
     mut drivers: Query<&mut Driver>,
     mut driver_earnings: Query<&mut DriverEarnings>,
@@ -28,7 +31,7 @@ pub fn trip_completed_system(
         return;
     };
 
-    let Ok(mut trip) = trips.get_mut(trip_entity) else {
+    let Ok((mut trip, mut timing, financials)) = trips.get_mut(trip_entity) else {
         return;
     };
     if trip.state != TripState::OnTrip {
@@ -39,7 +42,7 @@ pub fn trip_completed_system(
     let rider_entity = trip.rider;
 
     // Use agreed fare (quoted at accept, may include surge) or fall back to current pricing
-    let fare = trip.agreed_fare.unwrap_or_else(|| {
+    let fare = financials.agreed_fare.unwrap_or_else(|| {
         calculate_trip_fare_with_config(trip.pickup, trip.dropoff, *pricing_config)
     });
 
@@ -79,8 +82,8 @@ pub fn trip_completed_system(
     }
 
     let completed_at = clock.now();
-    let pickup_at = trip.pickup_at.unwrap_or(completed_at);
-    trip.dropoff_at = Some(completed_at);
+    let pickup_at = timing.pickup_at.unwrap_or(completed_at);
+    timing.dropoff_at = Some(completed_at);
     trip.state = TripState::Completed;
 
     telemetry.completed_trips.push(CompletedTripRecord {
@@ -88,8 +91,8 @@ pub fn trip_completed_system(
         rider_entity,
         driver_entity,
         completed_at,
-        requested_at: trip.requested_at,
-        matched_at: trip.matched_at,
+        requested_at: timing.requested_at,
+        matched_at: timing.matched_at,
         pickup_at,
         fare,
         surge_impact,
@@ -144,21 +147,27 @@ mod tests {
             })
             .id();
         let trip_entity = world
-            .spawn(Trip {
-                state: TripState::OnTrip,
-                rider: rider_entity,
-                driver: driver_entity,
-                pickup: cell,
-                dropoff: destination,
-                pickup_distance_km_at_accept: 0.0,
-                requested_at: 0,
-                matched_at: 1,
-                pickup_at: Some(2),
-                pickup_eta_ms: 0,
-                dropoff_at: None,
-                cancelled_at: None,
-                agreed_fare: None,
-            })
+            .spawn((
+                Trip {
+                    state: TripState::OnTrip,
+                    rider: rider_entity,
+                    driver: driver_entity,
+                    pickup: cell,
+                    dropoff: destination,
+                },
+                TripTiming {
+                    requested_at: 0,
+                    matched_at: 1,
+                    pickup_at: Some(2),
+                    dropoff_at: None,
+                    cancelled_at: None,
+                },
+                TripFinancials {
+                    agreed_fare: None,
+                    pickup_distance_km_at_accept: 0.0,
+                },
+                crate::ecs::TripLiveData { pickup_eta_ms: 0 },
+            ))
             .id();
 
         {

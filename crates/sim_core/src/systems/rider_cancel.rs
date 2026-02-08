@@ -1,7 +1,7 @@
 use bevy_ecs::prelude::{Commands, Query, Res, ResMut};
 
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
-use crate::ecs::{Driver, DriverState, Rider, RiderState, Trip, TripState};
+use crate::ecs::{Driver, DriverState, Rider, RiderState, Trip, TripState, TripTiming};
 use crate::telemetry::SimTelemetry;
 
 pub fn rider_cancel_system(
@@ -11,7 +11,7 @@ pub fn rider_cancel_system(
     mut telemetry: ResMut<SimTelemetry>,
     mut riders: Query<&mut Rider>,
     mut drivers: Query<&mut Driver>,
-    mut trips: Query<&mut Trip>,
+    mut trips: Query<(&mut Trip, &mut TripTiming)>,
 ) {
     if event.0.kind != EventKind::RiderCancel {
         return;
@@ -30,10 +30,10 @@ pub fn rider_cancel_system(
     if let Some(driver_entity) = rider.matched_driver {
         // Use assigned_trip for O(1) trip lookup instead of scanning all trips
         if let Some(trip_entity) = rider.assigned_trip {
-            if let Ok(mut trip) = trips.get_mut(trip_entity) {
+            if let Ok((mut trip, mut timing)) = trips.get_mut(trip_entity) {
                 if trip.state == TripState::EnRoute {
                     trip.state = TripState::Cancelled;
-                    trip.cancelled_at = Some(clock.now());
+                    timing.cancelled_at = Some(clock.now());
                 }
             }
         }
@@ -67,7 +67,7 @@ mod tests {
     use bevy_ecs::schedule::apply_deferred;
 
     use crate::clock::SimulationClock;
-    use crate::ecs::{Position, Rider, Trip};
+    use crate::ecs::{Position, Rider, Trip, TripFinancials, TripLiveData, TripTiming};
 
     #[test]
     fn rider_cancel_resets_driver_and_trip() {
@@ -107,21 +107,27 @@ mod tests {
             ))
             .id();
         let trip_entity = world
-            .spawn(Trip {
-                state: TripState::EnRoute,
-                rider: rider_entity,
-                driver: driver_entity,
-                pickup: cell,
-                dropoff: destination,
-                pickup_distance_km_at_accept: 0.0,
-                requested_at: 0,
-                matched_at: 0,
-                pickup_at: None,
-                pickup_eta_ms: 0,
-                dropoff_at: None,
-                cancelled_at: None,
-                agreed_fare: None,
-            })
+            .spawn((
+                Trip {
+                    state: TripState::EnRoute,
+                    rider: rider_entity,
+                    driver: driver_entity,
+                    pickup: cell,
+                    dropoff: destination,
+                },
+                TripTiming {
+                    requested_at: 0,
+                    matched_at: 0,
+                    pickup_at: None,
+                    dropoff_at: None,
+                    cancelled_at: None,
+                },
+                TripFinancials {
+                    agreed_fare: None,
+                    pickup_distance_km_at_accept: 0.0,
+                },
+                TripLiveData { pickup_eta_ms: 0 },
+            ))
             .id();
 
         {

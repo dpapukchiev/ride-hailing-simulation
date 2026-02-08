@@ -1,0 +1,3 @@
+# LF line endings so tools (bash, rustfmt) work consistently on all platforms
+*.sh text eol=lf
+*.rs text eol=lf

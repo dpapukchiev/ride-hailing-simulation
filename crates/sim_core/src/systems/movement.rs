@@ -8,7 +8,7 @@
 use bevy_ecs::prelude::{Commands, Entity, ParamSet, Query, Res, ResMut, With};
 
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock, ONE_SEC_MS};
-use crate::ecs::{Driver, DriverState, Position, Rider, Trip, TripRoute, TripState};
+use crate::ecs::{Driver, DriverState, Position, Rider, Trip, TripLiveData, TripRoute, TripState};
 use crate::routing::RouteProviderResource;
 use crate::spatial::{distance_km_between_cells, grid_path_cells_cached, SpatialIndex};
 use crate::speed::{SpeedFactors, SpeedModel};
@@ -92,7 +92,7 @@ pub fn movement_system(
     congestion_zones: Res<CongestionZones>,
     dynamic_congestion: Res<DynamicCongestionConfig>,
     spatial_index: Option<Res<SpatialIndex>>,
-    mut trips: Query<(&mut Trip, Option<&mut TripRoute>)>,
+    mut trips: Query<(&mut Trip, &mut TripLiveData, Option<&mut TripRoute>)>,
     mut queries: ParamSet<(
         Query<(&mut Driver, &mut Position)>,
         Query<&mut Position, With<Rider>>,
@@ -107,7 +107,7 @@ pub fn movement_system(
     };
 
     let (driver_entity, target_cell, is_en_route, rider_entity) = {
-        let Ok((trip, _)) = trips.get(trip_entity) else {
+        let Ok((trip, _, _)) = trips.get(trip_entity) else {
             return;
         };
         let target = match trip.state {
@@ -165,8 +165,8 @@ pub fn movement_system(
     let remaining_km = distance_km_between_cells(driver_pos_cell, target_cell);
     if remaining_km <= 0.0 {
         if is_en_route {
-            if let Ok((mut trip, _)) = trips.get_mut(trip_entity) {
-                trip.pickup_eta_ms = 0;
+            if let Ok((_, mut live_data, _)) = trips.get_mut(trip_entity) {
+                live_data.pickup_eta_ms = 0;
             }
         }
         let kind = if is_en_route {
@@ -180,7 +180,10 @@ pub fn movement_system(
 
     // Resolve next cell from route provider or cached route
     let next_driver_cell = {
-        let mut trip_route = trips.get_mut(trip_entity).ok().and_then(|(_, route)| route);
+        let mut trip_route = trips
+            .get_mut(trip_entity)
+            .ok()
+            .and_then(|(_, _, route)| route);
 
         let trip_route_ref = trip_route.as_deref_mut();
 
@@ -220,8 +223,8 @@ pub fn movement_system(
 
     let remaining = distance_km_between_cells(next_driver_cell, target_cell);
     if is_en_route {
-        if let Ok((mut trip, _)) = trips.get_mut(trip_entity) {
-            trip.pickup_eta_ms = if remaining <= 0.0 {
+        if let Ok((_, mut live_data, _)) = trips.get_mut(trip_entity) {
+            live_data.pickup_eta_ms = if remaining <= 0.0 {
                 0
             } else {
                 travel_time_ms(remaining, speed_kmh)
@@ -254,7 +257,7 @@ pub fn movement_system(
 mod tests {
     use super::*;
     use crate::clock::ONE_SEC_MS;
-    use crate::ecs::{Rider, RiderState};
+    use crate::ecs::{Rider, RiderState, TripFinancials, TripLiveData, TripTiming};
     use crate::routing::{H3GridRouteProvider, RouteProviderResource};
     use crate::speed::SpeedModel;
     use crate::traffic::{CongestionZones, DynamicCongestionConfig, TrafficProfile};
@@ -313,21 +316,27 @@ mod tests {
             ))
             .id();
         let trip_entity = world
-            .spawn(Trip {
-                state: TripState::EnRoute,
-                rider: rider_entity,
-                driver: driver_entity,
-                pickup: neighbor,
-                dropoff,
-                pickup_distance_km_at_accept: 0.0,
-                requested_at: 0,
-                matched_at: 0,
-                pickup_at: None,
-                pickup_eta_ms: 0,
-                dropoff_at: None,
-                cancelled_at: None,
-                agreed_fare: None,
-            })
+            .spawn((
+                Trip {
+                    state: TripState::EnRoute,
+                    rider: rider_entity,
+                    driver: driver_entity,
+                    pickup: neighbor,
+                    dropoff,
+                },
+                TripTiming {
+                    requested_at: 0,
+                    matched_at: 0,
+                    pickup_at: None,
+                    dropoff_at: None,
+                    cancelled_at: None,
+                },
+                TripFinancials {
+                    agreed_fare: None,
+                    pickup_distance_km_at_accept: 0.0,
+                },
+                TripLiveData { pickup_eta_ms: 0 },
+            ))
             .id();
 
         world.resource_mut::<SimulationClock>().schedule_at_secs(

@@ -1,7 +1,7 @@
 use bevy_ecs::prelude::{Query, Res, ResMut};
 
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
-use crate::ecs::{Rider, RiderState, Trip, TripState};
+use crate::ecs::{Rider, RiderState, Trip, TripLiveData, TripState, TripTiming};
 use crate::scenario::RiderCancelConfig;
 
 /// Pure patience check: if the projected pickup time exceeds the rider's wait
@@ -11,7 +11,7 @@ pub fn pickup_eta_updated_system(
     event: Res<CurrentEvent>,
     mut clock: ResMut<SimulationClock>,
     cancel_config: Option<Res<RiderCancelConfig>>,
-    trips: Query<&Trip>,
+    trips: Query<(&Trip, &TripTiming, &TripLiveData)>,
     riders: Query<&Rider>,
 ) {
     if event.0.kind != EventKind::PickupEtaUpdated {
@@ -22,7 +22,7 @@ pub fn pickup_eta_updated_system(
         return;
     };
 
-    let Ok(trip) = trips.get(trip_entity) else {
+    let Ok((trip, timing, live_data)) = trips.get(trip_entity) else {
         return;
     };
     if trip.state != TripState::EnRoute {
@@ -47,13 +47,13 @@ pub fn pickup_eta_updated_system(
         .max_wait_secs
         .max(config.min_wait_secs)
         .saturating_mul(1000);
-    let wait_start = trip.matched_at;
+    let wait_start = timing.matched_at;
     let now = clock.now();
     if now < wait_start.saturating_add(min_wait_ms) {
         return;
     }
 
-    let projected_pickup = now.saturating_add(trip.pickup_eta_ms);
+    let projected_pickup = now.saturating_add(live_data.pickup_eta_ms);
     let deadline = wait_start.saturating_add(max_wait_ms);
     if projected_pickup <= deadline {
         return;

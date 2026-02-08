@@ -1,7 +1,9 @@
 use bevy_ecs::prelude::{Entity, Query, Res, ResMut};
 
 use crate::clock::SimulationClock;
-use crate::ecs::{Driver, DriverEarnings, DriverFatigue, Position, Rider, Trip};
+use crate::ecs::{
+    Driver, DriverEarnings, DriverFatigue, Position, Rider, Trip, TripFinancials, TripTiming,
+};
 use crate::telemetry::{
     DriverSnapshot, RiderSnapshot, SimCounts, SimSnapshot, SimSnapshotConfig, SimSnapshots,
     SimTelemetry, TripSnapshot,
@@ -17,7 +19,7 @@ pub fn capture_snapshot_system(
     driver_query: Query<(Entity, &Driver, &Position)>,
     driver_earnings_query: Query<&DriverEarnings>,
     driver_fatigue_query: Query<&DriverFatigue>,
-    trip_query: Query<(Entity, &Trip)>,
+    trip_query: Query<(Entity, &Trip, &TripTiming, &TripFinancials)>,
 ) {
     // Interval check is now done via schedule condition, but keep for safety
     let now = clock.now();
@@ -68,7 +70,7 @@ pub fn capture_snapshot_system(
 
     // Remove double iteration: collect trips in single pass
     let mut trips = Vec::new();
-    for (entity, trip) in trip_query.iter() {
+    for (entity, trip, timing, financials) in trip_query.iter() {
         counts.add_trip(trip.state);
         trips.push(TripSnapshot {
             entity,
@@ -77,12 +79,12 @@ pub fn capture_snapshot_system(
             state: trip.state,
             pickup_cell: trip.pickup,
             dropoff_cell: trip.dropoff,
-            pickup_distance_km_at_accept: trip.pickup_distance_km_at_accept,
-            requested_at: trip.requested_at,
-            matched_at: trip.matched_at,
-            pickup_at: trip.pickup_at,
-            dropoff_at: trip.dropoff_at,
-            cancelled_at: trip.cancelled_at,
+            pickup_distance_km_at_accept: financials.pickup_distance_km_at_accept,
+            requested_at: timing.requested_at,
+            matched_at: timing.matched_at,
+            pickup_at: timing.pickup_at,
+            dropoff_at: timing.dropoff_at,
+            cancelled_at: timing.cancelled_at,
         });
     }
 

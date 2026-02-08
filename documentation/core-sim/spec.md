@@ -107,13 +107,16 @@ Components and state enums:
 - `DriverFatigue` component: `{ fatigue_threshold_ms: u64 }`
   - Maximum time on duty (in milliseconds) before driver goes OffDuty.
 - `TripState`: `EnRoute`, `OnTrip`, `Completed`, `Cancelled`
-- `Trip` component: `{ state, rider, driver, pickup, dropoff, pickup_distance_km_at_accept: f64, requested_at: u64, matched_at: u64, pickup_at: Option<u64>, pickup_eta_ms: u64, dropoff_at: Option<u64>, cancelled_at: Option<u64>, agreed_fare: Option<f64> }`
+- `Trip` component (core identity + spatial): `{ state, rider: Entity, driver: Entity, pickup: CellIndex, dropoff: CellIndex }`
   - `pickup` / `dropoff`: trip is completed when the driver reaches `dropoff` (not a fixed +1 tick).
-  - `pickup_distance_km_at_accept`: distance from driver to pickup at match acceptance time (km).
+- `TripTiming` component (lifecycle timestamps): `{ requested_at: u64, matched_at: u64, pickup_at: Option<u64>, dropoff_at: Option<u64>, cancelled_at: Option<u64> }`
   - `requested_at` / `matched_at` / `pickup_at` / `dropoff_at`: simulation time in ms; used for KPIs. `dropoff_at` is set in `trip_completed_system`.
-  - `pickup_eta_ms`: estimated time to pickup from current driver position (ms), updated in `movement_system`.
   - `cancelled_at`: simulation time when the trip was cancelled; set in `rider_cancel_system`.
+- `TripFinancials` component (fare + distance metrics): `{ agreed_fare: Option<f64>, pickup_distance_km_at_accept: f64 }`
   - `agreed_fare`: fare agreed at quote accept (may include surge); used for driver earnings and platform revenue in `trip_completed_system`.
+  - `pickup_distance_km_at_accept`: distance from driver to pickup at match acceptance time (km).
+- `TripLiveData` component (actively updated during en-route): `{ pickup_eta_ms: u64 }`
+  - `pickup_eta_ms`: estimated time to pickup from current driver position (ms), updated in `movement_system`.
 - `TripRoute` component (optional, attached after first MoveStep): `{ cells: Vec<CellIndex>, current_index: usize, total_distance_km: f64 }` — resolved route for a trip. Contains the full cell path so subsequent MoveSteps advance along it without re-querying the route provider.
 - `Position` component: `{ CellIndex }` H3 cell position for spatial matching
 

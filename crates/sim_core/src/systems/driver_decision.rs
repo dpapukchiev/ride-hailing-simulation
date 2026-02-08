@@ -5,7 +5,7 @@ use rand::{Rng, SeedableRng};
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
 use crate::ecs::{
     Driver, DriverEarnings, DriverFatigue, DriverState, Position, Rider, RiderState, Trip,
-    TripState,
+    TripFinancials, TripLiveData, TripState, TripTiming,
 };
 use crate::scenario::DriverDecisionConfig;
 use crate::spatial::distance_km_between_cells;
@@ -115,21 +115,27 @@ pub fn driver_decision_system(
             .and_then(|(_, r, _)| r.accepted_fare);
 
         let trip_entity = commands
-            .spawn(Trip {
-                state: TripState::EnRoute,
-                rider: rider_entity,
-                driver: driver_entity,
-                pickup,
-                dropoff,
-                pickup_distance_km_at_accept,
-                requested_at,
-                matched_at,
-                pickup_at: None,
-                pickup_eta_ms: 0,
-                dropoff_at: None,
-                cancelled_at: None,
-                agreed_fare,
-            })
+            .spawn((
+                Trip {
+                    state: TripState::EnRoute,
+                    rider: rider_entity,
+                    driver: driver_entity,
+                    pickup,
+                    dropoff,
+                },
+                TripTiming {
+                    requested_at,
+                    matched_at,
+                    pickup_at: None,
+                    dropoff_at: None,
+                    cancelled_at: None,
+                },
+                TripFinancials {
+                    agreed_fare,
+                    pickup_distance_km_at_accept,
+                },
+                TripLiveData { pickup_eta_ms: 0 },
+            ))
             .id();
 
         // Set trip backlinks on rider and driver for O(1) lookup
