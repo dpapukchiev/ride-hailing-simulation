@@ -10,8 +10,10 @@
 
 use bevy_ecs::prelude::{Component, Entity};
 use bevy_ecs::system::EntityCommands;
-use h3o::CellIndex;
+use h3o::{CellIndex, LatLng};
 
+use crate::routing::RouteResult;
+use crate::spatial::distance_km_between_lat_lng;
 use crate::telemetry::RiderAbandonmentReason;
 
 // Rider state markers
@@ -201,15 +203,90 @@ pub struct TripLiveData {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]
 pub struct Position(pub CellIndex);
 
+/// Geographic location (latitude/longitude) for an entity.
+#[derive(Debug, Clone, Copy, PartialEq, Component)]
+pub struct GeoPosition(pub LatLng);
+
+impl From<CellIndex> for GeoPosition {
+    fn from(cell: CellIndex) -> Self {
+        Self(cell.into())
+    }
+}
+
 /// Resolved route for a trip, stored on the Trip entity after the first MoveStep.
-/// Contains the full cell path so subsequent MoveSteps advance along it without
-/// re-querying the route provider.
+/// Contains route geometry so drivers advance along the actual path instead of raw
+/// H3 hops.
 #[derive(Debug, Clone, Component)]
 pub struct TripRoute {
-    /// H3 cells from origin to destination.
-    pub cells: Vec<CellIndex>,
-    /// Current index into `cells` (the cell the driver is currently at or moving toward).
-    pub current_index: usize,
-    /// Total route distance in km (from the route provider, may differ from Haversine).
+    /// Ordered lat/lng waypoints that describe the route (includes start + target).
+    pub points: Vec<LatLng>,
+    /// Distance (km) between consecutive waypoints.
+    pub segment_distances_km: Vec<f64>,
+    /// Index of the next segment to traverse (segment between points[i] and points[i+1]).
+    pub next_segment_index: usize,
+    /// Distance (km) already traveled along this route.
+    pub distance_traveled_km: f64,
+    /// Total route distance in km (from provider or segment sum).
     pub total_distance_km: f64,
+}
+
+impl TripRoute {
+    fn from_points(points: Vec<LatLng>, total_distance_km: Option<f64>) -> Option<Self> {
+        if points.len() < 2 {
+            return None;
+        }
+        let mut segment_distances_km = Vec::with_capacity(points.len() - 1);
+        let mut sum = 0.0;
+        for window in points.windows(2) {
+            let distance = distance_km_between_lat_lng(window[0], window[1]);
+            segment_distances_km.push(distance);
+            sum += distance;
+        }
+        if segment_distances_km.is_empty() {
+            return None;
+        }
+        let mut total = total_distance_km.unwrap_or(sum);
+        total = total.max(sum);
+        Some(Self {
+            points,
+            segment_distances_km,
+            next_segment_index: 0,
+            distance_traveled_km: 0.0,
+            total_distance_km: total,
+        })
+    }
+
+    pub fn from_cells(cells: Vec<CellIndex>) -> Option<Self> {
+        let points: Vec<LatLng> = cells.into_iter().map(|cell| cell.into()).collect();
+        Self::from_points(points, None)
+    }
+
+    pub fn from_route_result(result: RouteResult) -> Option<Self> {
+        let waypoints: Vec<LatLng> = result
+            .waypoints
+            .into_iter()
+            .filter_map(|(lat, lng)| LatLng::new(lat, lng).ok())
+            .collect();
+        let points = if waypoints.len() >= 2 {
+            waypoints
+        } else {
+            result.cells.into_iter().map(|cell| cell.into()).collect()
+        };
+        Self::from_points(points, Some(result.distance_km))
+    }
+
+    pub fn advance(&mut self) -> Option<(LatLng, f64)> {
+        if self.next_segment_index >= self.segment_distances_km.len() {
+            return None;
+        }
+        let distance = self.segment_distances_km[self.next_segment_index];
+        let point = self.points[self.next_segment_index + 1];
+        self.distance_traveled_km += distance;
+        self.next_segment_index += 1;
+        Some((point, distance))
+    }
+
+    pub fn remaining_distance_km(&self) -> f64 {
+        (self.total_distance_km - self.distance_traveled_km).max(0.0)
+    }
 }

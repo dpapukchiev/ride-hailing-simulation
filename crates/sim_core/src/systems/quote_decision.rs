@@ -71,7 +71,7 @@ pub fn quote_decision_system(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::Position;
+    use crate::ecs::{GeoPosition, Position};
     use bevy_ecs::prelude::{Schedule, World};
 
     #[test]
@@ -104,6 +104,7 @@ mod tests {
                 },
                 Browsing,
                 Position(cell),
+                GeoPosition(cell.into()),
                 RiderQuote {
                     fare: 5.0,
                     eta_ms: 60_000,
@@ -165,6 +166,7 @@ mod tests {
                 },
                 Browsing,
                 Position(cell),
+                GeoPosition(cell.into()),
                 RiderQuote {
                     fare: 5.0,
                     eta_ms: 60_000,

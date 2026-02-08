@@ -132,6 +132,42 @@ pub struct MapSignature {
     pub lng_max: i64,
 }
 
+#[derive(Clone, Copy)]
+struct ProjectionBounds {
+    lat_min: f64,
+    lat_max: f64,
+    lng_min: f64,
+    lng_max: f64,
+}
+
+impl ProjectionBounds {
+    fn new(lat_min: f64, lat_max: f64, lng_min: f64, lng_max: f64) -> Option<Self> {
+        if lat_max > lat_min && lng_max > lng_min {
+            Some(Self {
+                lat_min,
+                lat_max,
+                lng_min,
+                lng_max,
+            })
+        } else {
+            None
+        }
+    }
+
+    fn lat_span(&self) -> f64 {
+        self.lat_max - self.lat_min
+    }
+
+    fn lng_span(&self) -> f64 {
+        self.lng_max - self.lng_min
+    }
+}
+
+struct CachedProjection {
+    normalized_lines: Vec<Vec<(f32, f32)>>,
+    last_used: Instant,
+}
+
 pub struct MapTileState {
     tiles: HashMap<TileKey, TileGeometry>,
     inflight: HashSet<TileKey>,
@@ -139,6 +175,8 @@ pub struct MapTileState {
     sender: Sender<TileResult>,
     receiver: Receiver<TileResult>,
     last_signature: Option<MapSignature>,
+    current_projection_bounds: Option<ProjectionBounds>,
+    projection_cache: HashMap<TileKey, CachedProjection>,
 }
 
 #[derive(Debug, Clone)]
@@ -201,6 +239,8 @@ impl MapTileState {
             sender,
             receiver,
             last_signature: None,
+            current_projection_bounds: None,
+            projection_cache: HashMap::new(),
         }
     }
 
@@ -211,6 +251,13 @@ impl MapTileState {
         self.tiles.clear();
         self.inflight.clear();
         self.errors.clear();
+        self.current_projection_bounds = ProjectionBounds::new(
+            signature.lat_min as f64 / 1_000_000.0,
+            signature.lat_max as f64 / 1_000_000.0,
+            signature.lng_min as f64 / 1_000_000.0,
+            signature.lng_max as f64 / 1_000_000.0,
+        );
+        self.projection_cache.clear();
         self.last_signature = Some(signature);
     }
 
@@ -222,9 +269,85 @@ impl MapTileState {
                 continue;
             }
             if let Some(geometry) = result.geometry {
+                self.cache_projection_from_geometry(result.key, &geometry);
                 self.tiles.insert(result.key, geometry);
             }
         }
+    }
+
+    fn current_inflight_limit(&self) -> usize {
+        const WARMUP_TILES: usize = 6;
+        const WARMUP_LIMIT: usize = 4;
+        const MAX_LIMIT: usize = 12;
+        if self.tiles.len() >= WARMUP_TILES {
+            MAX_LIMIT
+        } else {
+            WARMUP_LIMIT
+        }
+    }
+
+    pub fn projected(&self, key: &TileKey) -> Option<&CachedProjection> {
+        self.projection_cache.get(key)
+    }
+
+    pub fn touch_projection(&mut self, key: &TileKey) {
+        if let Some(entry) = self.projection_cache.get_mut(key) {
+            entry.last_used = Instant::now();
+        }
+    }
+
+    pub fn cache_projection_from_geometry(&mut self, key: TileKey, geometry: &TileGeometry) {
+        let bounds = match self.current_projection_bounds {
+            Some(bounds) => bounds,
+            None => return,
+        };
+        let lat_span = bounds.lat_span();
+        let lng_span = bounds.lng_span();
+        if lat_span <= 0.0 || lng_span <= 0.0 {
+            return;
+        }
+
+        const TOLERANCE: f32 = 0.002;
+        let mut normalized_lines = Vec::new();
+        for line in &geometry.lines {
+            let mut projected = Vec::new();
+            let mut last_point: Option<(f32, f32)> = None;
+            for &(lat, lng) in line {
+                let mut x = ((lng - bounds.lng_min) / lng_span) as f32;
+                let mut y = ((bounds.lat_max - lat) / lat_span) as f32;
+                x = x.clamp(0.0, 1.0);
+                y = y.clamp(0.0, 1.0);
+                let point = (x, y);
+                if let Some(last) = last_point {
+                    if (point.0 - last.0).abs() < TOLERANCE && (point.1 - last.1).abs() < TOLERANCE
+                    {
+                        continue;
+                    }
+                }
+                projected.push(point);
+                last_point = Some(point);
+            }
+            if projected.len() >= 2 {
+                normalized_lines.push(projected);
+            }
+        }
+        if normalized_lines.is_empty() {
+            return;
+        }
+        self.projection_cache.insert(
+            key,
+            CachedProjection {
+                normalized_lines,
+                last_used: Instant::now(),
+            },
+        );
+    }
+
+    pub fn evict_stale_projections(&mut self) {
+        let now = Instant::now();
+        let ttl = Duration::from_secs(5);
+        self.projection_cache
+            .retain(|_, entry| now.duration_since(entry.last_used) <= ttl);
     }
 
     pub fn request_missing_tiles<I>(&mut self, endpoint: &str, keys: I)
@@ -240,7 +363,8 @@ impl MapTileState {
             if self.errors.contains_key(&key) {
                 continue;
             }
-            if inflight_count >= 12 {
+            let limit = self.current_inflight_limit();
+            if inflight_count >= limit {
                 break;
             }
             inflight_count += 1;

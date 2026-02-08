@@ -171,8 +171,8 @@ mod tests {
     use bevy_ecs::schedule::apply_deferred;
 
     use crate::ecs::{
-        DriverEarnings, DriverFatigue, EnRoute, Evaluating, Idle, Position, Rider, TripEnRoute,
-        Waiting,
+        DriverEarnings, DriverFatigue, EnRoute, Evaluating, GeoPosition, Idle, Position, Rider,
+        TripEnRoute, Waiting,
     };
 
     #[test]
@@ -204,6 +204,7 @@ mod tests {
                 },
                 Waiting,
                 Position(cell),
+                GeoPosition(cell.into()),
             ))
             .id();
         let driver_entity = world
@@ -214,6 +215,7 @@ mod tests {
                 },
                 Evaluating,
                 Position(cell),
+                GeoPosition(cell.into()),
                 DriverEarnings {
                     daily_earnings: 0.0,
                     daily_earnings_target: 200.0,
@@ -290,6 +292,7 @@ mod tests {
                 },
                 Waiting,
                 Position(cell),
+                GeoPosition(cell.into()),
             ))
             .id();
         let driver_entity = world
@@ -300,6 +303,7 @@ mod tests {
                 },
                 Evaluating,
                 Position(cell),
+                GeoPosition(cell.into()),
                 DriverEarnings {
                     daily_earnings: 0.0,
                     daily_earnings_target: 200.0,
@@ -375,6 +379,7 @@ mod tests {
                 },
                 Waiting,
                 Position(cell),
+                GeoPosition(cell.into()),
             ))
             .id();
         let driver_entity1 = world1
@@ -385,6 +390,7 @@ mod tests {
                 },
                 Evaluating,
                 Position(cell),
+                GeoPosition(cell.into()),
                 DriverEarnings {
                     daily_earnings: 0.0,
                     daily_earnings_target: 200.0,
@@ -410,6 +416,7 @@ mod tests {
                 },
                 Waiting,
                 Position(cell),
+                GeoPosition(cell.into()),
             ))
             .id();
         let driver_entity2 = world2
@@ -420,6 +427,7 @@ mod tests {
                 },
                 Evaluating,
                 Position(cell),
+                GeoPosition(cell.into()),
                 DriverEarnings {
                     daily_earnings: 0.0,
                     daily_earnings_target: 200.0,

@@ -7,7 +7,9 @@ use rand::{Rng, SeedableRng};
 use crate::clock::{
     CurrentEvent, EventKind, EventSubject, SimulationClock, ONE_HOUR_MS, ONE_MIN_MS,
 };
-use crate::ecs::{Browsing, Driver, DriverEarnings, DriverFatigue, Idle, Position, Rider};
+use crate::ecs::{
+    Browsing, Driver, DriverEarnings, DriverFatigue, GeoPosition, Idle, Position, Rider,
+};
 use crate::scenario::{random_destination, BatchMatchingConfig};
 use crate::spatial::GeoIndex;
 use crate::spawner::{random_cell_in_bounds, DriverSpawner, RiderSpawner, SpawnWeighting};
@@ -99,6 +101,7 @@ fn spawn_rider(
             },
             Browsing,
             Position(position),
+            GeoPosition(position.into()),
         ))
         .id();
 
@@ -150,6 +153,7 @@ fn spawn_driver(
         },
         Idle,
         Position(position),
+        GeoPosition(position.into()),
         DriverEarnings {
             daily_earnings: 0.0,
             daily_earnings_target,

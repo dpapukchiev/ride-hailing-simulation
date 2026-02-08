@@ -11,7 +11,7 @@ use sim_core::telemetry::SimSnapshots;
 use crate::app::{MapSignature, RoutingMode, SimUiApp};
 use crate::ui::controls::render_control_panel;
 use crate::ui::rendering::{
-    choose_tile_zoom, draw_agent, draw_grid, project_cell, project_lat_lng_unclamped,
+    choose_tile_zoom, draw_agent, draw_grid, project_lat_lng_unclamped, project_position,
     render_map_legend, render_metrics_legend, render_trip_table_all, tiles_for_bounds, MapBounds,
 };
 use crate::ui::utils::{
@@ -201,7 +201,7 @@ impl eframe::App for SimUiApp {
                             if self.show_riders {
                                 for rider in &snapshot.riders {
                                     if rider.state != sim_core::telemetry::RiderState::InTransit {
-                                        if let Some(pos) = project_cell(rider.cell, &bounds, map_rect) {
+                            if let Some(pos) = project_position(rider.cell, rider.geo, &bounds, map_rect) {
                                             draw_agent(&painter, pos, "R", rider_color(rider.state, rider.matched_driver));
                                         }
                                     }
@@ -214,7 +214,7 @@ impl eframe::App for SimUiApp {
                                     if self.hide_off_duty_drivers && driver.state == sim_core::telemetry::DriverState::OffDuty {
                                         continue;
                                     }
-                                    if let Some(pos) = project_cell(driver.cell, &bounds, map_rect) {
+                                    if let Some(pos) = project_position(driver.cell, driver.geo, &bounds, map_rect) {
                                         let mut label = String::from("D");
                                         if driver.state == sim_core::telemetry::DriverState::OnTrip {
                                             label.push_str("(R)");

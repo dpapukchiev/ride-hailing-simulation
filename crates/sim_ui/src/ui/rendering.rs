@@ -3,7 +3,7 @@
 use eframe::egui::{self, Align2, Color32, FontId, Vec2};
 use h3o::{CellIndex, LatLng};
 
-use sim_core::telemetry::{DriverState, RiderState, TripSnapshot, TripState};
+use sim_core::telemetry::{DriverState, GeoPoint, RiderState, TripSnapshot, TripState};
 
 use crate::app::TileKey;
 use crate::ui::utils::{
@@ -67,6 +67,20 @@ pub fn project_lat_lng_unclamped(
     let px = rect.left() + rect.width() * x as f32;
     let py = rect.top() + rect.height() * y as f32;
     Some(egui::pos2(px, py))
+}
+
+/// Project either a cached geo position (preferred) or an H3 cell.
+pub fn project_position(
+    cell: CellIndex,
+    geo: Option<GeoPoint>,
+    bounds: &MapBounds,
+    rect: egui::Rect,
+) -> Option<egui::Pos2> {
+    if let Some(point) = geo {
+        project_lat_lng_unclamped(point.lat, point.lng, bounds, rect)
+    } else {
+        project_cell(cell, bounds, rect)
+    }
 }
 
 fn clamp_lat(lat: f64) -> f64 {

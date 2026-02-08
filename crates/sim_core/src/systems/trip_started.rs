@@ -106,7 +106,7 @@ pub fn trip_started_system(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::OnTrip;
+    use crate::ecs::{GeoPosition, OnTrip};
     use bevy_ecs::prelude::{Schedule, World};
     use bevy_ecs::schedule::apply_deferred;
 
@@ -134,6 +134,7 @@ mod tests {
                 },
                 Waiting,
                 Position(cell),
+                GeoPosition(cell.into()),
             ))
             .id();
         let driver_entity = world
@@ -144,6 +145,7 @@ mod tests {
                 },
                 EnRoute,
                 Position(cell),
+                GeoPosition(cell.into()),
             ))
             .id();
         let trip_entity = world

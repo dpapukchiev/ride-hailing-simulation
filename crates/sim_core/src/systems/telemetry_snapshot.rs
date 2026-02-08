@@ -2,12 +2,12 @@ use bevy_ecs::prelude::{Entity, Query, Res, ResMut};
 
 use crate::clock::SimulationClock;
 use crate::ecs::{
-    Browsing, Driver, DriverEarnings, DriverFatigue, EnRoute, Evaluating, Idle, InTransit, OffDuty,
-    OnTrip, Position, Rider, RiderCancelled, RiderCompleted, Trip, TripCancelled, TripCompleted,
-    TripEnRoute, TripFinancials, TripOnTrip, TripTiming, Waiting,
+    Browsing, Driver, DriverEarnings, DriverFatigue, EnRoute, Evaluating, GeoPosition, Idle,
+    InTransit, OffDuty, OnTrip, Position, Rider, RiderCancelled, RiderCompleted, Trip,
+    TripCancelled, TripCompleted, TripEnRoute, TripFinancials, TripOnTrip, TripTiming, Waiting,
 };
 use crate::telemetry::{
-    DriverSnapshot, DriverState, RiderSnapshot, RiderState, SimCounts, SimSnapshot,
+    DriverSnapshot, DriverState, GeoPoint, RiderSnapshot, RiderState, SimCounts, SimSnapshot,
     SimSnapshotConfig, SimSnapshots, SimTelemetry, TripSnapshot, TripState,
 };
 
@@ -84,6 +84,7 @@ pub fn capture_snapshot_system(
         Entity,
         &Rider,
         &Position,
+        Option<&GeoPosition>,
         Option<&Browsing>,
         Option<&Waiting>,
         Option<&InTransit>,
@@ -94,6 +95,7 @@ pub fn capture_snapshot_system(
         Entity,
         &Driver,
         &Position,
+        Option<&GeoPosition>,
         Option<&Idle>,
         Option<&Evaluating>,
         Option<&EnRoute>,
@@ -132,7 +134,7 @@ pub fn capture_snapshot_system(
 
     // Remove double iteration: collect riders in single pass
     let mut riders = Vec::new();
-    for (entity, rider, position, browsing, waiting, in_transit, completed, cancelled) in
+    for (entity, rider, position, geo_pos, browsing, waiting, in_transit, completed, cancelled) in
         rider_query.iter()
     {
         let state = rider_state_from_markers(browsing, waiting, in_transit, completed, cancelled);
@@ -142,12 +144,16 @@ pub fn capture_snapshot_system(
             cell: position.0,
             state,
             matched_driver: rider.matched_driver,
+            geo: geo_pos.map(|geo| GeoPoint {
+                lat: geo.0.lat(),
+                lng: geo.0.lng(),
+            }),
         });
     }
 
     // Remove double iteration: collect drivers in single pass
     let mut drivers = Vec::new();
-    for (entity, _driver, position, idle, evaluating, en_route, on_trip, off_duty) in
+    for (entity, _driver, position, geo_pos, idle, evaluating, en_route, on_trip, off_duty) in
         driver_query.iter()
     {
         let state = driver_state_from_markers(idle, evaluating, en_route, on_trip, off_duty);
@@ -163,6 +169,10 @@ pub fn capture_snapshot_system(
             session_start_time_ms: earnings.map(|e| e.session_start_time_ms),
             session_end_time_ms: earnings.and_then(|e| e.session_end_time_ms),
             fatigue_threshold_ms: fatigue.map(|f| f.fatigue_threshold_ms),
+            geo: geo_pos.map(|geo| GeoPoint {
+                lat: geo.0.lat(),
+                lng: geo.0.lng(),
+            }),
         });
     }
 

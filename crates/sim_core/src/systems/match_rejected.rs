@@ -44,6 +44,7 @@ pub fn match_rejected_system(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ecs::GeoPosition;
     use bevy_ecs::prelude::{Schedule, World};
 
     use crate::ecs::Position;
@@ -78,6 +79,7 @@ mod tests {
                 },
                 Waiting,
                 Position(cell),
+                GeoPosition(cell.into()),
             ))
             .id();
 

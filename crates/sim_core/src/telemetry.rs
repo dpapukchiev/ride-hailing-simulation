@@ -34,6 +34,13 @@ pub enum TripState {
     Cancelled,
 }
 
+/// Simplified geographic point (lat/lng) used in snapshots.
+#[derive(Debug, Clone, Copy)]
+pub struct GeoPoint {
+    pub lat: f64,
+    pub lng: f64,
+}
+
 /// Reason why a rider abandoned their ride request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RiderAbandonmentReason {
@@ -109,6 +116,8 @@ pub struct RiderSnapshot {
     pub state: RiderState,
     /// Driver entity if matched (None = waiting for match, Some = waiting for pickup)
     pub matched_driver: Option<Entity>,
+    /// Lat/lng position (if available) for accurate rendering.
+    pub geo: Option<GeoPoint>,
 }
 
 /// Snapshot of one driver for visualization/export.
@@ -127,6 +136,8 @@ pub struct DriverSnapshot {
     pub session_end_time_ms: Option<u64>,
     /// Fatigue threshold in ms (if available)
     pub fatigue_threshold_ms: Option<u64>,
+    /// Lat/lng location (if available) for UI rendering.
+    pub geo: Option<GeoPoint>,
 }
 
 /// Snapshot of one trip for visualization/export.

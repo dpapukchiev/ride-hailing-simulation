@@ -25,6 +25,15 @@ behaviour changes (geometry, projection, caching, controls, legends, etc.).
 - Track edge cases such as zero-length segments, short reroutes, and rerouting in
   progress. Explain how they are surfaced (or hidden) by the UI and how doc tests
   should cover them.
+- Each driver/rider retains a `GeoPosition` component that mirrors the route
+  geometry lat/lng; telemetry snapshots now expose the `geo` pair so the UI
+  renders the precise location instead of snapping to H3 cells. Mention the new
+  `project_position` helper that prefers geo coordinates and falls back to H3 when
+  geometry isn’t available.
+- The movement system walks `TripRoute` by advancing precomputed segment
+  distances and updating both `Position` and `GeoPosition` before scheduling the
+  next `MoveStep`/`TripStarted` event, ensuring driver location always follows the
+  cached polyline and `GeoPosition` stays in sync with telemetry exports.
 
 ## Rendering Strategy
 - The cached map background prevents a full re-render each frame. Describe the

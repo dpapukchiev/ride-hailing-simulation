@@ -71,7 +71,7 @@ pub fn quote_rejected_system(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::Position;
+    use crate::ecs::{GeoPosition, Position};
     use bevy_ecs::prelude::{Schedule, World};
     use bevy_ecs::schedule::apply_deferred;
 
@@ -106,6 +106,7 @@ mod tests {
                 },
                 Browsing,
                 Position(cell),
+                GeoPosition(cell.into()),
             ))
             .id();
 
@@ -171,6 +172,7 @@ mod tests {
                 },
                 Browsing,
                 Position(cell),
+                GeoPosition(cell.into()),
             ))
             .id();
 

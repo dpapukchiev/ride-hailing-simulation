@@ -75,8 +75,8 @@ mod tests {
 
     use crate::clock::SimulationClock;
     use crate::ecs::{
-        EnRoute, Idle, Position, Rider, Trip, TripEnRoute, TripFinancials, TripLiveData,
-        TripTiming, Waiting,
+        EnRoute, GeoPosition, Idle, Position, Rider, Trip, TripEnRoute, TripFinancials,
+        TripLiveData, TripTiming, Waiting,
     };
 
     #[test]
@@ -104,6 +104,7 @@ mod tests {
                 },
                 Waiting,
                 Position(cell),
+                GeoPosition(cell.into()),
             ))
             .id();
         let driver_entity = world
@@ -114,6 +115,7 @@ mod tests {
                 },
                 EnRoute,
                 Position(cell),
+                GeoPosition(cell.into()),
             ))
             .id();
         let trip_entity = world
@@ -203,6 +205,7 @@ mod tests {
                 },
                 Waiting,
                 Position(cell),
+                GeoPosition(cell.into()),
             ))
             .id();
 

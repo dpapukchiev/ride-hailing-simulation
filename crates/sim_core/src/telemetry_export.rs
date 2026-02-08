@@ -156,6 +156,8 @@ pub fn write_agent_positions_parquet<P: AsRef<Path>>(
     let mut agent_type = Vec::new();
     let mut state = Vec::new();
     let mut cell = Vec::new();
+    let mut lat = Vec::new();
+    let mut lng = Vec::new();
 
     for snapshot in &snapshots.snapshots {
         for rider in &snapshot.riders {
@@ -164,6 +166,13 @@ pub fn write_agent_positions_parquet<P: AsRef<Path>>(
             agent_type.push(AGENT_RIDER);
             state.push(rider_state_code(rider.state));
             cell.push(cell_to_u64(rider.cell));
+            if let Some(geo) = rider.geo {
+                lat.push(Some(geo.lat));
+                lng.push(Some(geo.lng));
+            } else {
+                lat.push(None);
+                lng.push(None);
+            }
         }
         for driver in &snapshot.drivers {
             timestamp_ms.push(snapshot.timestamp_ms);
@@ -171,6 +180,13 @@ pub fn write_agent_positions_parquet<P: AsRef<Path>>(
             agent_type.push(AGENT_DRIVER);
             state.push(driver_state_code(driver.state));
             cell.push(cell_to_u64(driver.cell));
+            if let Some(geo) = driver.geo {
+                lat.push(Some(geo.lat));
+                lng.push(Some(geo.lng));
+            } else {
+                lat.push(None);
+                lng.push(None);
+            }
         }
     }
 
@@ -180,6 +196,8 @@ pub fn write_agent_positions_parquet<P: AsRef<Path>>(
         Field::new("agent_type", DataType::UInt8, false),
         Field::new("state", DataType::UInt8, false),
         Field::new("cell", DataType::UInt64, false),
+        Field::new("lat", DataType::Float64, true),
+        Field::new("lng", DataType::Float64, true),
     ]);
 
     let arrays: Vec<ArrayRef> = vec![
@@ -188,6 +206,8 @@ pub fn write_agent_positions_parquet<P: AsRef<Path>>(
         Arc::new(UInt8Array::from(agent_type)),
         Arc::new(UInt8Array::from(state)),
         Arc::new(UInt64Array::from(cell)),
+        Arc::new(Float64Array::from_iter(lat.into_iter())),
+        Arc::new(Float64Array::from_iter(lng.into_iter())),
     ];
 
     write_record_batch(path, schema, arrays)

@@ -129,6 +129,7 @@ pub fn show_quote_system(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ecs::GeoPosition;
     use bevy_ecs::prelude::{Schedule, World};
 
     #[test]
@@ -155,6 +156,7 @@ mod tests {
                 },
                 Browsing,
                 Position(cell),
+                GeoPosition(cell.into()),
             ))
             .id();
 
