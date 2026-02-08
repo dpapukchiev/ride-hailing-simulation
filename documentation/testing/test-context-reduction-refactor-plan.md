@@ -18,8 +18,8 @@ session.
 
 | Session | Lane | Title | Depends on | Status | Last updated | Notes |
 |---|---|---|---|---|---|---|
-| 0 | Shared | Baseline inventory + guardrails | - | Not started | - | - |
-| 1 | Shared | Create reusable testkit + fixtures | 0 | Not started | - | - |
+| 0 | Shared | Baseline inventory + guardrails | - | Done | 2026-02-08 | Handed off with documentation updates and CI verified |
+| 1 | Shared | Create reusable testkit + fixtures | 0 | Done | 2026-02-08 | See handoff below |
 | 2A | A (Systems) | Extract end-to-end/system scenario tests | 1 | Not started | - | - |
 | 2B | B (Spawn/Routing) | Extract spawn/routing integration scenarios | 1 | Not started | - | - |
 | 2C | C (Core Utils) | Extract utility-heavy module tests | 1 | Not started | - | - |
@@ -29,6 +29,33 @@ session.
 | 4 | Shared | Refactor large scenario/spawner setup builders | 3A, 3B, 3C | Not started | - | - |
 | 5 | Shared | CI/docs/test command alignment | 4 | Not started | - | - |
 | 6 | Shared | Final validation + metrics signoff | 5 | Not started | - | - |
+
+### Session 0 handoff note
+Status: Done
+Completed:
+- Recorded the baseline inline test inventory table and clarified each extraction destination.
+- Locked in naming conventions and lane ownership boundaries for future sessions.
+Remaining:
+- Kick off Session 1 when helpers are ready.
+Verification:
+- Ran: `./ci.sh check`
+- Result: ✓ CI job 'check' passed.
+Blockers:
+- none.
+
+### Session 1 handoff note
+Status: Done
+Completed:
+- Added the reusable `tests/support` modules (world builder, entity fixtures, schedule runner) and marked them `#![allow(dead_code)]` until broader adoption, keeping the helpers deterministic via explicit seeds.
+- Pointed `tests/load_tests.rs` at `TestWorldBuilder` so the ignored load scenarios compile through the shared fixture and the helpers stay exercised.
+Remaining:
+- Begin Session 2A by extracting the heavy scenario tests from `crates/sim_core/src/systems/mod.rs` into `crates/sim_core/tests/integration_system_end_to_end_tests.rs` while reusing the new helpers.
+Verification:
+- Ran: `cargo test -p sim_core`
+- Ran: `./ci.sh check`
+- Result: ✓ CI job 'check' passed.
+Blockers:
+- none.
 
 Status values: `Not started`, `In progress`, `Blocked`, `Done`.
 
@@ -134,6 +161,27 @@ extra discovery work.
   - `crates/sim_core/tests/system_<area>_tests.rs`
   - `crates/sim_core/tests/integration_<area>_tests.rs`
 - Define ownership map for lanes A/B/C to avoid file overlap.
+
+### Baseline inventory snapshot
+| Source file | Inline test line estimate | Planned destination |
+|---|---:|---|
+| `crates/sim_core/src/systems/mod.rs` | 244 | `crates/sim_core/tests/integration_system_end_to_end_tests.rs` |
+| `crates/sim_core/src/systems/driver_decision.rs` | 305 | `crates/sim_core/tests/system_driver_decision_tests.rs` |
+| `crates/sim_core/src/systems/driver_offduty.rs` | 162 | `crates/sim_core/tests/system_driver_offduty_tests.rs` |
+| `crates/sim_core/src/scenario.rs` | 89 | `crates/sim_core/tests/integration_scenario_builder_tests.rs` |
+| `crates/sim_core/src/telemetry_export.rs` | 178 | `crates/sim_core/tests/integration_telemetry_export_tests.rs` |
+
+### Naming convention (frozen)
+Extracted test files follow these established patterns:
+- `crates/sim_core/tests/system_<area>_tests.rs` for driver/rider/matching lifecycle scenarios.
+- `crates/sim_core/tests/integration_<area>_tests.rs` for routing, telemetry, scenario builder, and spawn flows.
+
+### Lane ownership map (frozen)
+| Lane | Scope highlights |
+|---|---|
+| A | `systems/mod.rs`, driver lifecycle systems (`driver_*`, `trip_*`), `system_driver_*` and `system_trip_*` tests |
+| B | Quote/matching/rider cancel systems + scenario/spawner sources; `system_quote_*`, `system_matching_*`, and spawn integration tests |
+| C | Routing, OSRM, movement, telemetry, clock, and traffic sources; integration routing/telemetry/clock/traffic tests |
 
 ### Allowed files
 - `documentation/testing/test-context-reduction-refactor-plan.md`

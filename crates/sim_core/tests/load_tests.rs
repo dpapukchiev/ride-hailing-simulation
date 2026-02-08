@@ -1,14 +1,16 @@
 //! Load tests for sim_core: validate performance under realistic load conditions.
 
-use bevy_ecs::prelude::World;
+mod support;
+
 use sim_core::runner::{initialize_simulation, run_until_empty, simulation_schedule};
 use sim_core::scenario::{build_scenario, ScenarioParams};
 use std::time::Instant;
+use support::world::TestWorldBuilder;
 
 #[test]
 #[ignore] // Only run explicitly: cargo test --package sim_core --test load_tests -- --ignored
 fn test_sustained_load() {
-    let mut world = World::new();
+    let mut world = TestWorldBuilder::default().with_seed(42).build();
     let params = ScenarioParams {
         num_drivers: 500,
         num_riders: 1000,
@@ -47,7 +49,7 @@ fn test_sustained_load() {
 #[ignore]
 fn test_peak_load() {
     // Test sudden spike: many riders spawn quickly
-    let mut world = World::new();
+    let mut world = TestWorldBuilder::default().with_seed(42).build();
     let params = ScenarioParams {
         num_drivers: 200,
         num_riders: 1000, // High rider count
@@ -87,7 +89,7 @@ fn test_peak_load() {
 fn test_long_running() {
     // Long-running test: 24-hour simulation (or scaled equivalent)
     // This tests for memory leaks and stability over time
-    let mut world = World::new();
+    let mut world = TestWorldBuilder::default().with_seed(42).build();
     let params = ScenarioParams {
         num_drivers: 200,
         num_riders: 500,
