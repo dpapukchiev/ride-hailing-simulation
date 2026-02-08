@@ -13,3 +13,5 @@ bevy_ecs = "0.13"
 h3o = "0.8"
 eframe = "0.33.3"
 egui_plot = "0.34.0"
+prost = "0.13.5"
+reqwest = { version = "0.12.12", default-features = false, features = ["blocking", "rustls-tls"] }

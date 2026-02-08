@@ -8,11 +8,11 @@ use std::time::{Duration, Instant};
 use sim_core::matching::MatchingAlgorithmResource;
 use sim_core::telemetry::SimSnapshots;
 
-use crate::app::SimUiApp;
+use crate::app::{MapSignature, RoutingMode, SimUiApp};
 use crate::ui::controls::render_control_panel;
 use crate::ui::rendering::{
-    draw_agent, draw_grid, project_cell, render_map_legend, render_metrics_legend,
-    render_trip_table_all, MapBounds,
+    choose_tile_zoom, draw_agent, draw_grid, project_cell, project_lat_lng_unclamped,
+    render_map_legend, render_metrics_legend, render_trip_table_all, tiles_for_bounds, MapBounds,
 };
 use crate::ui::utils::{
     chart_color_abandoned_quote, chart_color_active_trips, chart_color_cancelled_riders,
@@ -65,6 +65,7 @@ impl eframe::App for SimUiApp {
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
+            self.map_tiles.drain_results();
             let (
                 latest_snapshot,
                 active_trips_points,
@@ -122,7 +123,7 @@ impl eframe::App for SimUiApp {
                         ui.heading("Map Legend");
                         render_map_legend(ui);
 
-                        let map_height = 560.0;
+                        let map_height = 680.0;
                         let map_size = egui::Vec2::new(ui.available_width(), map_height);
                         let (map_rect, _) = ui.allocate_exact_size(map_size, egui::Sense::hover());
                         let painter = ui.painter_at(map_rect);
@@ -143,6 +144,56 @@ impl eframe::App for SimUiApp {
                                 params.lng_min,
                                 params.lng_max,
                             );
+                            let mut tiles_drawn = 0usize;
+                            if self.routing_mode == RoutingMode::Osrm {
+                                let zoom = choose_tile_zoom(&bounds);
+                                let signature = MapSignature {
+                                    z: zoom,
+                                    lat_min: (bounds.lat_min * 1_000_000.0).round() as i64,
+                                    lat_max: (bounds.lat_max * 1_000_000.0).round() as i64,
+                                    lng_min: (bounds.lng_min * 1_000_000.0).round() as i64,
+                                    lng_max: (bounds.lng_max * 1_000_000.0).round() as i64,
+                                };
+                                self.map_tiles.update_signature(signature);
+                                let tiles = tiles_for_bounds(&bounds, zoom);
+                                if !self.osrm_endpoint.trim().is_empty() {
+                                    self.map_tiles
+                                        .request_missing_tiles(&self.osrm_endpoint, tiles.iter().copied());
+                                }
+                                let road_stroke = egui::Stroke::new(1.0, egui::Color32::from_gray(80));
+                                for tile in &tiles {
+                                    if let Some(geometry) = self.map_tiles.tile(tile) {
+                                        for line in &geometry.lines {
+                                            let mut points = Vec::with_capacity(line.len());
+                                            for (lat, lng) in line {
+                                                if let Some(pos) =
+                                                    project_lat_lng_unclamped(*lat, *lng, &bounds, map_rect)
+                                                {
+                                                    points.push(pos);
+                                                }
+                                            }
+                                            if points.len() >= 2 {
+                                                painter.add(egui::Shape::line(points, road_stroke));
+                                            }
+                                        }
+                                        tiles_drawn += 1;
+                                    }
+                                }
+                                if tiles_drawn == 0 {
+                                    let message = if self.osrm_endpoint.trim().is_empty() {
+                                        "OSRM endpoint missing"
+                                    } else {
+                                        "Loading OSRM tiles..."
+                                    };
+                                    painter.text(
+                                        map_rect.center(),
+                                        egui::Align2::CENTER_CENTER,
+                                        message,
+                                        egui::FontId::monospace(14.0),
+                                        egui::Color32::from_gray(160),
+                                    );
+                                }
+                            }
                             if self.grid_enabled {
                                 let spacing_km = (self.map_size_km / 10.0).clamp(0.5, 10.0);
                                 draw_grid(&painter, &bounds, map_rect, spacing_km);

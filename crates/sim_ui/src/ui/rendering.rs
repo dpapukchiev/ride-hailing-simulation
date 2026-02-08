@@ -5,6 +5,7 @@ use h3o::{CellIndex, LatLng};
 
 use sim_core::telemetry::{DriverState, RiderState, TripSnapshot, TripState};
 
+use crate::app::TileKey;
 use crate::ui::utils::{
     chart_color_abandoned_quote, chart_color_active_trips, chart_color_cancelled_riders,
     chart_color_cancelled_trips, chart_color_completed_trips, chart_color_idle_drivers,
@@ -50,6 +51,78 @@ pub fn project_cell(cell: CellIndex, bounds: &MapBounds, rect: egui::Rect) -> Op
     let px = rect.left() + rect.width() * x as f32;
     let py = rect.top() + rect.height() * y as f32;
     Some(egui::pos2(px, py))
+}
+
+pub fn project_lat_lng_unclamped(
+    lat: f64,
+    lng: f64,
+    bounds: &MapBounds,
+    rect: egui::Rect,
+) -> Option<egui::Pos2> {
+    if bounds.lat_max <= bounds.lat_min || bounds.lng_max <= bounds.lng_min {
+        return None;
+    }
+    let x = (lng - bounds.lng_min) / (bounds.lng_max - bounds.lng_min);
+    let y = (bounds.lat_max - lat) / (bounds.lat_max - bounds.lat_min);
+    let px = rect.left() + rect.width() * x as f32;
+    let py = rect.top() + rect.height() * y as f32;
+    Some(egui::pos2(px, py))
+}
+
+fn clamp_lat(lat: f64) -> f64 {
+    lat.clamp(-85.05112878, 85.05112878)
+}
+
+fn lon_to_x(lon: f64, zoom: u8) -> f64 {
+    let n = (1u32 << zoom) as f64;
+    ((lon + 180.0) / 360.0) * n
+}
+
+fn lat_to_y(lat: f64, zoom: u8) -> f64 {
+    let lat = clamp_lat(lat).to_radians();
+    let n = (1u32 << zoom) as f64;
+    let y = (1.0 - (lat.tan() + 1.0 / lat.cos()).ln() / std::f64::consts::PI) * 0.5;
+    y * n
+}
+
+fn tile_count(bounds: &MapBounds, zoom: u8) -> usize {
+    let x_min = lon_to_x(bounds.lng_min, zoom).floor() as i64;
+    let x_max = lon_to_x(bounds.lng_max, zoom).floor() as i64;
+    let y_min = lat_to_y(bounds.lat_max, zoom).floor() as i64;
+    let y_max = lat_to_y(bounds.lat_min, zoom).floor() as i64;
+    let width = (x_max - x_min + 1).max(0) as usize;
+    let height = (y_max - y_min + 1).max(0) as usize;
+    width.saturating_mul(height)
+}
+
+pub fn choose_tile_zoom(bounds: &MapBounds) -> u8 {
+    let mut chosen = 12u8;
+    for zoom in 12u8..=16u8 {
+        let count = tile_count(bounds, zoom);
+        if count <= 12 {
+            chosen = zoom;
+        }
+    }
+    chosen
+}
+
+pub fn tiles_for_bounds(bounds: &MapBounds, zoom: u8) -> Vec<TileKey> {
+    let x_min = lon_to_x(bounds.lng_min, zoom).floor() as i64;
+    let x_max = lon_to_x(bounds.lng_max, zoom).floor() as i64;
+    let y_min = lat_to_y(bounds.lat_max, zoom).floor() as i64;
+    let y_max = lat_to_y(bounds.lat_min, zoom).floor() as i64;
+    let max_index = (1u32 << zoom).saturating_sub(1) as i64;
+    let x_start = x_min.clamp(0, max_index) as u32;
+    let x_end = x_max.clamp(0, max_index) as u32;
+    let y_start = y_min.clamp(0, max_index) as u32;
+    let y_end = y_max.clamp(0, max_index) as u32;
+    let mut tiles = Vec::new();
+    for x in x_start..=x_end {
+        for y in y_start..=y_end {
+            tiles.push(TileKey { z: zoom, x, y });
+        }
+    }
+    tiles
 }
 
 /// Draw an agent (rider or driver) on the map.
