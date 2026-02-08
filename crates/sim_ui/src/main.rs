@@ -149,7 +149,7 @@ impl eframe::App for SimUiApp {
                             }
                             if self.show_riders {
                                 for rider in &snapshot.riders {
-                                    if rider.state != sim_core::ecs::RiderState::InTransit {
+                                    if rider.state != sim_core::telemetry::RiderState::InTransit {
                                         if let Some(pos) = project_cell(rider.cell, &bounds, map_rect) {
                                             draw_agent(&painter, pos, "R", rider_color(rider.state, rider.matched_driver));
                                         }
@@ -160,12 +160,12 @@ impl eframe::App for SimUiApp {
                                 let current_time = snapshot.timestamp_ms;
                                 for driver in &snapshot.drivers {
                                     // Filter off-duty drivers if hide_off_duty_drivers is enabled
-                                    if self.hide_off_duty_drivers && driver.state == sim_core::ecs::DriverState::OffDuty {
+                                    if self.hide_off_duty_drivers && driver.state == sim_core::telemetry::DriverState::OffDuty {
                                         continue;
                                     }
                                     if let Some(pos) = project_cell(driver.cell, &bounds, map_rect) {
                                         let mut label = String::from("D");
-                                        if driver.state == sim_core::ecs::DriverState::OnTrip {
+                                        if driver.state == sim_core::telemetry::DriverState::OnTrip {
                                             label.push_str("(R)");
                                         }
                                         if self.show_driver_stats {

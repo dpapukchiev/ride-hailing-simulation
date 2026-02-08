@@ -2,7 +2,7 @@
 
 use eframe::egui::Color32;
 use h3o::{CellIndex, LatLng};
-use sim_core::ecs::{DriverState, RiderState};
+use sim_core::telemetry::{DriverState, RiderState};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::ui::constants::{H3_RES9_CELL_WIDTH_KM, METERS_PER_DEG_LAT};

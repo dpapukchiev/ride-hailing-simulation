@@ -3,7 +3,7 @@
 use bevy_ecs::prelude::{Commands, Query, Res, ResMut};
 
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
-use crate::ecs::{Rider, RiderState};
+use crate::ecs::{Browsing, Rider};
 use crate::scenario::RiderQuoteConfig;
 use crate::telemetry::{RiderAbandonmentReason, SimTelemetry};
 
@@ -13,7 +13,7 @@ pub fn quote_rejected_system(
     mut commands: Commands,
     mut telemetry: ResMut<SimTelemetry>,
     quote_config: Option<Res<RiderQuoteConfig>>,
-    mut riders: Query<&mut Rider>,
+    mut riders: Query<(&mut Rider, Option<&Browsing>)>,
 ) {
     if event.0.kind != EventKind::QuoteRejected {
         return;
@@ -23,10 +23,10 @@ pub fn quote_rejected_system(
         return;
     };
 
-    let Ok(mut rider) = riders.get_mut(rider_entity) else {
+    let Ok((mut rider, browsing)) = riders.get_mut(rider_entity) else {
         return;
     };
-    if rider.state != RiderState::Browsing {
+    if browsing.is_none() {
         return;
     }
 
@@ -41,7 +41,6 @@ pub fn quote_rejected_system(
         );
     } else {
         // Rider gives up - record abandonment reason
-        rider.state = RiderState::Cancelled;
         telemetry.riders_abandoned_quote_total =
             telemetry.riders_abandoned_quote_total.saturating_add(1);
 
@@ -74,6 +73,7 @@ mod tests {
     use super::*;
     use crate::ecs::Position;
     use bevy_ecs::prelude::{Schedule, World};
+    use bevy_ecs::schedule::apply_deferred;
 
     #[test]
     fn quote_rejected_under_limit_reschedules_show_quote() {
@@ -96,7 +96,6 @@ mod tests {
         let rider_entity = world
             .spawn((
                 Rider {
-                    state: RiderState::Browsing,
                     matched_driver: None,
                     assigned_trip: None,
                     destination: Some(destination),
@@ -105,6 +104,7 @@ mod tests {
                     accepted_fare: None,
                     last_rejection_reason: None,
                 },
+                Browsing,
                 Position(cell),
             ))
             .id();
@@ -123,12 +123,12 @@ mod tests {
         world.insert_resource(CurrentEvent(event));
 
         let mut schedule = Schedule::default();
-        schedule.add_systems(quote_rejected_system);
+        schedule.add_systems((quote_rejected_system, apply_deferred));
         schedule.run(&mut world);
 
         let rider = world.get_entity(rider_entity).expect("rider still exists");
         let rider = rider.get::<Rider>().expect("Rider component");
-        assert_eq!(rider.state, RiderState::Browsing);
+        assert!(world.entity(rider_entity).contains::<Browsing>());
         assert_eq!(rider.quote_rejections, 2);
 
         let next_event = world
@@ -161,7 +161,6 @@ mod tests {
         let rider_entity = world
             .spawn((
                 Rider {
-                    state: RiderState::Browsing,
                     matched_driver: None,
                     assigned_trip: None,
                     destination: Some(destination),
@@ -170,6 +169,7 @@ mod tests {
                     accepted_fare: None,
                     last_rejection_reason: None,
                 },
+                Browsing,
                 Position(cell),
             ))
             .id();
@@ -187,7 +187,7 @@ mod tests {
         world.insert_resource(CurrentEvent(event));
 
         let mut schedule = Schedule::default();
-        schedule.add_systems(quote_rejected_system);
+        schedule.add_systems((quote_rejected_system, apply_deferred));
         schedule.run(&mut world);
 
         let rider_exists = world.get_entity(rider_entity).is_some();

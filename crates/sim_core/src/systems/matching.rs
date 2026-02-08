@@ -1,20 +1,21 @@
-use bevy_ecs::prelude::{Entity, Query, Res, ResMut};
+use bevy_ecs::prelude::{Commands, Entity, Query, Res, ResMut};
 
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
-use crate::ecs::{Driver, DriverState, Position, Rider, RiderState};
+use crate::ecs::{Driver, DriverStateCommands, Idle, Position, Rider, Waiting};
 use crate::matching::MatchingAlgorithmResource;
 use crate::scenario::{BatchMatchingConfig, MatchRadius};
 
 const MATCH_RETRY_SECS: u64 = 30;
 
 pub fn matching_system(
+    mut commands: Commands,
     mut clock: ResMut<SimulationClock>,
     event: Res<CurrentEvent>,
     batch_config: Option<Res<BatchMatchingConfig>>,
     match_radius: Option<Res<MatchRadius>>,
     matching_algorithm: Res<MatchingAlgorithmResource>,
-    mut riders: Query<(Entity, &mut Rider, &Position)>,
-    mut drivers: Query<(Entity, &mut Driver, &Position)>,
+    mut riders: Query<(Entity, &mut Rider, &Position, Option<&Waiting>)>,
+    mut drivers: Query<(Entity, &mut Driver, &Position, Option<&Idle>)>,
 ) {
     if event.0.kind != EventKind::TryMatch {
         return;
@@ -29,10 +30,10 @@ pub fn matching_system(
     };
 
     let (rider_pos, rider_destination) = {
-        let Ok((_entity, rider, position)) = riders.get(rider_entity) else {
+        let Ok((_entity, rider, position, waiting)) = riders.get(rider_entity) else {
             return;
         };
-        if rider.state != RiderState::Waiting {
+        if waiting.is_none() {
             return;
         }
         (position.0, rider.destination)
@@ -43,13 +44,7 @@ pub fn matching_system(
     // Collect available drivers (idle drivers only; exclude OffDuty drivers)
     let available_drivers: Vec<(Entity, h3o::CellIndex)> = drivers
         .iter()
-        .filter_map(|(entity, driver, position)| {
-            if driver.state == DriverState::Idle {
-                Some((entity, position.0))
-            } else {
-                None
-            }
-        })
+        .filter_map(|(entity, _driver, position, idle)| idle.map(|_| (entity, position.0)))
         .collect();
 
     // Use the matching algorithm to find a match
@@ -72,11 +67,11 @@ pub fn matching_system(
     };
 
     // Apply the match
-    if let Ok((_entity, mut rider, _)) = riders.get_mut(rider_entity) {
+    if let Ok((_entity, mut rider, _, _)) = riders.get_mut(rider_entity) {
         rider.matched_driver = Some(driver_entity);
     }
-    if let Ok((_entity, mut driver, _)) = drivers.get_mut(driver_entity) {
-        driver.state = DriverState::Evaluating;
+    if let Ok((_entity, mut driver, _, _)) = drivers.get_mut(driver_entity) {
+        commands.entity(driver_entity).set_driver_state_evaluating();
         driver.matched_rider = Some(rider_entity);
     }
 
@@ -90,8 +85,10 @@ pub fn matching_system(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ecs::Evaluating;
     use crate::matching::{MatchingAlgorithmResource, SimpleMatching};
     use bevy_ecs::prelude::{Schedule, World};
+    use bevy_ecs::schedule::apply_deferred;
 
     #[test]
     fn matches_waiting_rider_to_idle_driver() {
@@ -108,7 +105,6 @@ mod tests {
         let rider_entity = world
             .spawn((
                 Rider {
-                    state: RiderState::Waiting,
                     matched_driver: None,
                     assigned_trip: None,
                     destination: Some(destination),
@@ -117,16 +113,17 @@ mod tests {
                     accepted_fare: None,
                     last_rejection_reason: None,
                 },
+                Waiting,
                 Position(cell),
             ))
             .id();
         let driver_entity = world
             .spawn((
                 Driver {
-                    state: DriverState::Idle,
                     matched_rider: None,
                     assigned_trip: None,
                 },
+                Idle,
                 Position(cell),
             ))
             .id();
@@ -143,20 +140,26 @@ mod tests {
         world.insert_resource(CurrentEvent(event));
 
         let mut schedule = Schedule::default();
-        schedule.add_systems(matching_system);
+        schedule.add_systems((matching_system, apply_deferred));
         schedule.run(&mut world);
 
-        let (rider_state, matched_driver) = {
+        let (rider_waiting, matched_driver) = {
             let rider = world.query::<&Rider>().single(&world);
-            (rider.state, rider.matched_driver)
+            (
+                world.entity(rider_entity).contains::<Waiting>(),
+                rider.matched_driver,
+            )
         };
-        let (driver_state, matched_rider) = {
+        let (driver_evaluating, matched_rider) = {
             let driver = world.query::<&Driver>().single(&world);
-            (driver.state, driver.matched_rider)
+            (
+                world.entity(driver_entity).contains::<Evaluating>(),
+                driver.matched_rider,
+            )
         };
 
-        assert_eq!(rider_state, RiderState::Waiting);
-        assert_eq!(driver_state, DriverState::Evaluating);
+        assert!(rider_waiting);
+        assert!(driver_evaluating);
         assert_eq!(matched_driver, Some(driver_entity));
         assert_eq!(matched_rider, Some(rider_entity));
 

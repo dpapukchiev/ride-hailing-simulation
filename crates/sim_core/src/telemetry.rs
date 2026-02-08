@@ -5,7 +5,34 @@ use std::collections::VecDeque;
 use bevy_ecs::prelude::{Entity, Resource};
 use h3o::CellIndex;
 
-use crate::ecs::{DriverState, RiderState, TripState};
+/// Rider lifecycle state (for telemetry/snapshot serialization).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RiderState {
+    Browsing,
+    Waiting,
+    InTransit,
+    Completed,
+    Cancelled,
+}
+
+/// Driver lifecycle state (for telemetry/snapshot serialization).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DriverState {
+    Idle,
+    Evaluating,
+    EnRoute,
+    OnTrip,
+    OffDuty,
+}
+
+/// Trip lifecycle state (for telemetry/snapshot serialization).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TripState {
+    EnRoute,
+    OnTrip,
+    Completed,
+    Cancelled,
+}
 
 /// Reason why a rider abandoned their ride request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

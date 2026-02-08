@@ -5,7 +5,7 @@ use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
-use crate::ecs::{Rider, RiderQuote, RiderState};
+use crate::ecs::{Browsing, Rider, RiderQuote};
 use crate::scenario::RiderQuoteConfig;
 use crate::telemetry::RiderAbandonmentReason;
 
@@ -13,7 +13,7 @@ pub fn quote_decision_system(
     mut clock: ResMut<SimulationClock>,
     event: Res<CurrentEvent>,
     quote_config: Option<Res<RiderQuoteConfig>>,
-    mut riders: Query<(Entity, &mut Rider, &RiderQuote)>,
+    mut riders: Query<(Entity, &mut Rider, &RiderQuote, Option<&Browsing>)>,
 ) {
     if event.0.kind != EventKind::QuoteDecision {
         return;
@@ -23,10 +23,10 @@ pub fn quote_decision_system(
         return;
     };
 
-    let Ok((_, mut rider, quote)) = riders.get_mut(rider_entity) else {
+    let Ok((_, mut rider, quote, browsing)) = riders.get_mut(rider_entity) else {
         return;
     };
-    if rider.state != RiderState::Browsing {
+    if browsing.is_none() {
         return;
     }
 
@@ -94,7 +94,6 @@ mod tests {
         let rider_entity = world
             .spawn((
                 Rider {
-                    state: RiderState::Browsing,
                     matched_driver: None,
                     assigned_trip: None,
                     destination: Some(destination),
@@ -103,6 +102,7 @@ mod tests {
                     accepted_fare: None,
                     last_rejection_reason: None,
                 },
+                Browsing,
                 Position(cell),
                 RiderQuote {
                     fare: 5.0,
@@ -155,7 +155,6 @@ mod tests {
         let rider_entity = world
             .spawn((
                 Rider {
-                    state: RiderState::Browsing,
                     matched_driver: None,
                     assigned_trip: None,
                     destination: Some(destination),
@@ -164,6 +163,7 @@ mod tests {
                     accepted_fare: None,
                     last_rejection_reason: None,
                 },
+                Browsing,
                 Position(cell),
                 RiderQuote {
                     fare: 5.0,

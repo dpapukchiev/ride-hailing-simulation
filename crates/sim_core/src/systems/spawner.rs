@@ -7,7 +7,7 @@ use rand::{Rng, SeedableRng};
 use crate::clock::{
     CurrentEvent, EventKind, EventSubject, SimulationClock, ONE_HOUR_MS, ONE_MIN_MS,
 };
-use crate::ecs::{Driver, DriverEarnings, DriverFatigue, DriverState, Position, Rider, RiderState};
+use crate::ecs::{Browsing, Driver, DriverEarnings, DriverFatigue, Idle, Position, Rider};
 use crate::scenario::{random_destination, BatchMatchingConfig};
 use crate::spatial::GeoIndex;
 use crate::spawner::{random_cell_in_bounds, DriverSpawner, RiderSpawner, SpawnWeighting};
@@ -89,7 +89,6 @@ fn spawn_rider(
     let rider_entity = commands
         .spawn((
             Rider {
-                state: RiderState::Browsing,
                 matched_driver: None,
                 assigned_trip: None,
                 destination: Some(destination),
@@ -98,6 +97,7 @@ fn spawn_rider(
                 accepted_fare: None,
                 last_rejection_reason: None,
             },
+            Browsing,
             Position(position),
         ))
         .id();
@@ -145,10 +145,10 @@ fn spawn_driver(
     // Spawn the driver with earnings and fatigue components
     commands.spawn((
         Driver {
-            state: DriverState::Idle,
             matched_rider: None,
             assigned_trip: None,
         },
+        Idle,
         Position(position),
         DriverEarnings {
             daily_earnings: 0.0,

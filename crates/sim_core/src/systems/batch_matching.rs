@@ -3,21 +3,22 @@
 //! Collects all riders in Waiting state and all Idle drivers, calls the matching
 //! algorithm's find_batch_matches, applies matches, and schedules the next batch run.
 
-use bevy_ecs::prelude::{Entity, Query, Res, ResMut};
+use bevy_ecs::prelude::{Commands, Entity, Query, Res, ResMut};
 
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
-use crate::ecs::{Driver, DriverState, Position, Rider, RiderState};
+use crate::ecs::{Driver, DriverStateCommands, Idle, Position, Rider, Waiting};
 use crate::matching::MatchingAlgorithmResource;
 use crate::scenario::{BatchMatchingConfig, MatchRadius};
 
 pub fn batch_matching_system(
+    mut commands: Commands,
     mut clock: ResMut<SimulationClock>,
     event: Res<CurrentEvent>,
     batch_config: Option<Res<BatchMatchingConfig>>,
     match_radius: Option<Res<MatchRadius>>,
     matching_algorithm: Res<MatchingAlgorithmResource>,
-    mut riders: Query<(Entity, &mut Rider, &Position)>,
-    mut drivers: Query<(Entity, &mut Driver, &Position)>,
+    mut riders: Query<(Entity, &mut Rider, &Position, Option<&Waiting>)>,
+    mut drivers: Query<(Entity, &mut Driver, &Position, Option<&Idle>)>,
 ) {
     if event.0.kind != EventKind::BatchMatchRun {
         return;
@@ -37,22 +38,14 @@ pub fn batch_matching_system(
     // to accept/drive to pickup and must not be re-matched.
     let waiting_riders: Vec<(Entity, h3o::CellIndex, Option<h3o::CellIndex>)> = riders
         .iter()
-        .filter(|(_, rider, _)| {
-            rider.state == RiderState::Waiting && rider.matched_driver.is_none()
-        })
-        .map(|(entity, rider, position)| (entity, position.0, rider.destination))
+        .filter(|(_, rider, _, waiting)| waiting.is_some() && rider.matched_driver.is_none())
+        .map(|(entity, rider, position, _)| (entity, position.0, rider.destination))
         .collect();
 
     // Collect all Idle drivers (exclude OffDuty and others)
     let available_drivers: Vec<(Entity, h3o::CellIndex)> = drivers
         .iter()
-        .filter_map(|(entity, driver, position)| {
-            if driver.state == DriverState::Idle {
-                Some((entity, position.0))
-            } else {
-                None
-            }
-        })
+        .filter_map(|(entity, _driver, position, idle)| idle.map(|_| (entity, position.0)))
         .collect();
 
     let matches = matching_algorithm.find_batch_matches(
@@ -63,11 +56,13 @@ pub fn batch_matching_system(
     );
 
     for m in matches {
-        if let Ok((_, mut rider, _)) = riders.get_mut(m.rider_entity) {
+        if let Ok((_, mut rider, _, _)) = riders.get_mut(m.rider_entity) {
             rider.matched_driver = Some(m.driver_entity);
         }
-        if let Ok((_, mut driver, _)) = drivers.get_mut(m.driver_entity) {
-            driver.state = DriverState::Evaluating;
+        if let Ok((_, mut driver, _, _)) = drivers.get_mut(m.driver_entity) {
+            commands
+                .entity(m.driver_entity)
+                .set_driver_state_evaluating();
             driver.matched_rider = Some(m.rider_entity);
         }
         clock.schedule_in_secs(

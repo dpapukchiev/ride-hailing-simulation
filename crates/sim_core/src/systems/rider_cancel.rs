@@ -1,7 +1,10 @@
 use bevy_ecs::prelude::{Commands, Query, Res, ResMut};
 
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
-use crate::ecs::{Driver, DriverState, Rider, RiderState, Trip, TripState, TripTiming};
+use crate::ecs::{
+    Driver, DriverStateCommands, EnRoute, Evaluating, Rider, Trip, TripCancelled, TripCompleted,
+    TripEnRoute, TripOnTrip, TripTiming, Waiting,
+};
 use crate::telemetry::SimTelemetry;
 
 pub fn rider_cancel_system(
@@ -9,9 +12,9 @@ pub fn rider_cancel_system(
     clock: Res<SimulationClock>,
     mut commands: Commands,
     mut telemetry: ResMut<SimTelemetry>,
-    mut riders: Query<&mut Rider>,
-    mut drivers: Query<&mut Driver>,
-    mut trips: Query<(&mut Trip, &mut TripTiming)>,
+    mut riders: Query<(&mut Rider, Option<&Waiting>)>,
+    mut drivers: Query<(&mut Driver, Option<&EnRoute>, Option<&Evaluating>)>,
+    mut trips: Query<(&mut Trip, &mut TripTiming, Option<&TripEnRoute>)>,
 ) {
     if event.0.kind != EventKind::RiderCancel {
         return;
@@ -20,28 +23,33 @@ pub fn rider_cancel_system(
     let Some(EventSubject::Rider(rider_entity)) = event.0.subject else {
         return;
     };
-    let Ok(mut rider) = riders.get_mut(rider_entity) else {
+    let Ok((mut rider, waiting)) = riders.get_mut(rider_entity) else {
         return;
     };
-    if rider.state != RiderState::Waiting {
+    if waiting.is_none() {
         return;
     }
 
     if let Some(driver_entity) = rider.matched_driver {
         // Use assigned_trip for O(1) trip lookup instead of scanning all trips
         if let Some(trip_entity) = rider.assigned_trip {
-            if let Ok((mut trip, mut timing)) = trips.get_mut(trip_entity) {
-                if trip.state == TripState::EnRoute {
-                    trip.state = TripState::Cancelled;
+            if let Ok((_trip, mut timing, en_route)) = trips.get_mut(trip_entity) {
+                if en_route.is_some() {
                     timing.cancelled_at = Some(clock.now());
+                    commands
+                        .entity(trip_entity)
+                        .remove::<TripEnRoute>()
+                        .remove::<TripOnTrip>()
+                        .remove::<TripCompleted>()
+                        .insert(TripCancelled);
                 }
             }
         }
 
-        if let Ok(mut driver) = drivers.get_mut(driver_entity) {
+        if let Ok((mut driver, en_route, evaluating)) = drivers.get_mut(driver_entity) {
             if driver.matched_rider == Some(rider_entity) {
-                if driver.state == DriverState::EnRoute || driver.state == DriverState::Evaluating {
-                    driver.state = DriverState::Idle;
+                if en_route.is_some() || evaluating.is_some() {
+                    commands.entity(driver_entity).set_driver_state_idle();
                 }
                 driver.matched_rider = None;
             }
@@ -50,7 +58,6 @@ pub fn rider_cancel_system(
         }
     }
 
-    rider.state = RiderState::Cancelled;
     rider.matched_driver = None;
     rider.assigned_trip = None;
     telemetry.riders_cancelled_total = telemetry.riders_cancelled_total.saturating_add(1);
@@ -67,7 +74,10 @@ mod tests {
     use bevy_ecs::schedule::apply_deferred;
 
     use crate::clock::SimulationClock;
-    use crate::ecs::{Position, Rider, Trip, TripFinancials, TripLiveData, TripTiming};
+    use crate::ecs::{
+        EnRoute, Idle, Position, Rider, Trip, TripEnRoute, TripFinancials, TripLiveData,
+        TripTiming, Waiting,
+    };
 
     #[test]
     fn rider_cancel_resets_driver_and_trip() {
@@ -84,7 +94,6 @@ mod tests {
         let rider_entity = world
             .spawn((
                 Rider {
-                    state: RiderState::Waiting,
                     matched_driver: None,
                     assigned_trip: None,
                     destination: Some(destination),
@@ -93,28 +102,29 @@ mod tests {
                     accepted_fare: None,
                     last_rejection_reason: None,
                 },
+                Waiting,
                 Position(cell),
             ))
             .id();
         let driver_entity = world
             .spawn((
                 Driver {
-                    state: DriverState::EnRoute,
                     matched_rider: Some(rider_entity),
                     assigned_trip: None,
                 },
+                EnRoute,
                 Position(cell),
             ))
             .id();
         let trip_entity = world
             .spawn((
                 Trip {
-                    state: TripState::EnRoute,
                     rider: rider_entity,
                     driver: driver_entity,
                     pickup: cell,
                     dropoff: destination,
                 },
+                TripEnRoute,
                 TripTiming {
                     requested_at: 0,
                     matched_at: 0,
@@ -161,11 +171,11 @@ mod tests {
         assert!(!rider_exists, "rider should be despawned on cancel");
 
         let driver = world.entity(driver_entity).get::<Driver>().expect("driver");
-        assert_eq!(driver.state, DriverState::Idle);
+        assert!(world.entity(driver_entity).contains::<Idle>());
         assert_eq!(driver.matched_rider, None);
 
-        let trip = world.entity(trip_entity).get::<Trip>().expect("trip");
-        assert_eq!(trip.state, TripState::Cancelled);
+        let _trip = world.entity(trip_entity).get::<Trip>().expect("trip");
+        assert!(world.entity(trip_entity).contains::<TripCancelled>());
     }
 
     #[test]
@@ -183,7 +193,6 @@ mod tests {
         let rider_entity = world
             .spawn((
                 Rider {
-                    state: RiderState::Waiting,
                     matched_driver: None,
                     assigned_trip: None,
                     destination: Some(destination),
@@ -192,6 +201,7 @@ mod tests {
                     accepted_fare: None,
                     last_rejection_reason: None,
                 },
+                Waiting,
                 Position(cell),
             ))
             .id();

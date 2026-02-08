@@ -3,8 +3,7 @@
 use eframe::egui::{self, Align2, Color32, FontId, Vec2};
 use h3o::{CellIndex, LatLng};
 
-use sim_core::ecs::{DriverState, RiderState, TripState};
-use sim_core::telemetry::TripSnapshot;
+use sim_core::telemetry::{DriverState, RiderState, TripSnapshot, TripState};
 
 use crate::ui::utils::{
     chart_color_abandoned_quote, chart_color_active_trips, chart_color_cancelled_riders,

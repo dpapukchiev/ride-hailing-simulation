@@ -23,18 +23,20 @@ mod tests {
     use super::*;
     use bevy_ecs::prelude::{Schedule, World};
 
-    use crate::ecs::{Driver, DriverState};
+    use crate::ecs::{Driver, Evaluating};
 
     #[test]
     fn match_accepted_schedules_driver_decision() {
         let mut world = World::new();
         world.insert_resource(SimulationClock::default());
         let driver_entity = world
-            .spawn(Driver {
-                state: DriverState::Evaluating,
-                matched_rider: None,
-                assigned_trip: None,
-            })
+            .spawn((
+                Driver {
+                    matched_rider: None,
+                    assigned_trip: None,
+                },
+                Evaluating,
+            ))
             .id();
 
         world.resource_mut::<SimulationClock>().schedule_at_secs(

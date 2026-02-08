@@ -8,7 +8,10 @@
 use bevy_ecs::prelude::{Commands, Entity, ParamSet, Query, Res, ResMut, With};
 
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock, ONE_SEC_MS};
-use crate::ecs::{Driver, DriverState, Position, Rider, Trip, TripLiveData, TripRoute, TripState};
+use crate::ecs::{
+    Driver, EnRoute, OnTrip, Position, Rider, Trip, TripEnRoute, TripLiveData, TripOnTrip,
+    TripRoute,
+};
 use crate::routing::RouteProviderResource;
 use crate::spatial::{distance_km_between_cells, grid_path_cells_cached, SpatialIndex};
 use crate::speed::{SpeedFactors, SpeedModel};
@@ -92,9 +95,20 @@ pub fn movement_system(
     congestion_zones: Res<CongestionZones>,
     dynamic_congestion: Res<DynamicCongestionConfig>,
     spatial_index: Option<Res<SpatialIndex>>,
-    mut trips: Query<(&mut Trip, &mut TripLiveData, Option<&mut TripRoute>)>,
+    mut trips: Query<(
+        &mut Trip,
+        &mut TripLiveData,
+        Option<&mut TripRoute>,
+        Option<&TripEnRoute>,
+        Option<&TripOnTrip>,
+    )>,
     mut queries: ParamSet<(
-        Query<(&mut Driver, &mut Position)>,
+        Query<(
+            &mut Driver,
+            &mut Position,
+            Option<&EnRoute>,
+            Option<&OnTrip>,
+        )>,
         Query<&mut Position, With<Rider>>,
     )>,
 ) {
@@ -107,34 +121,30 @@ pub fn movement_system(
     };
 
     let (driver_entity, target_cell, is_en_route, rider_entity) = {
-        let Ok((trip, _, _)) = trips.get(trip_entity) else {
+        let Ok((trip, _, _, en_route, on_trip)) = trips.get(trip_entity) else {
             return;
         };
-        let target = match trip.state {
-            TripState::EnRoute => trip.pickup,
-            TripState::OnTrip => trip.dropoff,
-            TripState::Completed | TripState::Cancelled => return,
+        let is_en_route = en_route.is_some();
+        if !is_en_route && on_trip.is_none() {
+            return;
+        }
+        let target = if is_en_route {
+            trip.pickup
+        } else {
+            trip.dropoff
         };
-        (
-            trip.driver,
-            target,
-            trip.state == TripState::EnRoute,
-            trip.rider,
-        )
-    };
-
-    let expected_state = if is_en_route {
-        DriverState::EnRoute
-    } else {
-        DriverState::OnTrip
+        (trip.driver, target, is_en_route, trip.rider)
     };
 
     let driver_pos_cell = {
         let driver_query = queries.p0();
-        let Ok((driver, driver_pos)) = driver_query.get(driver_entity) else {
+        let Ok((_driver, driver_pos, en_route, on_trip)) = driver_query.get(driver_entity) else {
             return;
         };
-        if driver.state != expected_state {
+        if is_en_route && en_route.is_none() {
+            return;
+        }
+        if !is_en_route && on_trip.is_none() {
             return;
         }
         driver_pos.0
@@ -165,7 +175,7 @@ pub fn movement_system(
     let remaining_km = distance_km_between_cells(driver_pos_cell, target_cell);
     if remaining_km <= 0.0 {
         if is_en_route {
-            if let Ok((_, mut live_data, _)) = trips.get_mut(trip_entity) {
+            if let Ok((_, mut live_data, _, _, _)) = trips.get_mut(trip_entity) {
                 live_data.pickup_eta_ms = 0;
             }
         }
@@ -183,7 +193,7 @@ pub fn movement_system(
         let mut trip_route = trips
             .get_mut(trip_entity)
             .ok()
-            .and_then(|(_, _, route)| route);
+            .and_then(|(_, _, route, _, _)| route);
 
         let trip_route_ref = trip_route.as_deref_mut();
 
@@ -207,7 +217,7 @@ pub fn movement_system(
     // Update driver position
     {
         let mut driver_query = queries.p0();
-        let Ok((_, mut driver_pos)) = driver_query.get_mut(driver_entity) else {
+        let Ok((_, mut driver_pos, _, _)) = driver_query.get_mut(driver_entity) else {
             return;
         };
         driver_pos.0 = next_driver_cell;
@@ -223,7 +233,7 @@ pub fn movement_system(
 
     let remaining = distance_km_between_cells(next_driver_cell, target_cell);
     if is_en_route {
-        if let Ok((_, mut live_data, _)) = trips.get_mut(trip_entity) {
+        if let Ok((_, mut live_data, _, _, _)) = trips.get_mut(trip_entity) {
             live_data.pickup_eta_ms = if remaining <= 0.0 {
                 0
             } else {
@@ -257,7 +267,9 @@ pub fn movement_system(
 mod tests {
     use super::*;
     use crate::clock::ONE_SEC_MS;
-    use crate::ecs::{Rider, RiderState, TripFinancials, TripLiveData, TripTiming};
+    use crate::ecs::{
+        EnRoute, Rider, TripEnRoute, TripFinancials, TripLiveData, TripTiming, Waiting,
+    };
     use crate::routing::{H3GridRouteProvider, RouteProviderResource};
     use crate::speed::SpeedModel;
     use crate::traffic::{CongestionZones, DynamicCongestionConfig, TrafficProfile};
@@ -293,7 +305,6 @@ mod tests {
         let rider_entity = world
             .spawn((
                 Rider {
-                    state: RiderState::Waiting,
                     matched_driver: None,
                     assigned_trip: None,
                     destination: Some(dropoff),
@@ -302,28 +313,29 @@ mod tests {
                     accepted_fare: None,
                     last_rejection_reason: None,
                 },
+                Waiting,
                 Position(neighbor),
             ))
             .id();
         let driver_entity = world
             .spawn((
                 Driver {
-                    state: DriverState::EnRoute,
                     matched_rider: Some(rider_entity),
                     assigned_trip: None,
                 },
+                EnRoute,
                 Position(origin),
             ))
             .id();
         let trip_entity = world
             .spawn((
                 Trip {
-                    state: TripState::EnRoute,
                     rider: rider_entity,
                     driver: driver_entity,
                     pickup: neighbor,
                     dropoff,
                 },
+                TripEnRoute,
                 TripTiming {
                     requested_at: 0,
                     matched_at: 0,

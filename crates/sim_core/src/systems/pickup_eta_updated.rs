@@ -1,7 +1,7 @@
 use bevy_ecs::prelude::{Query, Res, ResMut};
 
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
-use crate::ecs::{Rider, RiderState, Trip, TripLiveData, TripState, TripTiming};
+use crate::ecs::{Rider, Trip, TripEnRoute, TripLiveData, TripTiming, Waiting};
 use crate::scenario::RiderCancelConfig;
 
 /// Pure patience check: if the projected pickup time exceeds the rider's wait
@@ -11,8 +11,8 @@ pub fn pickup_eta_updated_system(
     event: Res<CurrentEvent>,
     mut clock: ResMut<SimulationClock>,
     cancel_config: Option<Res<RiderCancelConfig>>,
-    trips: Query<(&Trip, &TripTiming, &TripLiveData)>,
-    riders: Query<&Rider>,
+    trips: Query<(&Trip, &TripTiming, &TripLiveData, Option<&TripEnRoute>)>,
+    riders: Query<(&Rider, Option<&Waiting>)>,
 ) {
     if event.0.kind != EventKind::PickupEtaUpdated {
         return;
@@ -22,19 +22,19 @@ pub fn pickup_eta_updated_system(
         return;
     };
 
-    let Ok((trip, timing, live_data)) = trips.get(trip_entity) else {
+    let Ok((trip, timing, live_data, en_route)) = trips.get(trip_entity) else {
         return;
     };
-    if trip.state != TripState::EnRoute {
+    if en_route.is_none() {
         return;
     }
 
     let rider_entity = trip.rider;
     let driver_entity = trip.driver;
-    let Ok(rider) = riders.get(rider_entity) else {
+    let Ok((rider, waiting)) = riders.get(rider_entity) else {
         return;
     };
-    if rider.state != RiderState::Waiting {
+    if waiting.is_none() {
         return;
     }
     if rider.matched_driver != Some(driver_entity) {

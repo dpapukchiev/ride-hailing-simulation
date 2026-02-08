@@ -3,7 +3,7 @@ use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
-use crate::ecs::{Rider, RiderQuote, RiderState};
+use crate::ecs::{Browsing, Rider, RiderQuote, Waiting};
 use crate::scenario::{BatchMatchingConfig, RiderCancelConfig};
 
 pub fn quote_accepted_system(
@@ -12,7 +12,7 @@ pub fn quote_accepted_system(
     mut commands: Commands,
     batch_config: Option<Res<BatchMatchingConfig>>,
     cancel_config: Option<Res<RiderCancelConfig>>,
-    mut riders: Query<(Entity, &mut Rider, &RiderQuote)>,
+    mut riders: Query<(Entity, &mut Rider, &RiderQuote, Option<&Browsing>)>,
 ) {
     if event.0.kind != EventKind::QuoteAccepted {
         return;
@@ -21,12 +21,15 @@ pub fn quote_accepted_system(
     let Some(EventSubject::Rider(rider_entity)) = event.0.subject else {
         return;
     };
-    let Ok((_, mut rider, quote)) = riders.get_mut(rider_entity) else {
+    let Ok((_, mut rider, quote, browsing)) = riders.get_mut(rider_entity) else {
         return;
     };
-    if rider.state == RiderState::Browsing {
+    if browsing.is_some() {
         rider.accepted_fare = Some(quote.fare);
-        rider.state = RiderState::Waiting;
+        commands
+            .entity(rider_entity)
+            .remove::<Browsing>()
+            .insert(Waiting);
         commands.entity(rider_entity).remove::<RiderQuote>();
     }
 
@@ -61,6 +64,7 @@ pub fn quote_accepted_system(
 mod tests {
     use super::*;
     use bevy_ecs::prelude::{Schedule, World};
+    use bevy_ecs::schedule::apply_deferred;
 
     #[test]
     fn quote_accepted_transitions_rider_state() {
@@ -74,7 +78,6 @@ mod tests {
         let rider_entity = world
             .spawn((
                 Rider {
-                    state: RiderState::Browsing,
                     matched_driver: None,
                     assigned_trip: None,
                     destination: Some(destination),
@@ -83,6 +86,7 @@ mod tests {
                     accepted_fare: None,
                     last_rejection_reason: None,
                 },
+                Browsing,
                 RiderQuote {
                     fare: 12.5,
                     eta_ms: 60_000,
@@ -103,11 +107,11 @@ mod tests {
         world.insert_resource(CurrentEvent(event));
 
         let mut schedule = Schedule::default();
-        schedule.add_systems(quote_accepted_system);
+        schedule.add_systems((quote_accepted_system, apply_deferred));
         schedule.run(&mut world);
 
         let rider = world.query::<&Rider>().single(&world);
-        assert_eq!(rider.state, RiderState::Waiting);
+        assert!(world.entity(rider_entity).contains::<Waiting>());
         assert_eq!(rider.accepted_fare, Some(12.5));
 
         let next_event = world

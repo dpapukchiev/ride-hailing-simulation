@@ -1,7 +1,7 @@
 use bevy_ecs::prelude::{Entity, Query, Res, ResMut};
 
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
-use crate::ecs::{Rider, RiderState};
+use crate::ecs::{Rider, Waiting};
 use crate::scenario::BatchMatchingConfig;
 
 const MATCH_RETRY_SECS: u64 = 30;
@@ -14,7 +14,7 @@ pub fn match_rejected_system(
     mut clock: ResMut<SimulationClock>,
     event: Res<CurrentEvent>,
     batch_config: Option<Res<BatchMatchingConfig>>,
-    mut riders: Query<(Entity, &mut Rider)>,
+    mut riders: Query<(Entity, &mut Rider, Option<&Waiting>)>,
 ) {
     if event.0.kind != EventKind::MatchRejected {
         return;
@@ -24,7 +24,7 @@ pub fn match_rejected_system(
         return;
     };
 
-    let Ok((_entity, mut rider)) = riders.get_mut(rider_entity) else {
+    let Ok((_entity, mut rider, waiting)) = riders.get_mut(rider_entity) else {
         return;
     };
 
@@ -32,7 +32,7 @@ pub fn match_rejected_system(
 
     // Only schedule per-rider TryMatch when batch matching is disabled
     let batch_enabled = batch_config.as_deref().is_some_and(|c| c.enabled);
-    if rider.state == RiderState::Waiting && !batch_enabled {
+    if waiting.is_some() && !batch_enabled {
         clock.schedule_in_secs(
             MATCH_RETRY_SECS,
             EventKind::TryMatch,
@@ -68,7 +68,6 @@ mod tests {
         let rider_entity = world
             .spawn((
                 Rider {
-                    state: RiderState::Waiting,
                     matched_driver: Some(fake_driver),
                     assigned_trip: None,
                     destination: Some(destination),
@@ -77,6 +76,7 @@ mod tests {
                     accepted_fare: Some(10.0),
                     last_rejection_reason: None,
                 },
+                Waiting,
                 Position(cell),
             ))
             .id();

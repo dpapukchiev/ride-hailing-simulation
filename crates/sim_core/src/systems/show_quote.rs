@@ -3,7 +3,7 @@
 use bevy_ecs::prelude::{Commands, Entity, Query, Res, ResMut};
 
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
-use crate::ecs::{Driver, DriverState, Position, Rider, RiderQuote, RiderState};
+use crate::ecs::{Browsing, Driver, Idle, Position, Rider, RiderQuote, Waiting};
 use crate::pricing::{calculate_trip_fare_with_config, PricingConfig};
 use crate::spatial::{distance_km_between_cells, grid_disk_cached, SpatialIndex};
 
@@ -18,8 +18,14 @@ pub fn show_quote_system(
     event: Res<CurrentEvent>,
     pricing_config: Res<PricingConfig>,
     spatial_index: Option<Res<SpatialIndex>>,
-    riders: Query<(Entity, &Rider, &Position)>,
-    drivers: Query<(&Driver, &Position)>,
+    riders: Query<(
+        Entity,
+        &Rider,
+        &Position,
+        Option<&Browsing>,
+        Option<&Waiting>,
+    )>,
+    drivers: Query<(&Driver, &Position, Option<&Idle>)>,
 ) {
     if event.0.kind != EventKind::ShowQuote {
         return;
@@ -29,10 +35,10 @@ pub fn show_quote_system(
         return;
     };
 
-    let Ok((_, rider, position)) = riders.get(rider_entity) else {
+    let Ok((_, rider, position, browsing, _waiting)) = riders.get(rider_entity) else {
         return;
     };
-    if rider.state != RiderState::Browsing {
+    if browsing.is_none() {
         return;
     }
     let Some(dropoff) = rider.destination else {
@@ -55,15 +61,13 @@ pub fn show_quote_system(
             let demand = rider_entities
                 .iter()
                 .filter_map(|&entity| riders.get(entity).ok())
-                .filter(|(_, r, _)| {
-                    r.state == RiderState::Browsing || r.state == RiderState::Waiting
-                })
+                .filter(|(_, _r, _pos, browsing, waiting)| browsing.is_some() || waiting.is_some())
                 .count();
 
             let supply = driver_entities
                 .iter()
                 .filter_map(|&entity| drivers.get(entity).ok())
-                .filter(|(d, _)| d.state == DriverState::Idle)
+                .filter(|(_d, _pos, idle)| idle.is_some())
                 .count();
 
             (demand, supply)
@@ -71,14 +75,13 @@ pub fn show_quote_system(
             // Fallback to full scan if spatial index not available
             let demand = riders
                 .iter()
-                .filter(|(_, r, pos)| {
-                    (r.state == RiderState::Browsing || r.state == RiderState::Waiting)
-                        && cluster_cells.contains(&pos.0)
+                .filter(|(_, _r, pos, browsing, waiting)| {
+                    (browsing.is_some() || waiting.is_some()) && cluster_cells.contains(&pos.0)
                 })
                 .count();
             let supply = drivers
                 .iter()
-                .filter(|(d, pos)| d.state == DriverState::Idle && cluster_cells.contains(&pos.0))
+                .filter(|(_d, pos, idle)| idle.is_some() && cluster_cells.contains(&pos.0))
                 .count();
             (demand, supply)
         };
@@ -99,8 +102,8 @@ pub fn show_quote_system(
 
     let eta_ms = drivers
         .iter()
-        .filter_map(|(driver, pos)| {
-            if driver.state == DriverState::Idle {
+        .filter_map(|(_driver, pos, idle)| {
+            if idle.is_some() {
                 let distance_km = distance_km_between_cells(pos.0, pickup);
                 let hours = distance_km / ETA_SPEED_KMH;
                 Some((hours * 3_600_000.0) as u64)
@@ -142,7 +145,6 @@ mod tests {
         let rider_entity = world
             .spawn((
                 Rider {
-                    state: RiderState::Browsing,
                     matched_driver: None,
                     assigned_trip: None,
                     destination: Some(destination),
@@ -151,6 +153,7 @@ mod tests {
                     accepted_fare: None,
                     last_rejection_reason: None,
                 },
+                Browsing,
                 Position(cell),
             ))
             .id();

@@ -1,11 +1,11 @@
-use bevy_ecs::prelude::{Commands, Entity, Query, Res, ResMut};
+use bevy_ecs::prelude::{Commands, Entity, Query, Res, ResMut, With};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
 use crate::ecs::{
-    Driver, DriverEarnings, DriverFatigue, DriverState, Position, Rider, RiderState, Trip,
-    TripFinancials, TripLiveData, TripState, TripTiming,
+    Driver, DriverEarnings, DriverFatigue, DriverStateCommands, Evaluating, Position, Rider, Trip,
+    TripEnRoute, TripFinancials, TripLiveData, TripTiming, Waiting,
 };
 use crate::scenario::DriverDecisionConfig;
 use crate::spatial::distance_km_between_cells;
@@ -23,8 +23,17 @@ pub fn driver_decision_system(
     event: Res<CurrentEvent>,
     driver_config: Option<Res<DriverDecisionConfig>>,
     mut commands: Commands,
-    mut drivers: Query<(&mut Driver, &Position, &DriverEarnings, &DriverFatigue)>,
-    mut riders: Query<(Entity, &mut Rider, &Position)>,
+    mut drivers: Query<
+        (
+            Entity,
+            &mut Driver,
+            &Position,
+            &DriverEarnings,
+            &DriverFatigue,
+        ),
+        With<Evaluating>,
+    >,
+    mut riders: Query<(Entity, &mut Rider, &Position, Option<&Waiting>)>,
 ) {
     if event.0.kind != EventKind::DriverDecision {
         return;
@@ -33,50 +42,41 @@ pub fn driver_decision_system(
     let Some(EventSubject::Driver(driver_entity)) = event.0.subject else {
         return;
     };
-    let Ok((mut driver, driver_pos, driver_earnings, driver_fatigue)) =
+    let Ok((driver_entity, mut driver, driver_pos, driver_earnings, driver_fatigue)) =
         drivers.get_mut(driver_entity)
     else {
         return;
     };
-    if driver.state != DriverState::Evaluating {
-        return;
-    }
 
     let Some(rider_entity) = driver.matched_rider else {
-        driver.state = DriverState::Idle;
+        commands.entity(driver_entity).set_driver_state_idle();
         return;
     };
 
     // Get trip characteristics for score calculation
     let (pickup, dropoff, requested_at, rider_waiting, fare) = match riders.get_mut(rider_entity) {
-        Ok((_entity, rider, pos)) => {
+        Ok((_entity, rider, pos, waiting)) => {
             let pickup = pos.0;
             let Some(dropoff) = rider.destination else {
                 // Rider has no destination; reset driver and bail
-                driver.state = DriverState::Idle;
+                commands.entity(driver_entity).set_driver_state_idle();
                 driver.matched_rider = None;
                 return;
             };
             let requested_at = rider.requested_at.unwrap_or(clock.now());
             let fare = rider.accepted_fare.unwrap_or(0.0);
-            (
-                pickup,
-                dropoff,
-                requested_at,
-                rider.state == RiderState::Waiting,
-                fare,
-            )
+            (pickup, dropoff, requested_at, waiting.is_some(), fare)
         }
         Err(_) => {
-            driver.state = DriverState::Idle;
+            commands.entity(driver_entity).set_driver_state_idle();
             return;
         }
     };
 
     if !rider_waiting {
-        driver.state = DriverState::Idle;
+        commands.entity(driver_entity).set_driver_state_idle();
         driver.matched_rider = None;
-        if let Ok((_entity, mut rider, _)) = riders.get_mut(rider_entity) {
+        if let Ok((_entity, mut rider, _, _)) = riders.get_mut(rider_entity) {
             rider.matched_driver = None;
         }
         return;
@@ -108,21 +108,21 @@ pub fn driver_decision_system(
     if logit_accepts_stochastic(score, config.seed, driver_entity) {
         let matched_at = clock.now();
         let pickup_distance_km_at_accept = distance_km_between_cells(driver_pos.0, pickup);
-        driver.state = DriverState::EnRoute;
+        commands.entity(driver_entity).set_driver_state_en_route();
         let agreed_fare = riders
             .get(rider_entity)
             .ok()
-            .and_then(|(_, r, _)| r.accepted_fare);
+            .and_then(|(_, r, _, _)| r.accepted_fare);
 
         let trip_entity = commands
             .spawn((
                 Trip {
-                    state: TripState::EnRoute,
                     rider: rider_entity,
                     driver: driver_entity,
                     pickup,
                     dropoff,
                 },
+                TripEnRoute,
                 TripTiming {
                     requested_at,
                     matched_at,
@@ -139,7 +139,7 @@ pub fn driver_decision_system(
             .id();
 
         // Set trip backlinks on rider and driver for O(1) lookup
-        if let Ok((_entity, mut rider, _)) = riders.get_mut(rider_entity) {
+        if let Ok((_entity, mut rider, _pos, _waiting)) = riders.get_mut(rider_entity) {
             rider.assigned_trip = Some(trip_entity);
         }
         driver.assigned_trip = Some(trip_entity);
@@ -151,7 +151,7 @@ pub fn driver_decision_system(
         );
     } else {
         let rejected_rider = driver.matched_rider;
-        driver.state = DriverState::Idle;
+        commands.entity(driver_entity).set_driver_state_idle();
         driver.matched_rider = None;
         if let Some(rider_entity) = rejected_rider {
             // Delegate rider-side cleanup to match_rejected_system
@@ -170,7 +170,10 @@ mod tests {
     use bevy_ecs::prelude::{Schedule, World};
     use bevy_ecs::schedule::apply_deferred;
 
-    use crate::ecs::{DriverEarnings, DriverFatigue, Position, Rider, RiderState};
+    use crate::ecs::{
+        DriverEarnings, DriverFatigue, EnRoute, Evaluating, Idle, Position, Rider, TripEnRoute,
+        Waiting,
+    };
 
     #[test]
     fn evaluating_driver_moves_to_en_route() {
@@ -191,7 +194,6 @@ mod tests {
         let rider_entity = world
             .spawn((
                 Rider {
-                    state: RiderState::Waiting,
                     matched_driver: None,
                     assigned_trip: None,
                     destination: Some(destination),
@@ -200,16 +202,17 @@ mod tests {
                     accepted_fare: Some(15.0),
                     last_rejection_reason: None,
                 },
+                Waiting,
                 Position(cell),
             ))
             .id();
         let driver_entity = world
             .spawn((
                 Driver {
-                    state: DriverState::Evaluating,
                     matched_rider: Some(rider_entity),
                     assigned_trip: None,
                 },
+                Evaluating,
                 Position(cell),
                 DriverEarnings {
                     daily_earnings: 0.0,
@@ -238,8 +241,7 @@ mod tests {
         schedule.add_systems((driver_decision_system, apply_deferred));
         schedule.run(&mut world);
 
-        let driver = world.query::<&Driver>().single(&world);
-        assert_eq!(driver.state, DriverState::EnRoute);
+        assert!(world.entity(driver_entity).contains::<EnRoute>());
 
         let next_event = world
             .resource_mut::<SimulationClock>()
@@ -252,7 +254,7 @@ mod tests {
             other => panic!("expected trip subject, got {other:?}"),
         };
         let trip = world.entity(trip_entity).get::<Trip>().expect("trip");
-        assert_eq!(trip.state, TripState::EnRoute);
+        assert!(world.entity(trip_entity).contains::<TripEnRoute>());
         assert_eq!(trip.driver, driver_entity);
         assert_eq!(trip.rider, rider_entity);
         assert_eq!(trip.pickup, cell);
@@ -278,7 +280,6 @@ mod tests {
         let rider_entity = world
             .spawn((
                 Rider {
-                    state: RiderState::Waiting,
                     matched_driver: None,
                     assigned_trip: None,
                     destination: Some(destination),
@@ -287,16 +288,17 @@ mod tests {
                     accepted_fare: Some(5.0), // Low fare
                     last_rejection_reason: None,
                 },
+                Waiting,
                 Position(cell),
             ))
             .id();
         let driver_entity = world
             .spawn((
                 Driver {
-                    state: DriverState::Evaluating,
                     matched_rider: Some(rider_entity),
                     assigned_trip: None,
                 },
+                Evaluating,
                 Position(cell),
                 DriverEarnings {
                     daily_earnings: 0.0,
@@ -326,7 +328,7 @@ mod tests {
         schedule.run(&mut world);
 
         let driver = world.query::<&Driver>().single(&world);
-        assert_eq!(driver.state, DriverState::Idle);
+        assert!(world.entity(driver_entity).contains::<Idle>());
         assert_eq!(driver.matched_rider, None);
 
         // MatchRejected event should be scheduled at delta 0 for the rider
@@ -363,7 +365,6 @@ mod tests {
         let rider_entity1 = world1
             .spawn((
                 Rider {
-                    state: RiderState::Waiting,
                     matched_driver: None,
                     assigned_trip: None,
                     destination: Some(destination),
@@ -372,16 +373,17 @@ mod tests {
                     accepted_fare: Some(10.0),
                     last_rejection_reason: None,
                 },
+                Waiting,
                 Position(cell),
             ))
             .id();
         let driver_entity1 = world1
             .spawn((
                 Driver {
-                    state: DriverState::Evaluating,
                     matched_rider: Some(rider_entity1),
                     assigned_trip: None,
                 },
+                Evaluating,
                 Position(cell),
                 DriverEarnings {
                     daily_earnings: 0.0,
@@ -398,7 +400,6 @@ mod tests {
         let rider_entity2 = world2
             .spawn((
                 Rider {
-                    state: RiderState::Waiting,
                     matched_driver: None,
                     assigned_trip: None,
                     destination: Some(destination),
@@ -407,16 +408,17 @@ mod tests {
                     accepted_fare: Some(10.0),
                     last_rejection_reason: None,
                 },
+                Waiting,
                 Position(cell),
             ))
             .id();
         let driver_entity2 = world2
             .spawn((
                 Driver {
-                    state: DriverState::Evaluating,
                     matched_rider: Some(rider_entity2),
                     assigned_trip: None,
                 },
+                Evaluating,
                 Position(cell),
                 DriverEarnings {
                     daily_earnings: 0.0,
@@ -452,10 +454,10 @@ mod tests {
             schedule.run(world);
         }
 
-        let driver1 = world1.query::<&Driver>().single(&world1);
-        let driver2 = world2.query::<&Driver>().single(&world2);
-
         // Same seed + same driver entity index = same decision
-        assert_eq!(driver1.state, driver2.state);
+        assert_eq!(
+            world1.entity(driver_entity1).contains::<EnRoute>(),
+            world2.entity(driver_entity2).contains::<EnRoute>()
+        );
     }
 }

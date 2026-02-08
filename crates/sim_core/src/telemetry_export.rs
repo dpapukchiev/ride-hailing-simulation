@@ -20,8 +20,7 @@ use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use parquet::arrow::ArrowWriter;
 
-use crate::ecs::{DriverState, RiderState, TripState};
-use crate::telemetry::{SimSnapshots, SimTelemetry};
+use crate::telemetry::{DriverState, RiderState, SimSnapshots, SimTelemetry, TripState};
 
 const AGENT_RIDER: u8 = 0;
 const AGENT_DRIVER: u8 = 1;
@@ -477,8 +476,7 @@ pub fn validate_trip_timestamp_ordering(trip: &crate::telemetry::TripSnapshot) -
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::TripState;
-    use crate::telemetry::TripSnapshot;
+    use crate::telemetry::{TripSnapshot, TripState};
     use bevy_ecs::prelude::World;
     use h3o::CellIndex;
 

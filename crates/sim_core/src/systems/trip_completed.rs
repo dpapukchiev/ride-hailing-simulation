@@ -2,8 +2,8 @@ use bevy_ecs::prelude::{Commands, Query, Res, ResMut};
 
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
 use crate::ecs::{
-    Driver, DriverEarnings, DriverState, Rider, RiderState, Trip, TripFinancials, TripState,
-    TripTiming,
+    Driver, DriverEarnings, DriverStateCommands, InTransit, OnTrip, Rider, RiderCompleted, Trip,
+    TripCompleted, TripFinancials, TripOnTrip, TripTiming,
 };
 use crate::pricing::{
     calculate_driver_earnings, calculate_platform_revenue, calculate_trip_fare_with_config,
@@ -18,9 +18,14 @@ pub fn trip_completed_system(
     pricing_config: Res<PricingConfig>,
     mut telemetry: ResMut<SimTelemetry>,
     mut commands: Commands,
-    mut trips: Query<(&mut Trip, &mut TripTiming, &TripFinancials)>,
-    mut riders: Query<&mut Rider>,
-    mut drivers: Query<&mut Driver>,
+    mut trips: Query<(
+        &mut Trip,
+        &mut TripTiming,
+        &TripFinancials,
+        Option<&TripOnTrip>,
+    )>,
+    mut riders: Query<(&mut Rider, Option<&InTransit>)>,
+    mut drivers: Query<(&mut Driver, Option<&OnTrip>)>,
     mut driver_earnings: Query<&mut DriverEarnings>,
 ) {
     if event.0.kind != EventKind::TripCompleted {
@@ -31,10 +36,10 @@ pub fn trip_completed_system(
         return;
     };
 
-    let Ok((mut trip, mut timing, financials)) = trips.get_mut(trip_entity) else {
+    let Ok((trip, mut timing, financials, on_trip)) = trips.get_mut(trip_entity) else {
         return;
     };
-    if trip.state != TripState::OnTrip {
+    if on_trip.is_none() {
         return;
     }
 
@@ -54,9 +59,9 @@ pub fn trip_completed_system(
     let driver_earnings_amount = calculate_driver_earnings(fare, pricing_config.commission_rate);
 
     // Update driver state and clear trip backlink
-    if let Ok(mut driver) = drivers.get_mut(driver_entity) {
-        if driver.state == DriverState::OnTrip {
-            driver.state = DriverState::Idle;
+    if let Ok((mut driver, on_trip)) = drivers.get_mut(driver_entity) {
+        if on_trip.is_some() {
+            commands.entity(driver_entity).set_driver_state_idle();
         }
         driver.matched_rider = None;
         driver.assigned_trip = None;
@@ -74,9 +79,12 @@ pub fn trip_completed_system(
         Some(EventSubject::Driver(driver_entity)),
     );
 
-    if let Ok(mut rider) = riders.get_mut(rider_entity) {
-        if rider.state == RiderState::InTransit {
-            rider.state = RiderState::Completed;
+    if let Ok((mut rider, in_transit)) = riders.get_mut(rider_entity) {
+        if in_transit.is_some() {
+            commands
+                .entity(rider_entity)
+                .remove::<InTransit>()
+                .insert(RiderCompleted);
         }
         rider.matched_driver = None;
     }
@@ -84,7 +92,10 @@ pub fn trip_completed_system(
     let completed_at = clock.now();
     let pickup_at = timing.pickup_at.unwrap_or(completed_at);
     timing.dropoff_at = Some(completed_at);
-    trip.state = TripState::Completed;
+    commands
+        .entity(trip_entity)
+        .remove::<TripOnTrip>()
+        .insert(TripCompleted);
 
     telemetry.completed_trips.push(CompletedTripRecord {
         trip_entity,
@@ -107,10 +118,10 @@ pub fn trip_completed_system(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::clock::SimulationClock;
+    use crate::ecs::Idle;
     use bevy_ecs::prelude::{Schedule, World};
     use bevy_ecs::schedule::apply_deferred;
-
-    use crate::clock::SimulationClock;
 
     #[test]
     fn trip_completed_transitions_driver_and_rider() {
@@ -128,33 +139,37 @@ mod tests {
             .expect("neighbor cell");
 
         let rider_entity = world
-            .spawn(Rider {
-                state: RiderState::InTransit,
-                matched_driver: None,
-                assigned_trip: None,
-                destination: Some(destination),
-                requested_at: None,
-                quote_rejections: 0,
-                accepted_fare: None,
-                last_rejection_reason: None,
-            })
+            .spawn((
+                Rider {
+                    matched_driver: None,
+                    assigned_trip: None,
+                    destination: Some(destination),
+                    requested_at: None,
+                    quote_rejections: 0,
+                    accepted_fare: None,
+                    last_rejection_reason: None,
+                },
+                InTransit,
+            ))
             .id();
         let driver_entity = world
-            .spawn(Driver {
-                state: DriverState::OnTrip,
-                matched_rider: None,
-                assigned_trip: None,
-            })
+            .spawn((
+                Driver {
+                    matched_rider: None,
+                    assigned_trip: None,
+                },
+                OnTrip,
+            ))
             .id();
         let trip_entity = world
             .spawn((
                 Trip {
-                    state: TripState::OnTrip,
                     rider: rider_entity,
                     driver: driver_entity,
                     pickup: cell,
                     dropoff: destination,
                 },
+                TripOnTrip,
                 TripTiming {
                     requested_at: 0,
                     matched_at: 1,
@@ -197,17 +212,19 @@ mod tests {
         schedule.add_systems((trip_completed_system, apply_deferred));
         schedule.run(&mut world);
 
-        let rider_state = world.query::<&Rider>().iter(&world).next().map(|r| r.state);
+        let rider_exists = world.query::<&Rider>().iter(&world).next().is_some();
         let (driver_state, matched_rider) = {
             let driver = world.query::<&Driver>().single(&world);
-            (driver.state, driver.matched_rider)
+            (
+                world.entity(driver_entity).contains::<Idle>(),
+                driver.matched_rider,
+            )
         };
 
-        assert_eq!(rider_state, None, "rider should be despawned on completion");
-        assert_eq!(driver_state, DriverState::Idle);
+        assert!(!rider_exists, "rider should be despawned on completion");
+        assert!(driver_state);
         assert_eq!(matched_rider, None);
 
-        let trip_state = world.entity(trip_entity).get::<Trip>().expect("trip").state;
-        assert_eq!(trip_state, TripState::Completed);
+        assert!(world.entity(trip_entity).contains::<TripCompleted>());
     }
 }

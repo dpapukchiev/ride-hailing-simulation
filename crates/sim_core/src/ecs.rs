@@ -3,28 +3,31 @@
 //! This module defines the core data structures used in the simulation:
 //!
 //! - **Components**: `Rider`, `Driver`, `Trip`, `Position`, `DriverEarnings`, `DriverFatigue`
-//! - **State Enums**: `RiderState`, `DriverState`, `TripState`
+//! - **State Markers**: rider/driver/trip marker components (e.g. `Browsing`, `Idle`, `TripEnRoute`)
 //!
 //! Components are attached to entities in the ECS world, and systems query/modify them
 //! based on events. States represent the lifecycle stage of each entity.
 
 use bevy_ecs::prelude::{Component, Entity};
+use bevy_ecs::system::EntityCommands;
 use h3o::CellIndex;
 
 use crate::telemetry::RiderAbandonmentReason;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RiderState {
-    Browsing,
-    Waiting,
-    InTransit,
-    Completed,
-    Cancelled,
-}
+// Rider state markers
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]
+pub struct Browsing;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]
+pub struct Waiting;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]
+pub struct InTransit;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]
+pub struct RiderCompleted;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]
+pub struct RiderCancelled;
 
 #[derive(Debug, Clone, Copy, PartialEq, Component)]
 pub struct Rider {
-    pub state: RiderState,
     pub matched_driver: Option<Entity>,
     /// Backlink to the active Trip entity. Set when a Trip is spawned
     /// (driver_decision_system), cleared on trip completion/cancellation.
@@ -51,18 +54,73 @@ pub struct RiderQuote {
     pub eta_ms: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DriverState {
-    Idle,
-    Evaluating,
-    EnRoute,
-    OnTrip,
-    OffDuty,
+// Driver state markers
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]
+pub struct Idle;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]
+pub struct Evaluating;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]
+pub struct EnRoute;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]
+pub struct OnTrip;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]
+pub struct OffDuty;
+
+/// Extension trait to transition a driver entity to a single state by clearing all driver state
+/// markers and inserting the target. Use this instead of manually removing Idle/Evaluating/EnRoute/OnTrip/OffDuty.
+pub trait DriverStateCommands {
+    fn set_driver_state_idle(&mut self) -> &mut Self;
+    fn set_driver_state_evaluating(&mut self) -> &mut Self;
+    fn set_driver_state_en_route(&mut self) -> &mut Self;
+    fn set_driver_state_on_trip(&mut self) -> &mut Self;
+    fn set_driver_state_off_duty(&mut self) -> &mut Self;
+}
+
+impl<'a> DriverStateCommands for EntityCommands<'a> {
+    fn set_driver_state_idle(&mut self) -> &mut Self {
+        self.remove::<Idle>()
+            .remove::<Evaluating>()
+            .remove::<EnRoute>()
+            .remove::<OnTrip>()
+            .remove::<OffDuty>()
+            .insert(Idle)
+    }
+    fn set_driver_state_evaluating(&mut self) -> &mut Self {
+        self.remove::<Idle>()
+            .remove::<Evaluating>()
+            .remove::<EnRoute>()
+            .remove::<OnTrip>()
+            .remove::<OffDuty>()
+            .insert(Evaluating)
+    }
+    fn set_driver_state_en_route(&mut self) -> &mut Self {
+        self.remove::<Idle>()
+            .remove::<Evaluating>()
+            .remove::<EnRoute>()
+            .remove::<OnTrip>()
+            .remove::<OffDuty>()
+            .insert(EnRoute)
+    }
+    fn set_driver_state_on_trip(&mut self) -> &mut Self {
+        self.remove::<Idle>()
+            .remove::<Evaluating>()
+            .remove::<EnRoute>()
+            .remove::<OnTrip>()
+            .remove::<OffDuty>()
+            .insert(OnTrip)
+    }
+    fn set_driver_state_off_duty(&mut self) -> &mut Self {
+        self.remove::<Idle>()
+            .remove::<Evaluating>()
+            .remove::<EnRoute>()
+            .remove::<OnTrip>()
+            .remove::<OffDuty>()
+            .insert(OffDuty)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]
 pub struct Driver {
-    pub state: DriverState,
     pub matched_rider: Option<Entity>,
     /// Backlink to the active Trip entity. Set when a Trip is spawned
     /// (driver_decision_system), cleared on trip completion/cancellation.
@@ -90,18 +148,19 @@ pub struct DriverFatigue {
     pub fatigue_threshold_ms: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TripState {
-    EnRoute,
-    OnTrip,
-    Completed,
-    Cancelled,
-}
+// Trip state markers
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]
+pub struct TripEnRoute;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]
+pub struct TripOnTrip;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]
+pub struct TripCompleted;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]
+pub struct TripCancelled;
 
 /// Core trip identity and spatial data (slimmed from the original 13-field Trip).
 #[derive(Debug, Clone, Copy, PartialEq, Component)]
 pub struct Trip {
-    pub state: TripState,
     pub rider: Entity,
     pub driver: Entity,
     pub pickup: CellIndex,

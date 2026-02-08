@@ -1,9 +1,9 @@
 //! System for checking if drivers should go OffDuty based on earnings targets and fatigue thresholds.
 
-use bevy_ecs::prelude::{Query, Res, ResMut};
+use bevy_ecs::prelude::{Commands, Entity, Query, Res, ResMut};
 
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock, ONE_MIN_MS};
-use crate::ecs::{Driver, DriverEarnings, DriverFatigue, DriverState};
+use crate::ecs::{Driver, DriverEarnings, DriverFatigue, DriverStateCommands, OffDuty};
 
 /// Interval for periodic OffDuty checks (5 minutes).
 const CHECK_INTERVAL_MS: u64 = 5 * ONE_MIN_MS;
@@ -11,12 +11,15 @@ const CHECK_INTERVAL_MS: u64 = 5 * ONE_MIN_MS;
 /// Check a single driver for earnings/fatigue thresholds.
 /// Transitions the driver to OffDuty and sets session_end_time_ms if thresholds are exceeded.
 fn check_driver_offduty(
+    commands: &mut Commands,
     now: u64,
-    driver: &mut Driver,
+    driver_entity: Entity,
+    _driver: &mut Driver,
     earnings: &mut DriverEarnings,
     fatigue: &DriverFatigue,
+    is_offduty: bool,
 ) {
-    if driver.state == DriverState::OffDuty {
+    if is_offduty {
         return;
     }
 
@@ -32,8 +35,8 @@ fn check_driver_offduty(
     }
 
     if should_go_offduty {
-        driver.state = DriverState::OffDuty;
         earnings.session_end_time_ms = Some(now);
+        commands.entity(driver_entity).set_driver_state_off_duty();
     }
 }
 
@@ -46,9 +49,16 @@ fn check_driver_offduty(
 ///
 /// Also bootstraps the periodic check cycle on `SimulationStarted`.
 pub fn driver_offduty_check_system(
+    mut commands: Commands,
     mut clock: ResMut<SimulationClock>,
     event: Res<CurrentEvent>,
-    mut drivers: Query<(&mut Driver, &mut DriverEarnings, &DriverFatigue)>,
+    mut drivers: Query<(
+        Entity,
+        &mut Driver,
+        &mut DriverEarnings,
+        &DriverFatigue,
+        Option<&OffDuty>,
+    )>,
 ) {
     if event.0.kind == EventKind::CheckDriverOffDuty {
         let now = clock.now();
@@ -56,14 +66,32 @@ pub fn driver_offduty_check_system(
         match event.0.subject {
             // Targeted check: only the specified driver (e.g. after trip completion)
             Some(EventSubject::Driver(driver_entity)) => {
-                if let Ok((mut driver, mut earnings, fatigue)) = drivers.get_mut(driver_entity) {
-                    check_driver_offduty(now, &mut driver, &mut earnings, fatigue);
+                if let Ok((entity, mut driver, mut earnings, fatigue, offduty)) =
+                    drivers.get_mut(driver_entity)
+                {
+                    check_driver_offduty(
+                        &mut commands,
+                        now,
+                        entity,
+                        &mut driver,
+                        &mut earnings,
+                        fatigue,
+                        offduty.is_some(),
+                    );
                 }
             }
             // Periodic check: iterate all drivers, then schedule next check
             _ => {
-                for (mut driver, mut earnings, fatigue) in drivers.iter_mut() {
-                    check_driver_offduty(now, &mut driver, &mut earnings, fatigue);
+                for (entity, mut driver, mut earnings, fatigue, offduty) in drivers.iter_mut() {
+                    check_driver_offduty(
+                        &mut commands,
+                        now,
+                        entity,
+                        &mut driver,
+                        &mut earnings,
+                        fatigue,
+                        offduty.is_some(),
+                    );
                 }
                 clock.schedule_in(CHECK_INTERVAL_MS, EventKind::CheckDriverOffDuty, None);
             }
@@ -81,7 +109,9 @@ pub fn driver_offduty_check_system(
 mod tests {
     use super::*;
     use crate::clock::SimulationClock;
+    use crate::ecs::{EnRoute, Idle};
     use bevy_ecs::prelude::{Schedule, World};
+    use bevy_ecs::schedule::apply_deferred;
 
     #[test]
     fn driver_goes_offduty_when_earnings_target_reached() {
@@ -91,10 +121,10 @@ mod tests {
         let driver_entity = world
             .spawn((
                 Driver {
-                    state: DriverState::Idle,
                     matched_rider: None,
                     assigned_trip: None,
                 },
+                Idle,
                 DriverEarnings {
                     daily_earnings: 150.0,
                     daily_earnings_target: 100.0,
@@ -123,7 +153,7 @@ mod tests {
         world.insert_resource(CurrentEvent(event));
 
         let mut schedule = Schedule::default();
-        schedule.add_systems(driver_offduty_check_system);
+        schedule.add_systems((driver_offduty_check_system, apply_deferred));
         schedule.run(&mut world);
 
         // Process the check event
@@ -134,8 +164,8 @@ mod tests {
         world.insert_resource(CurrentEvent(check_event));
         schedule.run(&mut world);
 
-        let driver = world.entity(driver_entity).get::<Driver>().expect("driver");
-        assert_eq!(driver.state, DriverState::OffDuty);
+        let is_offduty = world.entity(driver_entity).contains::<OffDuty>();
+        assert!(is_offduty);
     }
 
     #[test]
@@ -147,10 +177,10 @@ mod tests {
         let driver_entity = world
             .spawn((
                 Driver {
-                    state: DriverState::Idle,
                     matched_rider: None,
                     assigned_trip: None,
                 },
+                Idle,
                 DriverEarnings {
                     daily_earnings: 50.0,
                     daily_earnings_target: 200.0,
@@ -182,11 +212,11 @@ mod tests {
         world.insert_resource(CurrentEvent(event));
 
         let mut schedule = Schedule::default();
-        schedule.add_systems(driver_offduty_check_system);
+        schedule.add_systems((driver_offduty_check_system, apply_deferred));
         schedule.run(&mut world);
 
-        let driver = world.entity(driver_entity).get::<Driver>().expect("driver");
-        assert_eq!(driver.state, DriverState::OffDuty);
+        let is_offduty = world.entity(driver_entity).contains::<OffDuty>();
+        assert!(is_offduty);
     }
 
     #[test]
@@ -198,10 +228,10 @@ mod tests {
         let driver_entity = world
             .spawn((
                 Driver {
-                    state: DriverState::EnRoute,
                     matched_rider: None,
                     assigned_trip: None,
                 },
+                EnRoute,
                 DriverEarnings {
                     daily_earnings: 50.0,
                     daily_earnings_target: 200.0,
@@ -227,13 +257,12 @@ mod tests {
         world.insert_resource(CurrentEvent(event));
 
         let mut schedule = Schedule::default();
-        schedule.add_systems(driver_offduty_check_system);
+        schedule.add_systems((driver_offduty_check_system, apply_deferred));
         schedule.run(&mut world);
 
-        let driver = world.entity(driver_entity).get::<Driver>().expect("driver");
-        assert_eq!(
-            driver.state,
-            DriverState::OffDuty,
+        let is_offduty = world.entity(driver_entity).contains::<OffDuty>();
+        assert!(
+            is_offduty,
             "driver over fatigue threshold should go OffDuty even when EnRoute"
         );
     }

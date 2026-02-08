@@ -37,7 +37,7 @@ mod end_to_end_tests {
 
     use crate::clock::{SimulationClock, ONE_SEC_MS};
     use crate::distributions::UniformInterArrival;
-    use crate::ecs::{Driver, DriverState, Trip, TripState};
+    use crate::ecs::{Driver, Idle, OffDuty, Trip, TripCompleted};
     use crate::pricing::PricingConfig;
     use crate::routing::{H3GridRouteProvider, RouteProviderResource};
     use crate::runner::{initialize_simulation, run_until_empty, simulation_schedule};
@@ -131,7 +131,10 @@ mod end_to_end_tests {
         let (driver_entity, driver) = drivers[0];
 
         let trip = world.entity(trip_entity).get::<Trip>().expect("trip");
-        assert_eq!(trip.state, TripState::Completed);
+        assert!(
+            world.entity(trip_entity).contains::<TripCompleted>(),
+            "trip should be in Completed state"
+        );
         assert_eq!(trip.driver, driver_entity);
         // Note: pickup cell may differ from expected due to spawner randomness within bounds
         assert_ne!(
@@ -140,9 +143,9 @@ mod end_to_end_tests {
         );
         // Driver should be Idle or OffDuty (if earnings/fatigue thresholds were met)
         assert!(
-            driver.state == DriverState::Idle || driver.state == DriverState::OffDuty,
-            "driver should be Idle or OffDuty after trip completion, got {:?}",
-            driver.state
+            world.entity(driver_entity).contains::<Idle>()
+                || world.entity(driver_entity).contains::<OffDuty>(),
+            "driver should be Idle or OffDuty after trip completion"
         );
         assert_eq!(driver.matched_rider, None);
 
@@ -243,18 +246,25 @@ mod end_to_end_tests {
             .iter(&world)
             .collect();
         assert_eq!(trips.len(), 2, "expected two completed trips");
-        for (_trip_entity, trip) in &trips {
-            assert_eq!(trip.state, TripState::Completed);
+        for (trip_entity, _trip) in &trips {
+            assert!(
+                world.entity(*trip_entity).contains::<TripCompleted>(),
+                "trip should be in Completed state"
+            );
         }
 
-        let drivers: Vec<_> = world.query::<&Driver>().iter(&world).collect();
-        assert_eq!(drivers.len(), 2);
-        for driver in drivers {
+        let driver_entities: Vec<_> = world
+            .query::<(bevy_ecs::prelude::Entity, &Driver)>()
+            .iter(&world)
+            .map(|(e, _)| e)
+            .collect();
+        assert_eq!(driver_entities.len(), 2);
+        for driver_entity in driver_entities {
             // Drivers should be Idle or OffDuty (if earnings/fatigue thresholds were met)
             assert!(
-                driver.state == DriverState::Idle || driver.state == DriverState::OffDuty,
-                "driver should be Idle or OffDuty after trip completion, got {:?}",
-                driver.state
+                world.entity(driver_entity).contains::<Idle>()
+                    || world.entity(driver_entity).contains::<OffDuty>(),
+                "driver should be Idle or OffDuty after trip completion"
             );
         }
 
