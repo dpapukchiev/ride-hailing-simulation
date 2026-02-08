@@ -21,6 +21,8 @@ use crate::spawner::{
     SpawnWeightingKind,
 };
 use crate::speed::SpeedModel;
+#[cfg(feature = "osrm")]
+use crate::telemetry::OsrmSpawnTelemetry;
 use crate::telemetry::{SimSnapshotConfig, SimSnapshots, SimTelemetry};
 use crate::traffic::{
     CongestionZones, DynamicCongestionConfig, TrafficProfile, TrafficProfileKind,
@@ -623,6 +625,11 @@ pub fn build_scenario(world: &mut World, params: ScenarioParams) {
         RouteProviderKind::Osrm { endpoint } => Some(OsrmSpawnClient::new(endpoint)),
         _ => None,
     };
+
+    #[cfg(feature = "osrm")]
+    if matches!(params.route_provider_kind, RouteProviderKind::Osrm { .. }) {
+        world.insert_resource(OsrmSpawnTelemetry::default());
+    }
 
     // Insert traffic model resources
     world.insert_resource(TrafficProfile::from_kind(&params.traffic_profile));

@@ -19,7 +19,7 @@ keep each session small, testable, and reviewable.
 | 1 | Lock world-bounds behavior at spawn time | Done | 2026-02-08 | See status section below |
 | 2 | Add OSRM match-service spawn snap utility | Done | 2026-02-08 | See status block below. |
 | 3 | Build spawn position resolver for routing mode | Done | 2026-02-08 | See Session 3 progress below |
-| 4 | Add graceful fallback chain for OSRM spawn failures | Not started | - | - |
+| 4 | Add graceful fallback chain for OSRM spawn failures | In progress | 2026-02-08 | Started wiring match fallback chain, nearest snap, and metrics |
 | 5 | Prevent out-of-bounds drift during movement (policy pass) | Not started | - | - |
 | 6 | UI/Docs alignment | Not started | - | - |
 | 7 | End-to-end validation and perf guardrails | Not started | - | - |
@@ -194,6 +194,7 @@ Blockers:
   4) fallback to bounded random cell center
 - Add rate limiting or simple retry cap to avoid blocking spawn throughput.
 - Add observability counters/log fields for snap success/failure rate.
+- Add a pickup completion tolerance so that drivers meeting riders near the edge (different H3 cell but within ~20-40m) can still start trips rather than waiting forever.
 
 ### Suggested files
 - `crates/sim_core/src/systems/spawner.rs`
@@ -208,6 +209,21 @@ Blockers:
 - Run `cargo test -p sim_core`.
 - Run `./ci.sh check` and only close this session when it ends with
   `✓ CI job 'check' passed.`
+
+### Session 4 progress
+```
+Status: In progress
+Completed:
+- Added OSRM match retry/nearest fallback logic that honors confidence, distance, and bounds plus max attempts.
+- Wired rider/driver spawners to pass in OSRM metrics and validated with `cargo test -p sim_core`.
+Remaining:
+- Capture/log counters in exports or UI, and verify pickup tolerance handling near map edges.
+- Run `./ci.sh check` before marking this session done.
+CI:
+- Not run: ./ci.sh check (not yet requested)
+Blockers:
+- None
+```
 
 ---
 

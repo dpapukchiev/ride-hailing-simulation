@@ -1,6 +1,8 @@
 //! Telemetry / KPIs: records completed trips for analysis.
 
 use std::collections::VecDeque;
+#[cfg(feature = "osrm")]
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use bevy_ecs::prelude::{Entity, Resource};
 use h3o::CellIndex;
@@ -106,6 +108,68 @@ pub struct SimTelemetry {
     pub platform_revenue_total: f64,
     /// Total fares collected from riders (sum of agreed fares for completed trips).
     pub total_fares_collected: f64,
+}
+
+#[cfg(feature = "osrm")]
+#[derive(Debug, Default, Resource)]
+pub struct OsrmSpawnTelemetry {
+    match_attempts: AtomicU64,
+    match_success: AtomicU64,
+    match_errors: AtomicU64,
+    match_rejected_confidence: AtomicU64,
+    match_rejected_distance: AtomicU64,
+    match_rejected_oob: AtomicU64,
+    nearest_attempts: AtomicU64,
+    nearest_success: AtomicU64,
+    nearest_failure: AtomicU64,
+    nearest_rejected_oob: AtomicU64,
+}
+
+#[cfg(feature = "osrm")]
+impl OsrmSpawnTelemetry {
+    fn increment(counter: &AtomicU64) {
+        counter.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_match_attempt(&self) {
+        Self::increment(&self.match_attempts);
+    }
+
+    pub fn record_match_success(&self) {
+        Self::increment(&self.match_success);
+    }
+
+    pub fn record_match_error(&self) {
+        Self::increment(&self.match_errors);
+    }
+
+    pub fn record_match_rejected_confidence(&self) {
+        Self::increment(&self.match_rejected_confidence);
+    }
+
+    pub fn record_match_rejected_distance(&self) {
+        Self::increment(&self.match_rejected_distance);
+    }
+
+    pub fn record_match_rejected_oob(&self) {
+        Self::increment(&self.match_rejected_oob);
+    }
+
+    pub fn record_nearest_attempt(&self) {
+        Self::increment(&self.nearest_attempts);
+    }
+
+    pub fn record_nearest_success(&self) {
+        Self::increment(&self.nearest_success);
+    }
+
+    pub fn record_nearest_failure(&self) {
+        Self::increment(&self.nearest_failure);
+    }
+
+    pub fn record_nearest_rejected_oob(&self) {
+        Self::increment(&self.nearest_rejected_oob);
+    }
 }
 
 /// Snapshot of one rider for visualization/export.

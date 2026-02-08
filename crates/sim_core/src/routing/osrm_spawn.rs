@@ -13,6 +13,8 @@ use std::time::Duration;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
 const DEFAULT_FIRST_RADIUS_M: f64 = 30.0;
 const DEFAULT_ADDITIONAL_RADIUS_M: f64 = 15.0;
+const FALLBACK_FIRST_RADIUS_M: f64 = 45.0;
+const FALLBACK_ADDITIONAL_RADIUS_M: f64 = 30.0;
 
 /// Thin HTTP client for OSRM match-based snapping.
 #[derive(Debug, Clone)]
@@ -67,6 +69,17 @@ impl OsrmSpawnClient {
         parse_match_response(parsed)
     }
 
+    /// Snap a single coordinate to the nearest road using OSRM `/nearest` as a fallback.
+    pub fn snap_nearest(&self, point: LatLng) -> Result<OsrmNearestMatch, OsrmSpawnError> {
+        let coord = format!("{:.6},{:.6}", point.lng(), point.lat());
+        let url = Url::parse(&format!("{}/nearest/v1/driving/{}", self.endpoint, coord))
+            .map_err(|err| OsrmSpawnError::Api(format!("failed to build OSRM URL: {}", err)))?;
+
+        let response = self.client.get(url).send().map_err(OsrmSpawnError::Http)?;
+        let parsed: OsrmNearestResponse = response.json().map_err(OsrmSpawnError::Json)?;
+        parse_nearest_response(parsed)
+    }
+
     /// Convenience helper that applies conservative radii (30m start, 15m rest).
     pub fn snap_with_defaults(&self, points: &[LatLng]) -> Result<OsrmSpawnMatch, OsrmSpawnError> {
         let radiuses = default_radiuses(points.len());
@@ -79,6 +92,14 @@ impl OsrmSpawnClient {
 pub struct OsrmSpawnMatch {
     pub coordinate: LatLng,
     pub confidence: f64,
+    pub distance_m: Option<f64>,
+    pub road_name: Option<String>,
+}
+
+/// Result of a nearest-neighbor snap.
+#[derive(Clone, Debug, PartialEq)]
+pub struct OsrmNearestMatch {
+    pub coordinate: LatLng,
     pub distance_m: Option<f64>,
     pub road_name: Option<String>,
 }
@@ -122,6 +143,24 @@ fn default_radiuses(count: usize) -> Vec<f64> {
     radiuses.push(DEFAULT_FIRST_RADIUS_M);
     radiuses.extend(std::iter::repeat_n(DEFAULT_ADDITIONAL_RADIUS_M, count - 1));
     radiuses
+}
+
+pub(crate) fn fallback_radiuses(count: usize) -> Vec<f64> {
+    if count == 0 {
+        return Vec::new();
+    }
+    let mut radiuses = Vec::with_capacity(count);
+    radiuses.push(FALLBACK_FIRST_RADIUS_M);
+    radiuses.extend(std::iter::repeat_n(FALLBACK_ADDITIONAL_RADIUS_M, count - 1));
+    radiuses
+}
+
+pub(crate) fn radiuses_for_attempt(attempt: usize, count: usize) -> Vec<f64> {
+    if attempt == 0 {
+        default_radiuses(count)
+    } else {
+        fallback_radiuses(count)
+    }
 }
 
 #[derive(Deserialize)]
@@ -176,6 +215,37 @@ fn parse_match_response(resp: OsrmMatchResponse) -> Result<OsrmSpawnMatch, OsrmS
         coordinate: snapped_coordinate,
         confidence: matching.confidence,
         distance_m: matching.distance,
+        road_name,
+    })
+}
+
+#[derive(Deserialize)]
+struct OsrmNearestResponse {
+    code: String,
+    waypoints: Vec<OsrmNearestWaypoint>,
+}
+
+#[derive(Deserialize)]
+struct OsrmNearestWaypoint {
+    location: [f64; 2],
+    name: Option<String>,
+    distance: Option<f64>,
+}
+
+fn parse_nearest_response(resp: OsrmNearestResponse) -> Result<OsrmNearestMatch, OsrmSpawnError> {
+    if resp.code != "Ok" {
+        return Err(OsrmSpawnError::Api(resp.code));
+    }
+
+    let waypoint = resp.waypoints.first().ok_or(OsrmSpawnError::NoMatch)?;
+    let snapped_coordinate = LatLng::new(waypoint.location[1], waypoint.location[0])
+        .map_err(|_| OsrmSpawnError::NoMatch)?;
+
+    let road_name = waypoint.name.clone().filter(|name| !name.trim().is_empty());
+
+    Ok(OsrmNearestMatch {
+        coordinate: snapped_coordinate,
+        distance_m: waypoint.distance,
         road_name,
     })
 }
@@ -309,6 +379,36 @@ mod tests {
         let snap = parse_match_response(response).expect("should parse");
         assert_eq!(snap.confidence, 0.9);
         assert_eq!(snap.distance_m, Some(25.0));
+        assert_eq!(snap.road_name.as_deref(), Some("Sample Rd"));
+        assert_eq!(snap.coordinate, LatLng::new(52.5, 13.0).unwrap());
+    }
+
+    #[test]
+    fn fallback_radiuses_repeat_last_value_when_shorter() {
+        let radiuses = fallback_radiuses(3);
+        assert_eq!(
+            radiuses,
+            vec![
+                FALLBACK_FIRST_RADIUS_M,
+                FALLBACK_ADDITIONAL_RADIUS_M,
+                FALLBACK_ADDITIONAL_RADIUS_M,
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_nearest_response_returns_snap() {
+        let response = OsrmNearestResponse {
+            code: "Ok".to_string(),
+            waypoints: vec![OsrmNearestWaypoint {
+                location: [13.0, 52.5],
+                name: Some("Sample Rd".to_string()),
+                distance: Some(12.0),
+            }],
+        };
+
+        let snap = parse_nearest_response(response).expect("should parse");
+        assert_eq!(snap.distance_m, Some(12.0));
         assert_eq!(snap.road_name.as_deref(), Some("Sample Rd"));
         assert_eq!(snap.coordinate, LatLng::new(52.5, 13.0).unwrap());
     }

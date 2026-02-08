@@ -10,19 +10,34 @@ use crate::clock::{
 use crate::ecs::{
     Browsing, Driver, DriverEarnings, DriverFatigue, GeoPosition, Idle, Position, Rider,
 };
-#[cfg(feature = "osrm")]
-use crate::routing::osrm_spawn::OsrmSpawnClient;
 use crate::scenario::{random_destination, BatchMatchingConfig};
 use crate::spatial::{cell_in_bounds, GeoIndex};
 use crate::spawner::{random_cell_in_bounds, DriverSpawner, RiderSpawner, SpawnWeighting};
+use h3o::{CellIndex, LatLng};
+
+#[cfg(feature = "osrm")]
+use crate::routing::osrm_spawn::{radiuses_for_attempt, OsrmSpawnClient, OsrmSpawnMatch};
+#[cfg(feature = "osrm")]
+use crate::telemetry::OsrmSpawnTelemetry;
 #[cfg(feature = "osrm")]
 use h3o::Resolution;
-use h3o::{CellIndex, LatLng};
 
 #[cfg(feature = "osrm")]
 type MaybeOsrmSpawnClient<'a> = Option<&'a OsrmSpawnClient>;
 #[cfg(not(feature = "osrm"))]
 type MaybeOsrmSpawnClient<'a> = ();
+
+#[cfg(feature = "osrm")]
+type MaybeOsrmSpawnMetrics<'a> = Option<&'a OsrmSpawnTelemetry>;
+#[cfg(not(feature = "osrm"))]
+type MaybeOsrmSpawnMetrics<'a> = ();
+
+#[cfg(feature = "osrm")]
+const MAX_OSRM_MATCH_ATTEMPTS: usize = 2;
+#[cfg(feature = "osrm")]
+const MIN_OSRM_MATCH_CONFIDENCE: f64 = 0.7;
+#[cfg(feature = "osrm")]
+const MAX_OSRM_MATCH_DISTANCE_M: f64 = 40.0;
 
 /// Create a seeded RNG for spawn operations.
 /// Uses config seed + spawn count for deterministic but varied randomness.
@@ -82,6 +97,7 @@ struct SpawnLocation {
     geo: LatLng,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn resolve_spawn_location<R, F>(
     rng: &mut R,
     weighting: Option<&SpawnWeighting>,
@@ -91,6 +107,7 @@ fn resolve_spawn_location<R, F>(
     lng_min: f64,
     lng_max: f64,
     _osrm_client: MaybeOsrmSpawnClient<'_>,
+    _osrm_metrics: MaybeOsrmSpawnMetrics<'_>,
 ) -> SpawnLocation
 where
     R: Rng,
@@ -119,6 +136,7 @@ where
             lat_max,
             lng_min,
             lng_max,
+            _osrm_metrics,
         ) {
             spawn_location.geo = snapped;
             spawn_location.cell = snapped.to_cell(Resolution::Nine);
@@ -135,6 +153,7 @@ fn spawn_rider(
     spawner: &mut RiderSpawner,
     current_time_ms: u64,
     weighting: Option<&SpawnWeighting>,
+    osrm_metrics: MaybeOsrmSpawnMetrics<'_>,
 ) -> bevy_ecs::prelude::Entity {
     // Create RNG for position/destination generation
     let mut rng = create_spawn_rng(spawner.config.seed, spawner.spawned_count());
@@ -154,6 +173,7 @@ fn spawn_rider(
         lng_min,
         lng_max,
         spawner.osrm_spawn_client(),
+        osrm_metrics,
     );
     let position = spawn_location.cell;
 
@@ -204,6 +224,7 @@ fn spawn_driver(
     spawner: &mut DriverSpawner,
     current_time_ms: u64,
     weighting: Option<&SpawnWeighting>,
+    osrm_metrics: MaybeOsrmSpawnMetrics<'_>,
 ) {
     // Create RNG for position generation
     let mut rng = create_spawn_rng(spawner.config.seed, spawner.spawned_count());
@@ -223,6 +244,7 @@ fn spawn_driver(
         lng_min,
         lng_max,
         spawner.osrm_spawn_client(),
+        osrm_metrics,
     );
     let position = spawn_location.cell;
 
@@ -261,13 +283,21 @@ fn initialize_rider_spawner(
     clock: &mut SimulationClock,
     current_time_ms: u64,
     weighting: Option<&SpawnWeighting>,
+    osrm_metrics: MaybeOsrmSpawnMetrics<'_>,
 ) {
     if !spawner.initialized() {
         spawner.set_initialized(true);
 
         // Spawn initial riders immediately
         for _ in 0..spawner.config.initial_count {
-            spawn_rider(commands, clock, spawner, current_time_ms, weighting);
+            spawn_rider(
+                commands,
+                clock,
+                spawner,
+                current_time_ms,
+                weighting,
+                osrm_metrics,
+            );
             // Manually increment count since we're not calling advance() for initial spawns
             spawner.increment_spawned_count();
         }
@@ -286,13 +316,14 @@ fn initialize_driver_spawner(
     clock: &mut SimulationClock,
     current_time_ms: u64,
     weighting: Option<&SpawnWeighting>,
+    osrm_metrics: MaybeOsrmSpawnMetrics<'_>,
 ) {
     if !spawner.initialized() {
         spawner.set_initialized(true);
 
         // Spawn initial drivers immediately
         for _ in 0..spawner.config.initial_count {
-            spawn_driver(commands, spawner, current_time_ms, weighting);
+            spawn_driver(commands, spawner, current_time_ms, weighting, osrm_metrics);
             // Manually increment count since we're not calling advance() for initial spawns
             spawner.increment_spawned_count();
         }
@@ -311,6 +342,7 @@ fn process_rider_spawner_event(
     clock: &mut SimulationClock,
     current_time_ms: u64,
     weighting: Option<&SpawnWeighting>,
+    osrm_metrics: MaybeOsrmSpawnMetrics<'_>,
 ) {
     // Check if we're before start time (shouldn't happen, but be safe)
     if let Some(start_time) = spawner.config.start_time_ms {
@@ -323,7 +355,14 @@ fn process_rider_spawner_event(
 
     // Check if we should spawn
     if spawner.should_spawn(current_time_ms) {
-        spawn_rider(commands, clock, spawner, current_time_ms, weighting);
+        spawn_rider(
+            commands,
+            clock,
+            spawner,
+            current_time_ms,
+            weighting,
+            osrm_metrics,
+        );
 
         // Advance spawner to next spawn time (uses seeded distribution internally)
         spawner.advance(current_time_ms);
@@ -342,6 +381,7 @@ fn process_driver_spawner_event(
     clock: &mut SimulationClock,
     current_time_ms: u64,
     weighting: Option<&SpawnWeighting>,
+    osrm_metrics: MaybeOsrmSpawnMetrics<'_>,
 ) {
     // Check if we're before start time (shouldn't happen, but be safe)
     if let Some(start_time) = spawner.config.start_time_ms {
@@ -354,7 +394,7 @@ fn process_driver_spawner_event(
 
     // Check if we should spawn
     if spawner.should_spawn(current_time_ms) {
-        spawn_driver(commands, spawner, current_time_ms, weighting);
+        spawn_driver(commands, spawner, current_time_ms, weighting, osrm_metrics);
 
         // Advance spawner to next spawn time (uses seeded distribution internally)
         spawner.advance(current_time_ms);
@@ -374,6 +414,7 @@ pub fn simulation_started_system(
     rider_spawner: Option<ResMut<RiderSpawner>>,
     driver_spawner: Option<ResMut<DriverSpawner>>,
     spawn_weighting: Option<Res<SpawnWeighting>>,
+    #[cfg(feature = "osrm")] osrm_spawn_metrics: Option<Res<OsrmSpawnTelemetry>>,
     event: Res<CurrentEvent>,
 ) {
     if event.0.kind != EventKind::SimulationStarted {
@@ -382,6 +423,10 @@ pub fn simulation_started_system(
 
     let current_time_ms = clock.now();
     let weighting = spawn_weighting.as_deref();
+    #[cfg(feature = "osrm")]
+    let osrm_spawn_metrics_ref: MaybeOsrmSpawnMetrics<'_> = osrm_spawn_metrics.as_deref();
+    #[cfg(not(feature = "osrm"))]
+    let osrm_spawn_metrics_ref: MaybeOsrmSpawnMetrics<'_> = ();
 
     // When batch matching is enabled, schedule the first BatchMatchRun at time 0
     if let Some(cfg) = batch_config.as_deref() {
@@ -398,6 +443,7 @@ pub fn simulation_started_system(
             &mut clock,
             current_time_ms,
             weighting,
+            osrm_spawn_metrics_ref,
         );
     }
 
@@ -409,6 +455,7 @@ pub fn simulation_started_system(
             &mut clock,
             current_time_ms,
             weighting,
+            osrm_spawn_metrics_ref,
         );
     }
 
@@ -422,6 +469,7 @@ pub fn rider_spawner_system(
     mut clock: ResMut<SimulationClock>,
     mut spawner: ResMut<RiderSpawner>,
     spawn_weighting: Option<Res<SpawnWeighting>>,
+    #[cfg(feature = "osrm")] osrm_spawn_metrics: Option<Res<OsrmSpawnTelemetry>>,
     event: Res<CurrentEvent>,
 ) {
     if event.0.kind != EventKind::SpawnRider {
@@ -430,12 +478,17 @@ pub fn rider_spawner_system(
 
     let current_time_ms = clock.now();
     let weighting = spawn_weighting.as_deref();
+    #[cfg(feature = "osrm")]
+    let osrm_spawn_metrics_ref: MaybeOsrmSpawnMetrics<'_> = osrm_spawn_metrics.as_deref();
+    #[cfg(not(feature = "osrm"))]
+    let osrm_spawn_metrics_ref: MaybeOsrmSpawnMetrics<'_> = ();
     process_rider_spawner_event(
         &mut spawner,
         &mut commands,
         &mut clock,
         current_time_ms,
         weighting,
+        osrm_spawn_metrics_ref,
     );
 }
 
@@ -445,6 +498,7 @@ pub fn driver_spawner_system(
     mut clock: ResMut<SimulationClock>,
     mut spawner: ResMut<DriverSpawner>,
     spawn_weighting: Option<Res<SpawnWeighting>>,
+    #[cfg(feature = "osrm")] osrm_spawn_metrics: Option<Res<OsrmSpawnTelemetry>>,
     event: Res<CurrentEvent>,
 ) {
     if event.0.kind != EventKind::SpawnDriver {
@@ -453,12 +507,17 @@ pub fn driver_spawner_system(
 
     let current_time_ms = clock.now();
     let weighting = spawn_weighting.as_deref();
+    #[cfg(feature = "osrm")]
+    let osrm_spawn_metrics_ref: MaybeOsrmSpawnMetrics<'_> = osrm_spawn_metrics.as_deref();
+    #[cfg(not(feature = "osrm"))]
+    let osrm_spawn_metrics_ref: MaybeOsrmSpawnMetrics<'_> = ();
     process_driver_spawner_event(
         &mut spawner,
         &mut commands,
         &mut clock,
         current_time_ms,
         weighting,
+        osrm_spawn_metrics_ref,
     );
 }
 
@@ -474,19 +533,93 @@ fn try_snap_spawn_location<R: Rng>(
     lat_max: f64,
     lng_min: f64,
     lng_max: f64,
+    osrm_metrics: MaybeOsrmSpawnMetrics<'_>,
 ) -> Option<LatLng> {
-    let trace = build_spawn_trace(rng, candidate, lat_min, lat_max, lng_min, lng_max);
-    if trace.is_empty() {
-        return None;
+    for attempt in 0..MAX_OSRM_MATCH_ATTEMPTS {
+        let trace = build_spawn_trace(rng, candidate, lat_min, lat_max, lng_min, lng_max);
+        if trace.is_empty() {
+            break;
+        }
+
+        if let Some(metrics) = osrm_metrics {
+            metrics.record_match_attempt();
+        }
+        let radiuses = radiuses_for_attempt(attempt, trace.len());
+        let matching = match client.snap_trace(&trace, &radiuses) {
+            Ok(matching) => matching,
+            Err(_) => {
+                if let Some(metrics) = osrm_metrics {
+                    metrics.record_match_error();
+                }
+                continue;
+            }
+        };
+
+        if !is_snap_acceptable(&matching, lat_min, lat_max, lng_min, lng_max, osrm_metrics) {
+            continue;
+        }
+
+        if let Some(metrics) = osrm_metrics {
+            metrics.record_match_success();
+        }
+        return Some(matching.coordinate);
     }
 
-    let matching = client.snap_with_defaults(&trace).ok()?;
-    let coordinate = matching.coordinate;
-    if coordinate_within_bounds(&coordinate, lat_min, lat_max, lng_min, lng_max) {
-        Some(coordinate)
-    } else {
-        None
+    if let Some(metrics) = osrm_metrics {
+        metrics.record_nearest_attempt();
     }
+    if let Ok(nearest) = client.snap_nearest(candidate) {
+        if coordinate_within_bounds(&nearest.coordinate, lat_min, lat_max, lng_min, lng_max) {
+            if let Some(metrics) = osrm_metrics {
+                metrics.record_nearest_success();
+            }
+            return Some(nearest.coordinate);
+        }
+        if let Some(metrics) = osrm_metrics {
+            metrics.record_nearest_rejected_oob();
+        }
+    } else if let Some(metrics) = osrm_metrics {
+        metrics.record_nearest_failure();
+    }
+
+    None
+}
+
+#[cfg(feature = "osrm")]
+fn is_snap_acceptable(
+    snap: &OsrmSpawnMatch,
+    lat_min: f64,
+    lat_max: f64,
+    lng_min: f64,
+    lng_max: f64,
+    metrics: MaybeOsrmSpawnMetrics<'_>,
+) -> bool {
+    if snap.confidence < MIN_OSRM_MATCH_CONFIDENCE {
+        if let Some(m) = metrics {
+            m.record_match_rejected_confidence();
+        }
+        return false;
+    }
+
+    if snap
+        .distance_m
+        .map(|dist| dist > MAX_OSRM_MATCH_DISTANCE_M)
+        .unwrap_or(false)
+    {
+        if let Some(m) = metrics {
+            m.record_match_rejected_distance();
+        }
+        return false;
+    }
+
+    if !coordinate_within_bounds(&snap.coordinate, lat_min, lat_max, lng_min, lng_max) {
+        if let Some(m) = metrics {
+            m.record_match_rejected_oob();
+        }
+        return false;
+    }
+
+    true
 }
 
 #[cfg(feature = "osrm")]
