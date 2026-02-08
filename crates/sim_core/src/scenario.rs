@@ -12,6 +12,8 @@ use crate::matching::{
 };
 use crate::patterns::{apply_driver_patterns, apply_rider_patterns};
 use crate::pricing::PricingConfig;
+#[cfg(feature = "osrm")]
+use crate::routing::osrm_spawn::OsrmSpawnClient;
 use crate::routing::{build_route_provider, RouteProviderKind, RouteProviderResource};
 use crate::spatial::{cell_in_bounds, SpatialIndex};
 use crate::spawner::{
@@ -616,6 +618,12 @@ pub fn build_scenario(world: &mut World, params: ScenarioParams) {
     let route_provider = build_route_provider(&params.route_provider_kind);
     world.insert_resource(RouteProviderResource(route_provider));
 
+    #[cfg(feature = "osrm")]
+    let osrm_spawn_client = match &params.route_provider_kind {
+        RouteProviderKind::Osrm { endpoint } => Some(OsrmSpawnClient::new(endpoint)),
+        _ => None,
+    };
+
     // Insert traffic model resources
     world.insert_resource(TrafficProfile::from_kind(&params.traffic_profile));
     if params.congestion_zones_enabled {
@@ -670,7 +678,18 @@ pub fn build_scenario(world: &mut World, params: ScenarioParams) {
         initial_count: params.initial_rider_count,
         seed,
     };
-    world.insert_resource(RiderSpawner::new(rider_spawner_config));
+    let rider_spawner = {
+        let base = RiderSpawner::new(rider_spawner_config);
+        #[cfg(feature = "osrm")]
+        {
+            base.with_osrm_spawn_client(osrm_spawn_client.clone())
+        }
+        #[cfg(not(feature = "osrm"))]
+        {
+            base
+        }
+    };
+    world.insert_resource(rider_spawner);
 
     // Create driver spawner: time-of-day distribution for driver supply
     // Drivers spawn continuously over the driver_spread_ms window with time-varying rates
@@ -703,7 +722,18 @@ pub fn build_scenario(world: &mut World, params: ScenarioParams) {
         initial_count: params.initial_driver_count,
         seed: driver_seed,
     };
-    world.insert_resource(DriverSpawner::new(driver_spawner_config));
+    let driver_spawner = {
+        let base = DriverSpawner::new(driver_spawner_config);
+        #[cfg(feature = "osrm")]
+        {
+            base.with_osrm_spawn_client(osrm_spawn_client.clone())
+        }
+        #[cfg(not(feature = "osrm"))]
+        {
+            base
+        }
+    };
+    world.insert_resource(driver_spawner);
 }
 
 #[cfg(test)]

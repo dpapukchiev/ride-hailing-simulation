@@ -10,10 +10,19 @@ use crate::clock::{
 use crate::ecs::{
     Browsing, Driver, DriverEarnings, DriverFatigue, GeoPosition, Idle, Position, Rider,
 };
+#[cfg(feature = "osrm")]
+use crate::routing::osrm_spawn::OsrmSpawnClient;
 use crate::scenario::{random_destination, BatchMatchingConfig};
 use crate::spatial::{cell_in_bounds, GeoIndex};
 use crate::spawner::{random_cell_in_bounds, DriverSpawner, RiderSpawner, SpawnWeighting};
-use h3o::CellIndex;
+#[cfg(feature = "osrm")]
+use h3o::Resolution;
+use h3o::{CellIndex, LatLng};
+
+#[cfg(feature = "osrm")]
+type MaybeOsrmSpawnClient<'a> = Option<&'a OsrmSpawnClient>;
+#[cfg(not(feature = "osrm"))]
+type MaybeOsrmSpawnClient<'a> = ();
 
 /// Create a seeded RNG for spawn operations.
 /// Uses config seed + spawn count for deterministic but varied randomness.
@@ -68,6 +77,57 @@ where
         .filter(|cell| cell_in_bounds(*cell, lat_min, lat_max, lng_min, lng_max))
 }
 
+struct SpawnLocation {
+    cell: CellIndex,
+    geo: LatLng,
+}
+
+fn resolve_spawn_location<R, F>(
+    rng: &mut R,
+    weighting: Option<&SpawnWeighting>,
+    sampler: F,
+    lat_min: f64,
+    lat_max: f64,
+    lng_min: f64,
+    lng_max: f64,
+    _osrm_client: MaybeOsrmSpawnClient<'_>,
+) -> SpawnLocation
+where
+    R: Rng,
+    F: Fn(&SpawnWeighting, &mut R) -> Option<CellIndex>,
+{
+    let cell =
+        bounded_weighted_spawn_cell(weighting, rng, sampler, lat_min, lat_max, lng_min, lng_max)
+            .unwrap_or_else(|| generate_spawn_position(rng, lat_min, lat_max, lng_min, lng_max));
+
+    let base_spawn_location = SpawnLocation {
+        cell,
+        geo: cell.into(),
+    };
+    #[cfg(feature = "osrm")]
+    let mut spawn_location = base_spawn_location;
+    #[cfg(not(feature = "osrm"))]
+    let spawn_location = base_spawn_location;
+
+    #[cfg(feature = "osrm")]
+    if let Some(client) = _osrm_client {
+        if let Some(snapped) = try_snap_spawn_location(
+            client,
+            rng,
+            spawn_location.geo,
+            lat_min,
+            lat_max,
+            lng_min,
+            lng_max,
+        ) {
+            spawn_location.geo = snapped;
+            spawn_location.cell = snapped.to_cell(Resolution::Nine);
+        }
+    }
+
+    spawn_location
+}
+
 /// Helper function to spawn a single rider.
 fn spawn_rider(
     commands: &mut Commands,
@@ -85,16 +145,17 @@ fn spawn_rider(
     let lng_max = spawner.config.lng_max;
 
     // Generate position: try weighted cell first, then fall back to uniform random
-    let position = bounded_weighted_spawn_cell(
-        weighting,
+    let spawn_location = resolve_spawn_location(
         &mut rng,
+        weighting,
         |w, rng| w.sample_rider_cell(rng),
         lat_min,
         lat_max,
         lng_min,
         lng_max,
-    )
-    .unwrap_or_else(|| generate_spawn_position(&mut rng, lat_min, lat_max, lng_min, lng_max));
+        spawner.osrm_spawn_client(),
+    );
+    let position = spawn_location.cell;
 
     let geo = GeoIndex::default();
     let destination = random_destination(
@@ -123,7 +184,7 @@ fn spawn_rider(
             },
             Browsing,
             Position(position),
-            GeoPosition(position.into()),
+            GeoPosition(spawn_location.geo),
         ))
         .id();
 
@@ -153,16 +214,17 @@ fn spawn_driver(
     let lng_max = spawner.config.lng_max;
 
     // Generate position: try weighted cell first, then fall back to uniform random
-    let position = bounded_weighted_spawn_cell(
-        weighting,
+    let spawn_location = resolve_spawn_location(
         &mut rng,
+        weighting,
         |w, rng| w.sample_driver_cell(rng),
         lat_min,
         lat_max,
         lng_min,
         lng_max,
-    )
-    .unwrap_or_else(|| generate_spawn_position(&mut rng, lat_min, lat_max, lng_min, lng_max));
+        spawner.osrm_spawn_client(),
+    );
+    let position = spawn_location.cell;
 
     // Sample earnings target: $100-$300 range
     let daily_earnings_target = rng.gen_range(100.0..=300.0);
@@ -179,7 +241,7 @@ fn spawn_driver(
         },
         Idle,
         Position(position),
-        GeoPosition(position.into()),
+        GeoPosition(spawn_location.geo),
         DriverEarnings {
             daily_earnings: 0.0,
             daily_earnings_target,
@@ -398,6 +460,98 @@ pub fn driver_spawner_system(
         current_time_ms,
         weighting,
     );
+}
+
+#[cfg(feature = "osrm")]
+const SPAWN_TRACE_JITTER_DEG: f64 = 0.00035;
+
+#[cfg(feature = "osrm")]
+fn try_snap_spawn_location<R: Rng>(
+    client: &OsrmSpawnClient,
+    rng: &mut R,
+    candidate: LatLng,
+    lat_min: f64,
+    lat_max: f64,
+    lng_min: f64,
+    lng_max: f64,
+) -> Option<LatLng> {
+    let trace = build_spawn_trace(rng, candidate, lat_min, lat_max, lng_min, lng_max);
+    if trace.is_empty() {
+        return None;
+    }
+
+    let matching = client.snap_with_defaults(&trace).ok()?;
+    let coordinate = matching.coordinate;
+    if coordinate_within_bounds(&coordinate, lat_min, lat_max, lng_min, lng_max) {
+        Some(coordinate)
+    } else {
+        None
+    }
+}
+
+#[cfg(feature = "osrm")]
+fn build_spawn_trace<R: Rng>(
+    rng: &mut R,
+    center: LatLng,
+    lat_min: f64,
+    lat_max: f64,
+    lng_min: f64,
+    lng_max: f64,
+) -> Vec<LatLng> {
+    let mut trace = Vec::with_capacity(3);
+    trace.push(center);
+    for _ in 0..2 {
+        let lat = clamp_latlng(
+            center.lat() + rng.gen_range(-SPAWN_TRACE_JITTER_DEG..=SPAWN_TRACE_JITTER_DEG),
+            lat_min,
+            lat_max,
+            -90.0,
+            90.0,
+        );
+        let lng = clamp_latlng(
+            center.lng() + rng.gen_range(-SPAWN_TRACE_JITTER_DEG..=SPAWN_TRACE_JITTER_DEG),
+            lng_min,
+            lng_max,
+            -180.0,
+            180.0,
+        );
+        if let Ok(point) = LatLng::new(lat, lng) {
+            trace.push(point);
+        }
+    }
+    trace
+}
+
+#[cfg(feature = "osrm")]
+fn clamp_latlng(
+    value: f64,
+    min_bound: f64,
+    max_bound: f64,
+    global_min: f64,
+    global_max: f64,
+) -> f64 {
+    let bounded = value.clamp(global_min, global_max);
+    bordered_clamp(bounded, min_bound, max_bound)
+}
+
+#[cfg(feature = "osrm")]
+fn bordered_clamp(value: f64, min_bound: f64, max_bound: f64) -> f64 {
+    let min = min_bound.min(max_bound);
+    let max = min_bound.max(max_bound);
+    value.clamp(min, max)
+}
+
+#[cfg(feature = "osrm")]
+fn coordinate_within_bounds(
+    location: &LatLng,
+    lat_min: f64,
+    lat_max: f64,
+    lng_min: f64,
+    lng_max: f64,
+) -> bool {
+    let lat = location.lat();
+    let lng = location.lng();
+    lat >= lat_min && lat <= lat_max && lng >= lng_min && lng <= lng_max
 }
 
 #[cfg(test)]

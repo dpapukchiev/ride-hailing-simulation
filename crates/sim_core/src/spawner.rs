@@ -4,9 +4,16 @@
 //! variable supply and demand patterns. They react to SimulationStarted events
 //! and schedule their own spawn events.
 
+#[cfg(feature = "osrm")]
+use crate::routing::osrm_spawn::OsrmSpawnClient;
 use bevy_ecs::prelude::Resource;
 use h3o::{CellIndex, LatLng, Resolution};
 use serde::{Deserialize, Serialize};
+
+#[cfg(feature = "osrm")]
+type MaybeOsrmSpawnClient<'a> = Option<&'a OsrmSpawnClient>;
+#[cfg(not(feature = "osrm"))]
+type MaybeOsrmSpawnClient<'a> = ();
 
 use crate::distributions::InterArrivalDistribution;
 
@@ -166,6 +173,8 @@ pub struct DriverSpawnerConfig {
 pub struct RiderSpawner {
     pub config: RiderSpawnerConfig,
     state: SpawnerState,
+    #[cfg(feature = "osrm")]
+    osrm_spawn_client: Option<OsrmSpawnClient>,
 }
 
 impl RiderSpawner {
@@ -174,6 +183,8 @@ impl RiderSpawner {
         Self {
             state: SpawnerState::new(config.start_time_ms),
             config,
+            #[cfg(feature = "osrm")]
+            osrm_spawn_client: None,
         }
     }
 
@@ -219,11 +230,32 @@ impl RiderSpawner {
     }
 }
 
+#[cfg(feature = "osrm")]
+impl RiderSpawner {
+    pub fn with_osrm_spawn_client(mut self, client: Option<OsrmSpawnClient>) -> Self {
+        self.osrm_spawn_client = client;
+        self
+    }
+
+    pub fn osrm_spawn_client(&self) -> MaybeOsrmSpawnClient<'_> {
+        self.osrm_spawn_client.as_ref()
+    }
+}
+
+#[cfg(not(feature = "osrm"))]
+impl RiderSpawner {
+    pub fn osrm_spawn_client(&self) -> MaybeOsrmSpawnClient<'_> {
+        ()
+    }
+}
+
 /// Active driver spawner resource that tracks spawning state.
 #[derive(Debug, Resource)]
 pub struct DriverSpawner {
     pub config: DriverSpawnerConfig,
     state: SpawnerState,
+    #[cfg(feature = "osrm")]
+    osrm_spawn_client: Option<OsrmSpawnClient>,
 }
 
 impl DriverSpawner {
@@ -232,6 +264,8 @@ impl DriverSpawner {
         Self {
             state: SpawnerState::new(config.start_time_ms),
             config,
+            #[cfg(feature = "osrm")]
+            osrm_spawn_client: None,
         }
     }
 
@@ -274,6 +308,25 @@ impl DriverSpawner {
     /// Increment the spawned count (used for initial spawns).
     pub fn increment_spawned_count(&mut self) {
         self.state.spawned_count += 1;
+    }
+}
+
+#[cfg(feature = "osrm")]
+impl DriverSpawner {
+    pub fn with_osrm_spawn_client(mut self, client: Option<OsrmSpawnClient>) -> Self {
+        self.osrm_spawn_client = client;
+        self
+    }
+
+    pub fn osrm_spawn_client(&self) -> MaybeOsrmSpawnClient<'_> {
+        self.osrm_spawn_client.as_ref()
+    }
+}
+
+#[cfg(not(feature = "osrm"))]
+impl DriverSpawner {
+    pub fn osrm_spawn_client(&self) -> MaybeOsrmSpawnClient<'_> {
+        ()
     }
 }
 
