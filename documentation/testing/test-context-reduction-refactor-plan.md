@@ -20,9 +20,9 @@ session.
 |---|---|---|---|---|---|---|
 | 0 | Shared | Baseline inventory + guardrails | - | Done | 2026-02-08 | Handed off with documentation updates and CI verified |
 | 1 | Shared | Create reusable testkit + fixtures | 0 | Done | 2026-02-08 | See handoff below |
-| 2A | A (Systems) | Extract end-to-end/system scenario tests | 1 | Not started | - | - |
-| 2B | B (Spawn/Routing) | Extract spawn/routing integration scenarios | 1 | Not started | - | - |
-| 2C | C (Core Utils) | Extract utility-heavy module tests | 1 | Not started | - | - |
+| 2A | A (Systems) | Extract end-to-end/system scenario tests | 1 | Done | 2026-02-09 | See handoff note below |
+| 2B | B (Spawn/Routing) | Extract spawn/routing integration scenarios | 1 | Done | 2026-02-09 | See handoff note below |
+| 2C | C (Core Utils) | Extract utility-heavy module tests | 1 | Done | 2026-02-09 | See handoff note below |
 | 3A | A (Driver lifecycle) | Split driver lifecycle tests from source files | 2A | Not started | - | - |
 | 3B | B (Rider/quote/matching) | Split quote + matching tests from source files | 2A | Not started | - | - |
 | 3C | C (Routing internals) | Split OSRM/routing internals tests | 2B | Not started | - | - |
@@ -251,6 +251,21 @@ Move the heavy `#[cfg(test)]` scenario tests out of `systems/mod.rs`.
 - `cargo test -p sim_core`
 - `./ci.sh check`
 
+### Session 2A handoff note
+Status: Done
+Completed:
+- Extracted the scenario-level end-to-end fixtures and assertions from `crates/sim_core/src/systems/mod.rs` into `crates/sim_core/tests/integration_system_end_to_end_tests.rs` while reusing the shared `tests/support` helpers.
+- Left only lightweight wiring checks in `systems/mod.rs` so the module stays focused on production setup.
+Remaining:
+- Kick off Session 3A per the lane roadmap once driver-lifecycle splits are ready.
+Verification:
+- Ran: `cargo test -p sim_core --test integration_system_end_to_end_tests`
+- Ran: `cargo test -p sim_core`
+- Ran: `./ci.sh check`
+- Result: ✓ CI job 'check' passed.
+Blockers:
+- none.
+
 ---
 
 ## Session 2B - Extract spawn/routing integration scenarios (Lane B)
@@ -288,6 +303,23 @@ Move scenario-like tests from spawn/routing files that are large or fixture-heav
 - `cargo test -p sim_core --features osrm --test integration_osrm_spawn_fallback_tests`
 - `cargo test -p sim_core`
 - `./ci.sh check`
+
+### Session 2B handoff note
+Status: Done
+Completed:
+- Pulled the scenario builder and spawn flow scenarios out of `crates/sim_core/src/scenario.rs` and `crates/sim_core/src/systems/spawner.rs` into `crates/sim_core/tests/integration_scenario_builder_tests.rs` and `crates/sim_core/tests/integration_spawn_flow_tests.rs`, reusing the shared fixture kit.
+- Added `crates/sim_core/tests/integration_osrm_spawn_fallback_tests.rs` to capture OSRM client fallback coverage outside the routing module.
+Remaining:
+- Start Session 3B once lane B is ready to split the remaining quote/matching flows.
+Verification:
+- Ran: `cargo test -p sim_core --test integration_scenario_builder_tests`
+- Ran: `cargo test -p sim_core --test integration_spawn_flow_tests`
+- Ran: `cargo test -p sim_core --features osrm --test integration_osrm_spawn_fallback_tests`
+- Ran: `cargo test -p sim_core`
+- Ran: `./ci.sh check`
+- Result: ✓ CI job 'check' passed.
+Blockers:
+- none.
 
 ---
 
@@ -327,6 +359,23 @@ Move longer functional tests from utility modules where extraction reduces noise
 - `cargo test -p sim_core --test integration_clock_schedule_tests`
 - `cargo test -p sim_core`
 - `./ci.sh check`
+
+### Session 2C handoff note
+Status: Done
+Completed:
+- Moved the telemetry export timestamp ordering validation, the traffic profile/density checks, and the clock schedule event ordering tests into dedicated integration suites, keeping production modules lean.
+- Verified that each utility now defers heavy scenario coverage to `crates/sim_core/tests` while still relying on the shared `support` helpers where appropriate.
+Remaining:
+- Begin Session 3C when lane C is ready to split movement/routing validations further.
+Verification:
+- Ran: `cargo test -p sim_core --test integration_telemetry_export_tests`
+- Ran: `cargo test -p sim_core --test integration_traffic_profile_tests`
+- Ran: `cargo test -p sim_core --test integration_clock_schedule_tests`
+- Ran: `cargo test -p sim_core`
+- Ran: `./ci.sh check`
+- Result: ✓ CI job 'check' passed.
+Blockers:
+- none.
 
 ---
 
