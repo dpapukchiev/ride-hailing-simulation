@@ -19,7 +19,7 @@ keep each session small, testable, and reviewable.
 | 1 | Lock world-bounds behavior at spawn time | Done | 2026-02-08 | See status section below |
 | 2 | Add OSRM match-service spawn snap utility | Done | 2026-02-08 | See status block below. |
 | 3 | Build spawn position resolver for routing mode | Done | 2026-02-08 | See Session 3 progress below |
-| 4 | Add graceful fallback chain for OSRM spawn failures | In progress | 2026-02-08 | Started wiring match fallback chain, nearest snap, and metrics |
+| 4 | Add graceful fallback chain for OSRM spawn failures | Done | 2026-02-08 | See status block below |
 | 5 | Prevent out-of-bounds drift during movement (policy pass) | Not started | - | - |
 | 6 | UI/Docs alignment | Not started | - | - |
 | 7 | End-to-end validation and perf guardrails | Not started | - | - |
@@ -212,15 +212,15 @@ Blockers:
 
 ### Session 4 progress
 ```
-Status: In progress
+Status: Done
 Completed:
-- Added OSRM match retry/nearest fallback logic that honors confidence, distance, and bounds plus max attempts.
-- Wired rider/driver spawners to pass in OSRM metrics and validated with `cargo test -p sim_core`.
+- Added OSRM match retry/nearest fallback logic that honors confidence, distance, and bounds plus max attempts and limited retries.
+- Wired rider/driver spawners to pass telemetry counters and recorded metrics while verifying behavior via `cargo test -p sim_core` and `./ci.sh check`.
 Remaining:
-- Capture/log counters in exports or UI, and verify pickup tolerance handling near map edges.
-- Run `./ci.sh check` before marking this session done.
+- None
 CI:
-- Not run: ./ci.sh check (not yet requested)
+- Ran: ./ci.sh check
+- Result: ✓ CI job 'check' passed.
 Blockers:
 - None
 ```
