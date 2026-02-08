@@ -16,7 +16,7 @@ keep each session small, testable, and reviewable.
 
 | Session | Title | Status | Last updated | Notes |
 |---|---|---|---|---|
-| 1 | Lock world-bounds behavior at spawn time | In progress | 2026-02-08 | See notes below |
+| 1 | Lock world-bounds behavior at spawn time | Done | 2026-02-08 | See status section below |
 | 2 | Add OSRM match-service spawn snap utility | Not started | - | - |
 | 3 | Build spawn position resolver for routing mode | Not started | - | - |
 | 4 | Add graceful fallback chain for OSRM spawn failures | Not started | - | - |
@@ -61,15 +61,15 @@ Blockers:
 
 #### Session 1 progress
 ```
-Status: In progress
+Status: Done
 Completed:
 - Added `spatial::cell_in_bounds` helper and reused it in scenario/spawner logic.
 - Guarded weighted rider/driver cells with `bounded_weighted_spawn_cell` and added regression tests.
 Remaining:
-- Run `./ci.sh check` to verify the session and mark it done.
+- None
 CI:
-- Ran: not yet (pending `./ci.sh check`)
-- Result: pending
+- Ran: ./ci.sh check
+- Result: ✓ CI job 'check' passed.
 Blockers:
 - None
 ```
