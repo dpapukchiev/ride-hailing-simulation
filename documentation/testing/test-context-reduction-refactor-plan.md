@@ -23,8 +23,8 @@ session.
 | 2A | A (Systems) | Extract end-to-end/system scenario tests | 1 | Done | 2026-02-09 | See handoff note below |
 | 2B | B (Spawn/Routing) | Extract spawn/routing integration scenarios | 1 | Done | 2026-02-09 | See handoff note below |
 | 2C | C (Core Utils) | Extract utility-heavy module tests | 1 | Done | 2026-02-09 | See handoff note below |
-| 3A | A (Driver lifecycle) | Split driver lifecycle tests from source files | 2A | Not started | - | - |
-| 3B | B (Rider/quote/matching) | Split quote + matching tests from source files | 2A | Not started | - | - |
+| 3A | A (Driver lifecycle) | Split driver lifecycle tests from source files | 2A | Done | 2026-02-09 | Extracted into dedicated `system_driver_*` and `system_trip_lifecycle_tests` suites |
+| 3B | B (Rider/quote/matching) | Split quote + matching tests from source files | 2A | Done | 2026-02-09 | Extracted quote/matching/rider-cancel suites into dedicated integration tests |
 | 3C | C (Routing internals) | Split OSRM/routing internals tests | 2B | Done | 2026-02-08 | Extracted movement + routing provider tests; kept OSRM parser microtests local |
 | 4 | Shared | Refactor large scenario/spawner setup builders | 3A, 3B, 3C | Not started | - | - |
 | 5 | Shared | CI/docs/test command alignment | 4 | Not started | - | - |
@@ -417,6 +417,23 @@ Refactor driver lifecycle tests into focused integration files with shared setup
 - `cargo test -p sim_core`
 - `./ci.sh check`
 
+### Session 3A handoff note
+Status: Done
+Completed:
+- Moved the driver decision, driver offduty, trip started, and trip completed scenario-style tests out of source modules and into dedicated integration suites under `crates/sim_core/tests`.
+- Preserved deterministic decision seeding, offduty threshold behavior, and trip lifecycle event sequencing assertions in the extracted tests.
+Remaining:
+- Begin Session 3B for quote/matching/rider cancel extraction in lane B.
+Verification:
+- Ran: `cargo test -p sim_core --test system_driver_decision_tests`
+- Ran: `cargo test -p sim_core --test system_driver_offduty_tests`
+- Ran: `cargo test -p sim_core --test system_trip_lifecycle_tests`
+- Ran: `cargo test -p sim_core`
+- Ran: `./ci.sh check`
+- Result: ✓ CI job 'check' passed.
+Blockers:
+- none.
+
 ---
 
 ## Session 3B - Split quote + matching tests from source files (Lane B)
@@ -463,6 +480,27 @@ Move rider quote/matching system tests into dedicated files.
 - `cargo test -p sim_core --test system_rider_cancel_tests`
 - `cargo test -p sim_core`
 - `./ci.sh check`
+
+---
+
+### Session 3B handoff note
+Status: Done
+Completed:
+- Extracted all inline tests from quote-flow systems (`quote_decision`, `show_quote`, `quote_accepted`, `quote_rejected`) into `crates/sim_core/tests/system_quote_flow_tests.rs`.
+- Extracted matching-flow tests from `matching`, `match_accepted`, and `match_rejected` into `crates/sim_core/tests/system_matching_flow_tests.rs`.
+- Extracted rider cancellation tests from `rider_cancel` into `crates/sim_core/tests/system_rider_cancel_tests.rs`.
+- Removed the corresponding `#[cfg(test)]` modules from the touched system source files to reduce production-file context.
+Remaining:
+- Session 4 can now proceed with scenario/spawner production-file decomposition after lanes 3A and 3C finish.
+Verification:
+- Ran: `cargo test -p sim_core --test system_quote_flow_tests`
+- Ran: `cargo test -p sim_core --test system_matching_flow_tests`
+- Ran: `cargo test -p sim_core --test system_rider_cancel_tests`
+- Ran: `cargo test -p sim_core`
+- Ran: `./ci.sh check`
+- Result: ✓ CI job 'check' passed.
+Blockers:
+- none.
 
 ---
 
