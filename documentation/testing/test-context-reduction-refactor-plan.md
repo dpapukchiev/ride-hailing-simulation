@@ -23,7 +23,7 @@ session.
 | 2A | A (Systems) | Extract end-to-end/system scenario tests | 1 | Done | 2026-02-09 | See handoff note below |
 | 2B | B (Spawn/Routing) | Extract spawn/routing integration scenarios | 1 | Done | 2026-02-09 | See handoff note below |
 | 2C | C (Core Utils) | Extract utility-heavy module tests | 1 | Done | 2026-02-09 | See handoff note below |
-| 3A | A (Driver lifecycle) | Split driver lifecycle tests from source files | 2A | Not started | - | - |
+| 3A | A (Driver lifecycle) | Split driver lifecycle tests from source files | 2A | Done | 2026-02-09 | Extracted into dedicated `system_driver_*` and `system_trip_lifecycle_tests` suites |
 | 3B | B (Rider/quote/matching) | Split quote + matching tests from source files | 2A | Not started | - | - |
 | 3C | C (Routing internals) | Split OSRM/routing internals tests | 2B | Not started | - | - |
 | 4 | Shared | Refactor large scenario/spawner setup builders | 3A, 3B, 3C | Not started | - | - |
@@ -416,6 +416,23 @@ Refactor driver lifecycle tests into focused integration files with shared setup
 - `cargo test -p sim_core --test system_trip_lifecycle_tests`
 - `cargo test -p sim_core`
 - `./ci.sh check`
+
+### Session 3A handoff note
+Status: Done
+Completed:
+- Moved the driver decision, driver offduty, trip started, and trip completed scenario-style tests out of source modules and into dedicated integration suites under `crates/sim_core/tests`.
+- Preserved deterministic decision seeding, offduty threshold behavior, and trip lifecycle event sequencing assertions in the extracted tests.
+Remaining:
+- Begin Session 3B for quote/matching/rider cancel extraction in lane B.
+Verification:
+- Ran: `cargo test -p sim_core --test system_driver_decision_tests`
+- Ran: `cargo test -p sim_core --test system_driver_offduty_tests`
+- Ran: `cargo test -p sim_core --test system_trip_lifecycle_tests`
+- Ran: `cargo test -p sim_core`
+- Ran: `./ci.sh check`
+- Result: ✓ CI job 'check' passed.
+Blockers:
+- none.
 
 ---
 
