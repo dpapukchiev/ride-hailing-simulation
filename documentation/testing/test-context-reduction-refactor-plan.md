@@ -26,7 +26,7 @@ session.
 | 3A | A (Driver lifecycle) | Split driver lifecycle tests from source files | 2A | Done | 2026-02-09 | Extracted into dedicated `system_driver_*` and `system_trip_lifecycle_tests` suites |
 | 3B | B (Rider/quote/matching) | Split quote + matching tests from source files | 2A | Done | 2026-02-09 | Extracted quote/matching/rider-cancel suites into dedicated integration tests |
 | 3C | C (Routing internals) | Split OSRM/routing internals tests | 2B | Done | 2026-02-08 | Extracted movement + routing provider tests; kept OSRM parser microtests local |
-| 4 | Shared | Refactor large scenario/spawner setup builders | 3A, 3B, 3C | Not started | - | - |
+| 4 | Shared | Refactor large scenario/spawner setup builders | 3A, 3B, 3C | Done | 2026-02-09 | Split `scenario`/`spawner` into focused modules; CI check passed |
 | 5 | Shared | CI/docs/test command alignment | 4 | Not started | - | - |
 | 6 | Shared | Final validation + metrics signoff | 5 | Not started | - | - |
 
@@ -592,6 +592,24 @@ submodules from large files.
 - `cargo test -p sim_core`
 - `cargo run -p sim_core --example scenario_run`
 - `./ci.sh check`
+
+---
+
+### Session 4 handoff note
+Status: Done
+Completed:
+- Split `crates/sim_core/src/scenario.rs` into `scenario/mod.rs`, `scenario/params.rs`, and `scenario/build.rs` so params/types, destination sampling, and world/spawner wiring are isolated.
+- Split `crates/sim_core/src/spawner.rs` into `spawner/mod.rs` + `spawner/weighting.rs` to isolate weighted hotspot logic from core spawner state/config behavior.
+- Preserved public API paths (e.g. `sim_core::scenario::*`, `sim_core::spawner::*`) via module re-exports.
+Remaining:
+- Session 5 can update docs/command alignment now that module layout changes are complete.
+Verification:
+- Ran: `cargo test -p sim_core`
+- Ran: `cargo run -p sim_core --example scenario_run`
+- Ran: `./ci.sh check`
+- Result: ✓ CI job 'check' passed.
+Blockers:
+- none.
 
 ---
 

@@ -1,0 +1,312 @@
+//! Entity spawners: dynamically spawn riders and drivers based on distributions.
+//!
+//! Spawners use inter-arrival time distributions to control spawn rates, enabling
+//! variable supply and demand patterns. They react to SimulationStarted events
+//! and schedule their own spawn events.
+
+mod weighting;
+
+pub use weighting::{SpawnWeighting, SpawnWeightingKind, WeightedCell};
+
+#[cfg(feature = "osrm")]
+use crate::routing::osrm_spawn::OsrmSpawnClient;
+use bevy_ecs::prelude::Resource;
+use h3o::{CellIndex, LatLng, Resolution};
+
+#[cfg(feature = "osrm")]
+pub(crate) type MaybeOsrmSpawnClient<'a> = Option<&'a OsrmSpawnClient>;
+#[cfg(not(feature = "osrm"))]
+pub(crate) type MaybeOsrmSpawnClient<'a> = ();
+
+use crate::distributions::InterArrivalDistribution;
+
+#[derive(Debug)]
+struct SpawnerState {
+    next_spawn_time_ms: u64,
+    spawned_count: usize,
+    initialized: bool,
+}
+
+impl SpawnerState {
+    fn new(start_time_ms: Option<u64>) -> Self {
+        Self {
+            next_spawn_time_ms: start_time_ms.unwrap_or(0),
+            spawned_count: 0,
+            initialized: false,
+        }
+    }
+}
+
+trait SpawnerConfig {
+    fn inter_arrival_dist(&self) -> &dyn InterArrivalDistribution;
+    fn start_time_ms(&self) -> Option<u64>;
+    fn end_time_ms(&self) -> Option<u64>;
+    fn max_count(&self) -> Option<usize>;
+}
+
+impl SpawnerConfig for RiderSpawnerConfig {
+    fn inter_arrival_dist(&self) -> &dyn InterArrivalDistribution {
+        self.inter_arrival_dist.as_ref()
+    }
+    fn start_time_ms(&self) -> Option<u64> {
+        self.start_time_ms
+    }
+    fn end_time_ms(&self) -> Option<u64> {
+        self.end_time_ms
+    }
+    fn max_count(&self) -> Option<usize> {
+        self.max_count
+    }
+}
+
+impl SpawnerConfig for DriverSpawnerConfig {
+    fn inter_arrival_dist(&self) -> &dyn InterArrivalDistribution {
+        self.inter_arrival_dist.as_ref()
+    }
+    fn start_time_ms(&self) -> Option<u64> {
+        self.start_time_ms
+    }
+    fn end_time_ms(&self) -> Option<u64> {
+        self.end_time_ms
+    }
+    fn max_count(&self) -> Option<usize> {
+        self.max_count
+    }
+}
+
+fn should_spawn_common(
+    state: &SpawnerState,
+    config: &dyn SpawnerConfig,
+    current_time_ms: u64,
+) -> bool {
+    if let Some(max) = config.max_count() {
+        if state.spawned_count >= max {
+            return false;
+        }
+    }
+
+    if let Some(end_time) = config.end_time_ms() {
+        if current_time_ms > end_time {
+            return false;
+        }
+    }
+
+    if let Some(start_time) = config.start_time_ms() {
+        if current_time_ms < start_time {
+            return false;
+        }
+    }
+
+    current_time_ms >= state.next_spawn_time_ms
+}
+
+fn advance_common(
+    state: &mut SpawnerState,
+    config: &dyn SpawnerConfig,
+    current_time_ms: u64,
+) -> f64 {
+    let inter_arrival_ms = config
+        .inter_arrival_dist()
+        .sample_ms(state.spawned_count as u64, current_time_ms);
+    state.next_spawn_time_ms = current_time_ms + inter_arrival_ms.max(0.0) as u64;
+    state.spawned_count += 1;
+    inter_arrival_ms
+}
+
+#[derive(Debug)]
+pub struct RiderSpawnerConfig {
+    pub inter_arrival_dist: Box<dyn InterArrivalDistribution>,
+    pub lat_min: f64,
+    pub lat_max: f64,
+    pub lng_min: f64,
+    pub lng_max: f64,
+    pub min_trip_cells: u32,
+    pub max_trip_cells: u32,
+    pub start_time_ms: Option<u64>,
+    pub end_time_ms: Option<u64>,
+    pub max_count: Option<usize>,
+    pub initial_count: usize,
+    pub seed: u64,
+}
+
+#[derive(Debug)]
+pub struct DriverSpawnerConfig {
+    pub inter_arrival_dist: Box<dyn InterArrivalDistribution>,
+    pub lat_min: f64,
+    pub lat_max: f64,
+    pub lng_min: f64,
+    pub lng_max: f64,
+    pub start_time_ms: Option<u64>,
+    pub end_time_ms: Option<u64>,
+    pub max_count: Option<usize>,
+    pub initial_count: usize,
+    pub seed: u64,
+}
+
+#[derive(Debug, Resource)]
+pub struct RiderSpawner {
+    pub config: RiderSpawnerConfig,
+    state: SpawnerState,
+    #[cfg(feature = "osrm")]
+    osrm_spawn_client: Option<OsrmSpawnClient>,
+}
+
+impl RiderSpawner {
+    pub fn new(config: RiderSpawnerConfig) -> Self {
+        Self {
+            state: SpawnerState::new(config.start_time_ms),
+            config,
+            #[cfg(feature = "osrm")]
+            osrm_spawn_client: None,
+        }
+    }
+
+    pub fn should_spawn(&self, current_time_ms: u64) -> bool {
+        should_spawn_common(&self.state, &self.config, current_time_ms)
+    }
+
+    pub fn advance(&mut self, current_time_ms: u64) -> f64 {
+        advance_common(&mut self.state, &self.config, current_time_ms)
+    }
+
+    pub fn next_spawn_time_ms(&self) -> u64 {
+        self.state.next_spawn_time_ms
+    }
+
+    pub fn spawned_count(&self) -> usize {
+        self.state.spawned_count
+    }
+
+    pub fn initialized(&self) -> bool {
+        self.state.initialized
+    }
+
+    pub fn set_initialized(&mut self, initialized: bool) {
+        self.state.initialized = initialized;
+    }
+
+    pub fn set_next_spawn_time_ms(&mut self, time_ms: u64) {
+        self.state.next_spawn_time_ms = time_ms;
+    }
+
+    pub fn increment_spawned_count(&mut self) {
+        self.state.spawned_count += 1;
+    }
+}
+
+#[cfg(feature = "osrm")]
+impl RiderSpawner {
+    pub fn with_osrm_spawn_client(mut self, client: Option<OsrmSpawnClient>) -> Self {
+        self.osrm_spawn_client = client;
+        self
+    }
+
+    pub fn osrm_spawn_client(&self) -> MaybeOsrmSpawnClient<'_> {
+        self.osrm_spawn_client.as_ref()
+    }
+}
+
+#[cfg(not(feature = "osrm"))]
+impl RiderSpawner {
+    pub fn osrm_spawn_client(&self) -> MaybeOsrmSpawnClient<'_> {
+        ()
+    }
+}
+
+#[derive(Debug, Resource)]
+pub struct DriverSpawner {
+    pub config: DriverSpawnerConfig,
+    state: SpawnerState,
+    #[cfg(feature = "osrm")]
+    osrm_spawn_client: Option<OsrmSpawnClient>,
+}
+
+impl DriverSpawner {
+    pub fn new(config: DriverSpawnerConfig) -> Self {
+        Self {
+            state: SpawnerState::new(config.start_time_ms),
+            config,
+            #[cfg(feature = "osrm")]
+            osrm_spawn_client: None,
+        }
+    }
+
+    pub fn should_spawn(&self, current_time_ms: u64) -> bool {
+        should_spawn_common(&self.state, &self.config, current_time_ms)
+    }
+
+    pub fn advance(&mut self, current_time_ms: u64) -> f64 {
+        advance_common(&mut self.state, &self.config, current_time_ms)
+    }
+
+    pub fn next_spawn_time_ms(&self) -> u64 {
+        self.state.next_spawn_time_ms
+    }
+
+    pub fn spawned_count(&self) -> usize {
+        self.state.spawned_count
+    }
+
+    pub fn initialized(&self) -> bool {
+        self.state.initialized
+    }
+
+    pub fn set_initialized(&mut self, initialized: bool) {
+        self.state.initialized = initialized;
+    }
+
+    pub fn set_next_spawn_time_ms(&mut self, time_ms: u64) {
+        self.state.next_spawn_time_ms = time_ms;
+    }
+
+    pub fn increment_spawned_count(&mut self) {
+        self.state.spawned_count += 1;
+    }
+}
+
+#[cfg(feature = "osrm")]
+impl DriverSpawner {
+    pub fn with_osrm_spawn_client(mut self, client: Option<OsrmSpawnClient>) -> Self {
+        self.osrm_spawn_client = client;
+        self
+    }
+
+    pub fn osrm_spawn_client(&self) -> MaybeOsrmSpawnClient<'_> {
+        self.osrm_spawn_client.as_ref()
+    }
+}
+
+#[cfg(not(feature = "osrm"))]
+impl DriverSpawner {
+    pub fn osrm_spawn_client(&self) -> MaybeOsrmSpawnClient<'_> {
+        ()
+    }
+}
+
+pub fn random_cell_in_bounds<R: rand::Rng>(
+    rng: &mut R,
+    lat_min: f64,
+    lat_max: f64,
+    lng_min: f64,
+    lng_max: f64,
+) -> Result<CellIndex, String> {
+    if lat_min < -90.0 || lat_max > 90.0 || lat_min > lat_max {
+        return Err(format!(
+            "Invalid latitude bounds: [{}, {}] (must be in [-90, 90] and min <= max)",
+            lat_min, lat_max
+        ));
+    }
+    if lng_min < -180.0 || lng_max > 180.0 || lng_min > lng_max {
+        return Err(format!(
+            "Invalid longitude bounds: [{}, {}] (must be in [-180, 180] and min <= max)",
+            lng_min, lng_max
+        ));
+    }
+
+    let lat = rng.gen_range(lat_min..=lat_max);
+    let lng = rng.gen_range(lng_min..=lng_max);
+
+    let coord = LatLng::new(lat, lng)
+        .map_err(|e| format!("Invalid coordinates ({}, {}): {}", lat, lng, e))?;
+    Ok(coord.to_cell(Resolution::Nine))
+}
