@@ -25,7 +25,7 @@ session.
 | 2C | C (Core Utils) | Extract utility-heavy module tests | 1 | Done | 2026-02-09 | See handoff note below |
 | 3A | A (Driver lifecycle) | Split driver lifecycle tests from source files | 2A | Not started | - | - |
 | 3B | B (Rider/quote/matching) | Split quote + matching tests from source files | 2A | Not started | - | - |
-| 3C | C (Routing internals) | Split OSRM/routing internals tests | 2B | Not started | - | - |
+| 3C | C (Routing internals) | Split OSRM/routing internals tests | 2B | Done | 2026-02-08 | Extracted movement + routing provider tests; kept OSRM parser microtests local |
 | 4 | Shared | Refactor large scenario/spawner setup builders | 3A, 3B, 3C | Not started | - | - |
 | 5 | Shared | CI/docs/test command alignment | 4 | Not started | - | - |
 | 6 | Shared | Final validation + metrics signoff | 5 | Not started | - | - |
@@ -467,6 +467,23 @@ Move rider quote/matching system tests into dedicated files.
 ---
 
 ## Session 3C - Split OSRM/routing internals tests (Lane C)
+
+### Session 3C handoff note
+Status: Done
+Completed:
+- Moved movement route-step scenario coverage from `crates/sim_core/src/systems/movement.rs` into `crates/sim_core/tests/system_movement_routing_tests.rs`, reusing the shared `TestWorldBuilder` fixture setup.
+- Moved routing provider behavior tests from `crates/sim_core/src/routing.rs` into `crates/sim_core/tests/integration_routing_provider_tests.rs` and removed the inline test module.
+- Kept `crates/sim_core/src/routing/osrm_spawn.rs` parser/helper microtests inline because they rely on private response-shape internals.
+Remaining:
+- Session 4 can begin once lanes 3A/3B finish their in-source test splits.
+Verification:
+- Ran: `cargo test -p sim_core --test system_movement_routing_tests`
+- Ran: `cargo test -p sim_core --test integration_routing_provider_tests`
+- Ran: `cargo test -p sim_core --features osrm`
+- Ran: `./ci.sh check`
+- Result: ✓ CI job 'check' passed.
+Blockers:
+- none.
 
 ### Scope
 Move routing tests that do not need private access; keep parser microtests local.
