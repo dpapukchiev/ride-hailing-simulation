@@ -3,21 +3,22 @@
 //! This module provides functions to export experiment results to Parquet and JSON,
 //! and to find optimal parameter combinations based on health scores.
 
-use std::fs::File;
 use std::path::Path;
-use std::sync::Arc;
 
-use arrow::array::{ArrayRef, Float64Array, UInt64Array};
-use arrow::datatypes::{DataType, Field, Schema};
-use arrow::record_batch::RecordBatch;
-use parquet::arrow::ArrowWriter;
-use parquet::file::properties::WriterProperties;
-use sim_core::scenario::MatchingAlgorithmType;
-use sim_core::traffic::TrafficProfileKind;
-
-use crate::health::{calculate_health_scores, HealthWeights};
+use crate::health::HealthWeights;
 use crate::metrics::SimulationResult;
 use crate::parameters::ParameterSet;
+
+#[path = "export/csv.rs"]
+mod csv;
+#[path = "export/json.rs"]
+mod json;
+#[path = "export/parquet.rs"]
+mod parquet;
+#[path = "export/ranking.rs"]
+mod ranking;
+#[path = "export/writer_utils.rs"]
+mod writer_utils;
 
 /// Export simulation results to Parquet format.
 ///
@@ -35,96 +36,9 @@ pub fn export_to_parquet(
     results: &[SimulationResult],
     path: impl AsRef<Path>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    if results.is_empty() {
-        return Err("No results to export".into());
-    }
-
-    // Build schema
-    let schema = Schema::new(vec![
-        Field::new("total_riders", DataType::UInt64, false),
-        Field::new("completed_riders", DataType::UInt64, false),
-        Field::new("abandoned_quote_riders", DataType::UInt64, false),
-        Field::new("cancelled_riders", DataType::UInt64, false),
-        Field::new("conversion_rate", DataType::Float64, false),
-        Field::new("platform_revenue", DataType::Float64, false),
-        Field::new("driver_payouts", DataType::Float64, false),
-        Field::new("total_fares_collected", DataType::Float64, false),
-        Field::new("avg_time_to_match_ms", DataType::Float64, false),
-        Field::new("median_time_to_match_ms", DataType::Float64, false),
-        Field::new("p90_time_to_match_ms", DataType::Float64, false),
-        Field::new("avg_time_to_pickup_ms", DataType::Float64, false),
-        Field::new("median_time_to_pickup_ms", DataType::Float64, false),
-        Field::new("p90_time_to_pickup_ms", DataType::Float64, false),
-        Field::new("completed_trips", DataType::UInt64, false),
-        Field::new("riders_abandoned_price", DataType::UInt64, false),
-        Field::new("riders_abandoned_eta", DataType::UInt64, false),
-        Field::new("riders_abandoned_stochastic", DataType::UInt64, false),
-    ]);
-
-    // Build arrays
-    let total_riders: Vec<u64> = results.iter().map(|r| r.total_riders as u64).collect();
-    let completed_riders: Vec<u64> = results.iter().map(|r| r.completed_riders as u64).collect();
-    let abandoned_quote_riders: Vec<u64> = results
-        .iter()
-        .map(|r| r.abandoned_quote_riders as u64)
-        .collect();
-    let cancelled_riders: Vec<u64> = results.iter().map(|r| r.cancelled_riders as u64).collect();
-    let conversion_rate: Vec<f64> = results.iter().map(|r| r.conversion_rate).collect();
-    let platform_revenue: Vec<f64> = results.iter().map(|r| r.platform_revenue).collect();
-    let driver_payouts: Vec<f64> = results.iter().map(|r| r.driver_payouts).collect();
-    let total_fares_collected: Vec<f64> = results.iter().map(|r| r.total_fares_collected).collect();
-    let avg_time_to_match_ms: Vec<f64> = results.iter().map(|r| r.avg_time_to_match_ms).collect();
-    let median_time_to_match_ms: Vec<f64> =
-        results.iter().map(|r| r.median_time_to_match_ms).collect();
-    let p90_time_to_match_ms: Vec<f64> = results.iter().map(|r| r.p90_time_to_match_ms).collect();
-    let avg_time_to_pickup_ms: Vec<f64> = results.iter().map(|r| r.avg_time_to_pickup_ms).collect();
-    let median_time_to_pickup_ms: Vec<f64> =
-        results.iter().map(|r| r.median_time_to_pickup_ms).collect();
-    let p90_time_to_pickup_ms: Vec<f64> = results.iter().map(|r| r.p90_time_to_pickup_ms).collect();
-    let completed_trips: Vec<u64> = results.iter().map(|r| r.completed_trips as u64).collect();
-    let riders_abandoned_price: Vec<u64> = results
-        .iter()
-        .map(|r| r.riders_abandoned_price as u64)
-        .collect();
-    let riders_abandoned_eta: Vec<u64> = results
-        .iter()
-        .map(|r| r.riders_abandoned_eta as u64)
-        .collect();
-    let riders_abandoned_stochastic: Vec<u64> = results
-        .iter()
-        .map(|r| r.riders_abandoned_stochastic as u64)
-        .collect();
-
-    let arrays: Vec<ArrayRef> = vec![
-        Arc::new(UInt64Array::from(total_riders)),
-        Arc::new(UInt64Array::from(completed_riders)),
-        Arc::new(UInt64Array::from(abandoned_quote_riders)),
-        Arc::new(UInt64Array::from(cancelled_riders)),
-        Arc::new(Float64Array::from(conversion_rate)),
-        Arc::new(Float64Array::from(platform_revenue)),
-        Arc::new(Float64Array::from(driver_payouts)),
-        Arc::new(Float64Array::from(total_fares_collected)),
-        Arc::new(Float64Array::from(avg_time_to_match_ms)),
-        Arc::new(Float64Array::from(median_time_to_match_ms)),
-        Arc::new(Float64Array::from(p90_time_to_match_ms)),
-        Arc::new(Float64Array::from(avg_time_to_pickup_ms)),
-        Arc::new(Float64Array::from(median_time_to_pickup_ms)),
-        Arc::new(Float64Array::from(p90_time_to_pickup_ms)),
-        Arc::new(UInt64Array::from(completed_trips)),
-        Arc::new(UInt64Array::from(riders_abandoned_price)),
-        Arc::new(UInt64Array::from(riders_abandoned_eta)),
-        Arc::new(UInt64Array::from(riders_abandoned_stochastic)),
-    ];
-
-    let batch = RecordBatch::try_new(Arc::new(schema), arrays)?;
-
-    let file = File::create(path)?;
-    let props = WriterProperties::builder().build();
-    let mut writer = ArrowWriter::try_new(file, batch.schema(), Some(props))?;
-    writer.write(&batch)?;
-    writer.close()?;
-
-    Ok(())
+    writer_utils::ensure_not_empty(results)?;
+    let file = writer_utils::create_output_file(path)?;
+    parquet::export_to_parquet_impl(results, file)
 }
 
 /// Export simulation results to JSON format.
@@ -143,9 +57,8 @@ pub fn export_to_json(
     results: &[SimulationResult],
     path: impl AsRef<Path>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let file = File::create(path)?;
-    serde_json::to_writer_pretty(file, results)?;
-    Ok(())
+    let file = writer_utils::create_output_file(path)?;
+    json::export_to_json_impl(results, file)
 }
 
 /// Export simulation results with parameters to CSV format.
@@ -167,164 +80,9 @@ pub fn export_to_csv(
     parameter_sets: &[ParameterSet],
     path: impl AsRef<Path>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    if results.is_empty() {
-        return Err("No results to export".into());
-    }
-    if results.len() != parameter_sets.len() {
-        return Err(format!(
-            "Results length ({}) doesn't match parameter_sets length ({})",
-            results.len(),
-            parameter_sets.len()
-        )
-        .into());
-    }
-
-    let file = File::create(path)?;
-    let mut wtr = csv::Writer::from_writer(file);
-
-    // Write header
-    wtr.write_record([
-        // Parameter metadata
-        "experiment_id",
-        "run_id",
-        "seed",
-        // Pricing parameters
-        "commission_rate",
-        "base_fare",
-        "per_km_rate",
-        "surge_enabled",
-        "surge_radius_k",
-        "surge_max_multiplier",
-        // Scenario parameters
-        "num_riders",
-        "num_drivers",
-        "match_radius",
-        "epoch_ms",
-        "matching_algorithm_type",
-        "batch_matching_enabled",
-        "batch_interval_secs",
-        "eta_weight",
-        // Traffic parameters
-        "traffic_profile",
-        "dynamic_congestion_enabled",
-        "base_speed_kmh",
-        // Results
-        "total_riders",
-        "total_drivers",
-        "completed_riders",
-        "abandoned_quote_riders",
-        "cancelled_riders",
-        "conversion_rate",
-        "platform_revenue",
-        "driver_payouts",
-        "total_fares_collected",
-        "avg_time_to_match_ms",
-        "median_time_to_match_ms",
-        "p90_time_to_match_ms",
-        "avg_time_to_pickup_ms",
-        "median_time_to_pickup_ms",
-        "p90_time_to_pickup_ms",
-        "completed_trips",
-        "riders_abandoned_price",
-        "riders_abandoned_eta",
-        "riders_abandoned_stochastic",
-    ])?;
-
-    // Write data rows
-    for (result, param_set) in results.iter().zip(parameter_sets.iter()) {
-        let pricing = param_set.params.pricing_config.as_ref();
-        let matching_alg = param_set.params.matching_algorithm_type.as_ref();
-        let matching_alg_str = match matching_alg {
-            Some(MatchingAlgorithmType::Simple) => "Simple",
-            Some(MatchingAlgorithmType::CostBased) => "CostBased",
-            Some(MatchingAlgorithmType::Hungarian) => "Hungarian",
-            None => "",
-        };
-
-        wtr.write_record([
-            // Parameter metadata
-            &param_set.experiment_id,
-            &param_set.run_id.to_string(),
-            &param_set.seed.to_string(),
-            // Pricing parameters
-            &pricing
-                .map(|p| p.commission_rate.to_string())
-                .unwrap_or_default(),
-            &pricing.map(|p| p.base_fare.to_string()).unwrap_or_default(),
-            &pricing
-                .map(|p| p.per_km_rate.to_string())
-                .unwrap_or_default(),
-            &pricing
-                .map(|p| p.surge_enabled.to_string())
-                .unwrap_or_default(),
-            &pricing
-                .map(|p| p.surge_radius_k.to_string())
-                .unwrap_or_default(),
-            &pricing
-                .map(|p| p.surge_max_multiplier.to_string())
-                .unwrap_or_default(),
-            // Scenario parameters
-            &param_set.params.num_riders.to_string(),
-            &param_set.params.num_drivers.to_string(),
-            &param_set.params.match_radius.to_string(),
-            &param_set
-                .params
-                .epoch_ms
-                .map(|e| e.to_string())
-                .unwrap_or_default(),
-            matching_alg_str,
-            &param_set
-                .params
-                .batch_matching_enabled
-                .map(|b| b.to_string())
-                .unwrap_or_default(),
-            &param_set
-                .params
-                .batch_interval_secs
-                .map(|i| i.to_string())
-                .unwrap_or_default(),
-            &param_set
-                .params
-                .eta_weight
-                .map(|w| w.to_string())
-                .unwrap_or_default(),
-            // Traffic parameters
-            &match &param_set.params.traffic_profile {
-                TrafficProfileKind::None => "None".to_string(),
-                TrafficProfileKind::Berlin => "Berlin".to_string(),
-                TrafficProfileKind::Custom(_) => "Custom".to_string(),
-            },
-            &param_set.params.dynamic_congestion_enabled.to_string(),
-            &param_set
-                .params
-                .base_speed_kmh
-                .map(|s| s.to_string())
-                .unwrap_or_default(),
-            // Results
-            &result.total_riders.to_string(),
-            &result.total_drivers.to_string(),
-            &result.completed_riders.to_string(),
-            &result.abandoned_quote_riders.to_string(),
-            &result.cancelled_riders.to_string(),
-            &result.conversion_rate.to_string(),
-            &result.platform_revenue.to_string(),
-            &result.driver_payouts.to_string(),
-            &result.total_fares_collected.to_string(),
-            &result.avg_time_to_match_ms.to_string(),
-            &result.median_time_to_match_ms.to_string(),
-            &result.p90_time_to_match_ms.to_string(),
-            &result.avg_time_to_pickup_ms.to_string(),
-            &result.median_time_to_pickup_ms.to_string(),
-            &result.p90_time_to_pickup_ms.to_string(),
-            &result.completed_trips.to_string(),
-            &result.riders_abandoned_price.to_string(),
-            &result.riders_abandoned_eta.to_string(),
-            &result.riders_abandoned_stochastic.to_string(),
-        ])?;
-    }
-
-    wtr.flush()?;
-    Ok(())
+    writer_utils::ensure_not_empty(results)?;
+    let file = writer_utils::create_output_file(path)?;
+    csv::export_to_csv_impl(results, parameter_sets, file)
 }
 
 /// Find the parameter set with the highest health score.
@@ -346,18 +104,7 @@ pub fn find_best_parameters<'a>(
     parameter_sets: &'a [ParameterSet],
     weights: &'a HealthWeights,
 ) -> Option<&'a ParameterSet> {
-    if results.is_empty() || results.len() != parameter_sets.len() {
-        return None;
-    }
-
-    let scores = calculate_health_scores(results, weights);
-    let (best_idx, _best_score) = scores
-        .iter()
-        .enumerate()
-        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-        .unwrap();
-
-    Some(&parameter_sets[best_idx])
+    ranking::find_best_parameters_impl(results, parameter_sets, weights)
 }
 
 /// Find the best result index (convenience function when parameter sets aren't available).
@@ -377,18 +124,7 @@ pub fn find_best_result_index(
     results: &[SimulationResult],
     weights: &HealthWeights,
 ) -> Option<usize> {
-    if results.is_empty() {
-        return None;
-    }
-
-    let scores = calculate_health_scores(results, weights);
-    let (best_idx, _best_score) = scores
-        .iter()
-        .enumerate()
-        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-        .unwrap();
-
-    Some(best_idx)
+    ranking::find_best_index_by_health(results, weights)
 }
 
 #[cfg(test)]
@@ -424,7 +160,6 @@ mod tests {
         let file = NamedTempFile::new().unwrap();
         export_to_json(&results, file.path()).unwrap();
 
-        // Verify file was created and contains JSON
         let contents = std::fs::read_to_string(file.path()).unwrap();
         assert!(contents.contains("conversion_rate"));
     }
@@ -478,6 +213,6 @@ mod tests {
 
         let weights = HealthWeights::default();
         let best_idx = find_best_result_index(&results, &weights).unwrap();
-        assert_eq!(best_idx, 1); // Second result should be better
+        assert_eq!(best_idx, 1);
     }
 }
