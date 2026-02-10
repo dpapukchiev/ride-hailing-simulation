@@ -94,7 +94,7 @@ Working effectively with AI coding tools requires a different skill set than wri
 Throughout development, strict quality standards were maintained:
 
 1. **Testing**: Unit tests for all systems, end-to-end integration tests, load tests
-2. **Documentation**: Inline docs with examples, comprehensive SPEC.md (700+ lines), CONFIG.md with formulas
+2. **Documentation**: Inline docs with examples, comprehensive SPEC.md and CONFIG.md with formulas
 3. **Benchmarks**: Criterion.rs benchmarks for performance tracking with baseline comparison
 4. **Linting**: Clippy pedantic mode enabled, no-warnings policy enforced
 5. **Code Review**: All AI-generated code reviewed for correctness and style

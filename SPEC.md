@@ -85,4 +85,4 @@ implementable stories and their status.
 - Opportunity cost and driver-value weighting in matching.
 - Driver acceptance models and rider conversion.
 - Event scheduling after match beyond fixed delays (e.g. variable trip duration).
-- H3-based movement or routing.
+- Distributed experimentation (coordinator/worker execution beyond single-machine sweeps).

@@ -142,12 +142,17 @@ agents within a single simulation.
 This project uses `mise` for toolchain management:
 
 ```sh
+# Trust this repo's mise config (first time only)
+mise trust
+
 # Install Rust toolchain
 mise install
 
 # Activate mise in your shell (if not already active)
 mise activate
 ```
+
+If you prefer not to use `mise`, install a recent stable Rust toolchain and run the same `cargo` commands below.
 
 ### Running the Simulation
 
