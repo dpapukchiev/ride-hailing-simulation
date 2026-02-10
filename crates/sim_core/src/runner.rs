@@ -23,6 +23,7 @@ use crate::systems::{
     quote_accepted::quote_accepted_system,
     quote_decision::quote_decision_system,
     quote_rejected::quote_rejected_system,
+    repositioning::repositioning_system,
     rider_cancel::rider_cancel_system,
     show_quote::show_quote_system,
     spatial_index::{update_spatial_index_drivers_system, update_spatial_index_riders_system},
@@ -84,6 +85,12 @@ fn is_try_match(event: Option<Res<CurrentEvent>>) -> bool {
 fn is_batch_match_run(event: Option<Res<CurrentEvent>>) -> bool {
     event
         .map(|e| e.0.kind == EventKind::BatchMatchRun)
+        .unwrap_or(false)
+}
+
+fn is_reposition_run(event: Option<Res<CurrentEvent>>) -> bool {
+    event
+        .map(|e| e.0.kind == EventKind::RepositionRun)
         .unwrap_or(false)
 }
 
@@ -280,6 +287,8 @@ pub fn simulation_schedule() -> Schedule {
         matching_system.run_if(is_try_match),
         // BatchMatchRun
         batch_matching_system.run_if(is_batch_match_run),
+        // RepositionRun
+        repositioning_system.run_if(is_reposition_run),
         // MatchAccepted
         match_accepted_system.run_if(is_match_accepted),
         // DriverDecision

@@ -7,9 +7,11 @@ use bevy_ecs::prelude::{Commands, Entity, Query, Res, ResMut};
 
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
 use crate::ecs::{Driver, DriverStateCommands, Idle, Position, Rider, Waiting};
+use crate::matching::policy::{build_zone_counts, choose_best_driver};
 use crate::matching::MatchingAlgorithmResource;
-use crate::scenario::{BatchMatchingConfig, MatchRadius};
+use crate::scenario::{BatchMatchingConfig, MatchRadius, RepositionPolicyConfig};
 
+#[allow(clippy::too_many_arguments)]
 pub fn batch_matching_system(
     mut commands: Commands,
     mut clock: ResMut<SimulationClock>,
@@ -17,6 +19,7 @@ pub fn batch_matching_system(
     batch_config: Option<Res<BatchMatchingConfig>>,
     match_radius: Option<Res<MatchRadius>>,
     matching_algorithm: Res<MatchingAlgorithmResource>,
+    reposition_cfg: Option<Res<RepositionPolicyConfig>>,
     mut riders: Query<(Entity, &mut Rider, &Position, Option<&Waiting>)>,
     mut drivers: Query<(Entity, &mut Driver, &Position, Option<&Idle>)>,
 ) {
@@ -48,12 +51,68 @@ pub fn batch_matching_system(
         .filter_map(|(entity, _driver, position, idle)| idle.map(|_| (entity, position.0)))
         .collect();
 
-    let matches = matching_algorithm.find_batch_matches(
-        &waiting_riders,
-        &available_drivers,
-        radius,
-        clock.now(),
-    );
+    let matches = if let Some(cfg) = reposition_cfg.as_deref() {
+        let waiting_zone_demand = build_zone_counts(waiting_riders.iter().map(|(_, pos, _)| *pos));
+        let mut idle_zone_supply = build_zone_counts(available_drivers.iter().map(|(_, pos)| *pos));
+        let target_idle_by_zone = idle_zone_supply.clone();
+        let mut remaining_drivers = available_drivers.clone();
+        let mut greedy_matches = Vec::new();
+
+        let mut riders_sorted = waiting_riders.clone();
+        riders_sorted.sort_by_key(|(_, pos, _)| {
+            std::cmp::Reverse(*waiting_zone_demand.get(pos).unwrap_or(&0))
+        });
+
+        for (rider_entity, rider_pos, _) in riders_sorted {
+            let maybe_driver = choose_best_driver(
+                rider_entity,
+                rider_pos,
+                &remaining_drivers,
+                radius,
+                &idle_zone_supply,
+                &waiting_zone_demand,
+                &target_idle_by_zone,
+                cfg.minimum_zone_reserve,
+                cfg.hotspot_weight,
+            );
+            let Some(driver_entity) = maybe_driver else {
+                continue;
+            };
+            if let Some(idx) = remaining_drivers
+                .iter()
+                .position(|(entity, _)| *entity == driver_entity)
+            {
+                let (_, driver_pos) = remaining_drivers.remove(idx);
+                *idle_zone_supply.entry(driver_pos).or_insert(0) = idle_zone_supply
+                    .get(&driver_pos)
+                    .copied()
+                    .unwrap_or(0)
+                    .saturating_sub(1);
+                greedy_matches.push(crate::matching::MatchResult {
+                    rider_entity,
+                    driver_entity,
+                });
+            }
+        }
+
+        if greedy_matches.is_empty() && !waiting_riders.is_empty() {
+            matching_algorithm.find_batch_matches(
+                &waiting_riders,
+                &available_drivers,
+                radius,
+                clock.now(),
+            )
+        } else {
+            greedy_matches
+        }
+    } else {
+        matching_algorithm.find_batch_matches(
+            &waiting_riders,
+            &available_drivers,
+            radius,
+            clock.now(),
+        )
+    };
 
     for m in matches {
         if let Ok((_, mut rider, _, _)) = riders.get_mut(m.rider_entity) {

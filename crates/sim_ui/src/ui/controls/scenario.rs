@@ -251,6 +251,30 @@ pub(super) fn render_scenario_parameters(ui: &mut egui::Ui, app: &mut SimUiApp) 
                 );
             });
             ui.horizontal(|ui| {
+                ui.label("Ctrl interval (s)").on_hover_text("Reposition control loop interval for idle-driver balancing.");
+                ui.add_enabled(can_edit, egui::DragValue::new(&mut app.reposition_control_interval_secs).range(5..=300));
+            });
+            ui.horizontal(|ui| {
+                ui.label("Hotspot weight").on_hover_text("Higher values place more idle supply near high-demand zones.");
+                ui.add_enabled(can_edit, egui::DragValue::new(&mut app.hotspot_weight).range(0.0..=2.0).speed(0.05));
+            });
+            ui.horizontal(|ui| {
+                ui.label("Min reserve").on_hover_text("Minimum idle drivers preserved per zone to avoid dead zones.");
+                ui.add_enabled(can_edit, egui::DragValue::new(&mut app.minimum_zone_reserve).range(0..=20));
+            });
+            ui.horizontal(|ui| {
+                ui.label("Cooldown (s)").on_hover_text("Minimum time before a repositioned driver can be moved again.");
+                ui.add_enabled(can_edit, egui::DragValue::new(&mut app.reposition_cooldown_secs).range(0..=1800));
+            });
+            ui.horizontal(|ui| {
+                ui.label("Max reposition (km)").on_hover_text("Distance cap for each idle-driver reposition move.");
+                ui.add_enabled(can_edit, egui::DragValue::new(&mut app.max_reposition_distance_km).range(0.0..=30.0).speed(0.5));
+            });
+            ui.horizontal(|ui| {
+                ui.label("Max moved/cycle").on_hover_text("Cap on number of idle drivers moved each control cycle.");
+                ui.add_enabled(can_edit, egui::DragValue::new(&mut app.max_drivers_moved_per_cycle).range(0..=500));
+            });
+            ui.horizontal(|ui| {
                 ui.label("Match radius (km)").on_hover_text("Maximum H3 grid distance for matching rider to driver. Converted to H3 cells internally. 0 = same cell only. Larger radius allows matching to drivers further away");
                 ui.add_enabled(
                     can_edit,

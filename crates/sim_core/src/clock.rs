@@ -27,6 +27,7 @@ pub enum EventKind {
     QuoteRejected,
     TryMatch,
     BatchMatchRun,
+    RepositionRun,
     MatchAccepted,
     DriverDecision,
     MatchRejected,

@@ -572,3 +572,20 @@ All random elements use **seeded RNG** for reproducibility:
 - Same seed → same sequence of random values
 - Seeds are derived from scenario seed + entity IDs + offsets
 - Allows deterministic simulation runs for testing and analysis
+
+## Coverage-aware matching + repositioning knobs
+
+The simulator now supports a control-loop policy that keeps broad idle-driver coverage while biasing some reserve toward active demand hotspots.
+
+- `reposition_policy_config.control_interval_secs` (default: `30`, range: `5..=300`): cadence for recomputing zone targets and issuing idle-driver reposition moves.
+- `reposition_policy_config.hotspot_weight` (default: `0.35`, range: `0.0..=2.0`): hotspot demand weighting added on top of uniform baseline coverage.
+- `reposition_policy_config.minimum_zone_reserve` (default: `1`, range: `0..=20`): minimum number of idle drivers preserved in any occupied zone.
+- `reposition_policy_config.cooldown_secs` (default: `120`, range: `0..=1800`): anti-churn cooldown before a recently moved driver can reposition again.
+- `reposition_policy_config.max_reposition_distance_km` (default: `6.0`, range: `0.0..=30.0`): per-cycle cap on individual reposition move distance.
+- `reposition_policy_config.max_drivers_moved_per_cycle` (default: `20`, range: `0..=500`): upper bound on moved idle drivers each control cycle.
+
+### Tuning guidance
+- Reduce `control_interval_secs` and increase `hotspot_weight` when p95 pickup ETA rises in clear hotspot periods.
+- Increase `minimum_zone_reserve` when low-demand districts lose all idle coverage.
+- Increase `cooldown_secs` and/or lower `max_drivers_moved_per_cycle` if oscillation/churn appears.
+- Raise `max_reposition_distance_km` only when geographic service area is wide and local rebalancing cannot close deficits.

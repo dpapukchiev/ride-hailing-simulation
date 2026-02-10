@@ -9,7 +9,7 @@ mod osrm;
 use bevy_ecs::prelude::{Commands, Res, ResMut};
 
 use crate::clock::{CurrentEvent, EventKind, SimulationClock, ONE_MIN_MS};
-use crate::scenario::BatchMatchingConfig;
+use crate::scenario::{BatchMatchingConfig, RepositionPolicyConfig};
 use crate::spawner::{DriverSpawner, RiderSpawner, SpawnWeighting};
 
 #[cfg(feature = "osrm")]
@@ -34,10 +34,12 @@ type MaybeOsrmSpawnMetrics<'a> = Option<&'a OsrmSpawnTelemetry>;
 #[cfg(not(feature = "osrm"))]
 type MaybeOsrmSpawnMetrics<'a> = ();
 
+#[allow(clippy::too_many_arguments)]
 pub fn simulation_started_system(
     mut commands: Commands,
     mut clock: ResMut<SimulationClock>,
     batch_config: Option<Res<BatchMatchingConfig>>,
+    reposition_config: Option<Res<RepositionPolicyConfig>>,
     rider_spawner: Option<ResMut<RiderSpawner>>,
     driver_spawner: Option<ResMut<DriverSpawner>>,
     spawn_weighting: Option<Res<SpawnWeighting>>,
@@ -59,6 +61,13 @@ pub fn simulation_started_system(
         if cfg.enabled {
             clock.schedule_at(0, EventKind::BatchMatchRun, None);
         }
+    }
+    if let Some(cfg) = reposition_config.as_deref() {
+        clock.schedule_at(
+            cfg.control_interval_secs.saturating_mul(1_000),
+            EventKind::RepositionRun,
+            None,
+        );
     }
 
     if let Some(mut spawner) = rider_spawner {

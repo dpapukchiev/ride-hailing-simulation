@@ -172,3 +172,15 @@ The project demonstrates understanding of distributed systems -- the experimenta
 ## Conclusion
 
 This project demonstrates that with strong architectural guidance, effective AI collaboration, and rigorous quality standards, it is possible to rapidly learn a new language while building a sophisticated system. The multi-disciplinary approach -- from research to implementation to data analysis -- showcases the ability to wear multiple hats and deliver end-to-end solutions.
+
+## Coverage-first dispatch update
+
+A new control loop combines demand-aware matching and idle-driver repositioning:
+
+1. **Matching score terms**: each candidate pair now includes pickup-time cost, reposition-distance cost, imbalance penalty (for draining a thin zone), and a hotspot bonus (for serving high-demand zones quickly).
+2. **Tie/stability behavior**: the policy prefers assignments that preserve local reserves and avoids unnecessary churn by retaining minimum zone reserves.
+3. **Idle reposition cycle**: every control interval, idle supply targets are recomputed as `uniform baseline + hotspot-weighted uplift`; only surplus zones feed deficit zones.
+4. **Stability safeguards**: driver cooldown, max move distance, and max moved-per-cycle cap reduce oscillations; reserve constraints prevent total starvation in low-demand zones.
+5. **Fallback safety**: matching falls back to the existing nearest-feasible matching algorithm whenever policy-driven greedy selection produces no candidate.
+
+This design pushes mean/p95 pickup ETA down by preserving broad map coverage while still pulling marginal idle supply toward short-term demand spikes.

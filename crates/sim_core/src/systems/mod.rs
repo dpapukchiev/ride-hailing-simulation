@@ -23,6 +23,7 @@ pub mod pickup_eta_updated;
 pub mod quote_accepted;
 pub mod quote_decision;
 pub mod quote_rejected;
+pub mod repositioning;
 pub mod rider_cancel;
 pub mod show_quote;
 pub mod spatial_index;

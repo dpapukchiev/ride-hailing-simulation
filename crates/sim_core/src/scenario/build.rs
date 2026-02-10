@@ -20,6 +20,7 @@ use crate::spawner::{
     DriverSpawner, DriverSpawnerConfig, RiderSpawner, RiderSpawnerConfig, SpawnWeighting,
 };
 use crate::speed::SpeedModel;
+use crate::systems::repositioning::RepositionState;
 #[cfg(feature = "osrm")]
 use crate::telemetry::OsrmSpawnTelemetry;
 use crate::telemetry::{SimSnapshotConfig, SimSnapshots, SimTelemetry};
@@ -239,6 +240,8 @@ pub fn build_scenario(world: &mut World, params: ScenarioParams) {
         enabled: params.batch_matching_enabled.unwrap_or(true),
         interval_secs: params.batch_interval_secs.unwrap_or(5),
     });
+    world.insert_resource(params.reposition_policy_config.unwrap_or_default());
+    world.insert_resource(RepositionState::default());
     if let Some(end_ms) = params.simulation_end_time_ms {
         world.insert_resource(SimulationEndTimeMs(end_ms));
     }

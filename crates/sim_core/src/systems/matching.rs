@@ -2,11 +2,13 @@ use bevy_ecs::prelude::{Commands, Entity, Query, Res, ResMut};
 
 use crate::clock::{CurrentEvent, EventKind, EventSubject, SimulationClock};
 use crate::ecs::{Driver, DriverStateCommands, Idle, Position, Rider, Waiting};
+use crate::matching::policy::{build_zone_counts, choose_best_driver};
 use crate::matching::MatchingAlgorithmResource;
-use crate::scenario::{BatchMatchingConfig, MatchRadius};
+use crate::scenario::{BatchMatchingConfig, MatchRadius, RepositionPolicyConfig};
 
 const MATCH_RETRY_SECS: u64 = 30;
 
+#[allow(clippy::too_many_arguments)]
 pub fn matching_system(
     mut commands: Commands,
     mut clock: ResMut<SimulationClock>,
@@ -14,6 +16,7 @@ pub fn matching_system(
     batch_config: Option<Res<BatchMatchingConfig>>,
     match_radius: Option<Res<MatchRadius>>,
     matching_algorithm: Res<MatchingAlgorithmResource>,
+    reposition_cfg: Option<Res<RepositionPolicyConfig>>,
     mut riders: Query<(Entity, &mut Rider, &Position, Option<&Waiting>)>,
     mut drivers: Query<(Entity, &mut Driver, &Position, Option<&Idle>)>,
 ) {
@@ -47,15 +50,40 @@ pub fn matching_system(
         .filter_map(|(entity, _driver, position, idle)| idle.map(|_| (entity, position.0)))
         .collect();
 
-    // Use the matching algorithm to find a match
-    let driver_entity = matching_algorithm.find_match(
-        rider_entity,
-        rider_pos,
-        rider_destination,
-        &available_drivers,
-        radius,
-        clock.now(),
+    let waiting_zone_demand = build_zone_counts(
+        riders
+            .iter()
+            .filter(|(_, rider, _, waiting)| waiting.is_some() && rider.matched_driver.is_none())
+            .map(|(_, _, position, _)| position.0),
     );
+    let idle_zone_supply = build_zone_counts(available_drivers.iter().map(|(_, pos)| *pos));
+    let target_idle_by_zone = idle_zone_supply.clone();
+
+    let driver_entity = reposition_cfg
+        .as_deref()
+        .and_then(|cfg| {
+            choose_best_driver(
+                rider_entity,
+                rider_pos,
+                &available_drivers,
+                radius,
+                &idle_zone_supply,
+                &waiting_zone_demand,
+                &target_idle_by_zone,
+                cfg.minimum_zone_reserve,
+                cfg.hotspot_weight,
+            )
+        })
+        .or_else(|| {
+            matching_algorithm.find_match(
+                rider_entity,
+                rider_pos,
+                rider_destination,
+                &available_drivers,
+                radius,
+                clock.now(),
+            )
+        });
 
     let Some(driver_entity) = driver_entity else {
         clock.schedule_in_secs(

@@ -12,5 +12,6 @@ pub use build::{
 };
 pub use params::{
     BatchMatchingConfig, DriverDecisionConfig, MatchRadius, MatchingAlgorithmType,
-    RiderCancelConfig, RiderQuoteConfig, ScenarioParams, SimulationEndTimeMs,
+    RepositionPolicyConfig, RiderCancelConfig, RiderQuoteConfig, ScenarioParams,
+    SimulationEndTimeMs,
 };

@@ -7,7 +7,7 @@ use sim_core::routing::RouteProviderKind;
 use sim_core::runner::{run_next_event, simulation_schedule};
 use sim_core::scenario::{
     build_scenario, create_cost_based_matching, create_hungarian_matching, create_simple_matching,
-    DriverDecisionConfig, RiderQuoteConfig, ScenarioParams,
+    DriverDecisionConfig, RepositionPolicyConfig, RiderQuoteConfig, ScenarioParams,
 };
 use sim_core::spawner::SpawnWeightingKind;
 use sim_core::traffic::TrafficProfileKind;
@@ -54,6 +54,12 @@ pub struct SimUiApp {
     pub matching_algorithm_changed: bool,
     pub batch_matching_enabled: bool,
     pub batch_interval_secs: u64,
+    pub reposition_control_interval_secs: u64,
+    pub hotspot_weight: f64,
+    pub minimum_zone_reserve: usize,
+    pub reposition_cooldown_secs: u64,
+    pub max_reposition_distance_km: f64,
+    pub max_drivers_moved_per_cycle: usize,
     pub start_year: i32,
     pub start_month: u32,
     pub start_day: u32,
@@ -222,6 +228,12 @@ impl SimUiApp {
             matching_algorithm_changed: false,
             batch_matching_enabled: defaults.batch_matching_enabled,
             batch_interval_secs: defaults.batch_interval_secs,
+            reposition_control_interval_secs: defaults.reposition_control_interval_secs,
+            hotspot_weight: defaults.hotspot_weight,
+            minimum_zone_reserve: defaults.minimum_zone_reserve,
+            reposition_cooldown_secs: defaults.reposition_cooldown_secs,
+            max_reposition_distance_km: defaults.max_reposition_distance_km,
+            max_drivers_moved_per_cycle: defaults.max_drivers_moved_per_cycle,
             start_year: defaults.start_year,
             start_month: defaults.start_month,
             start_day: defaults.start_day,
@@ -291,6 +303,15 @@ impl SimUiApp {
         params.lat_max = lat_max;
         params.lng_min = lng_min;
         params.lng_max = lng_max;
+
+        params.reposition_policy_config = Some(RepositionPolicyConfig {
+            control_interval_secs: self.reposition_control_interval_secs,
+            hotspot_weight: self.hotspot_weight,
+            minimum_zone_reserve: self.minimum_zone_reserve,
+            cooldown_secs: self.reposition_cooldown_secs,
+            max_reposition_distance_km: self.max_reposition_distance_km,
+            max_drivers_moved_per_cycle: self.max_drivers_moved_per_cycle,
+        });
 
         params = params
             .with_pricing_config(PricingConfig {

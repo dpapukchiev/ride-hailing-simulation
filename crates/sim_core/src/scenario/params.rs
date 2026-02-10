@@ -40,6 +40,36 @@ pub struct BatchMatchingConfig {
     pub interval_secs: u64,
 }
 
+/// Dynamic coverage-aware repositioning policy for idle drivers.
+#[derive(Debug, Clone, Copy, Resource)]
+pub struct RepositionPolicyConfig {
+    /// Control loop interval in seconds.
+    pub control_interval_secs: u64,
+    /// Weight for demand hotspots when computing target idle supply per zone.
+    pub hotspot_weight: f64,
+    /// Minimum idle drivers to preserve in each occupied zone.
+    pub minimum_zone_reserve: usize,
+    /// Cooldown period after repositioning a driver (seconds).
+    pub cooldown_secs: u64,
+    /// Maximum repositioning distance in km for a single move.
+    pub max_reposition_distance_km: f64,
+    /// Hard cap on number of drivers moved per control cycle.
+    pub max_drivers_moved_per_cycle: usize,
+}
+
+impl Default for RepositionPolicyConfig {
+    fn default() -> Self {
+        Self {
+            control_interval_secs: 30,
+            hotspot_weight: 0.35,
+            minimum_zone_reserve: 1,
+            cooldown_secs: 120,
+            max_reposition_distance_km: 6.0,
+            max_drivers_moved_per_cycle: 20,
+        }
+    }
+}
+
 impl Default for BatchMatchingConfig {
     fn default() -> Self {
         Self {
@@ -167,6 +197,8 @@ pub struct ScenarioParams {
     pub batch_interval_secs: Option<u64>,
     /// ETA weight for cost-based and Hungarian matching algorithms. If None, uses DEFAULT_ETA_WEIGHT.
     pub eta_weight: Option<f64>,
+    /// Coverage-aware repositioning policy for idle drivers.
+    pub reposition_policy_config: Option<RepositionPolicyConfig>,
     /// Which routing backend to use. Defaults to H3Grid (existing behaviour).
     pub route_provider_kind: RouteProviderKind,
     /// Traffic profile (time-of-day speed factors). Defaults to None (no traffic effects).
@@ -208,6 +240,7 @@ impl Default for ScenarioParams {
             batch_matching_enabled: None,
             batch_interval_secs: None,
             eta_weight: None,
+            reposition_policy_config: None,
             route_provider_kind: RouteProviderKind::default(),
             traffic_profile: TrafficProfileKind::default(),
             congestion_zones_enabled: false,

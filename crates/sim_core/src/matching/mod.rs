@@ -21,6 +21,7 @@
 pub mod algorithm;
 pub mod cost_based;
 pub mod hungarian;
+pub mod policy;
 pub mod simple;
 pub mod types;
 
