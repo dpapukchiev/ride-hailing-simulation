@@ -53,9 +53,9 @@ behaviour changes (geometry, projection, caching, controls, legends, etc.).
 
 ## Documentation Expectations
 - When driver movement or cached rendering behaviour changes, update this file and
-  reference the change in `documentation/ui/map-movement-backlog.md` so future work
-  knows the new baseline.
+  reference the change in `documentation/ui/spec.md` (or another existing UI doc) so
+  future work knows the new baseline.
 - Include screenshots, diagrams, or sequence descriptions as needed to clarify why
   OSRM geometry and cached textures were chosen.
-- Link to telemetry or CLI commands (`./ci.sh`, `cargo xtask ui`, etc.) that prove
+- Link to telemetry or CLI commands (`./ci.sh`, `cargo run -p xtask -- ui`, etc.) that prove
   the map remains smooth and drivers stay on the road.

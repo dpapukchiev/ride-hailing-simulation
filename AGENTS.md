@@ -8,10 +8,11 @@ This file is the concise reference any AI collaborator or future maintainers sho
 - **Entry points**: `cargo run -p sim_core --example scenario_run[_large]`, `cargo run -p sim_ui`, and experiment runners under `sim_experiments`.
 
 ## Common commands
-- `./ci.sh` - to apply the same checks as ci
+- `./ci.sh` - to apply the same checks as CI (`check` by default)
 - `cargo fmt --all`, `cargo clippy --all -- -D warnings` before merge PRs.
 - `cargo test -p sim_core` (core) or `cargo test` for smaller scopes.
 - `cargo run -p sim_core --example scenario_run_large --release` for performance benchmarks; attach perf outputs to docs if needed.
+- `cargo run -p xtask -- --help` to inspect available automation tasks.
 
 ## Collaboration workflow
 1. **Minimal context**: Tell the agent the goal and the files that may change; include snippets/diffs only when necessary. Avoid dumping entire modules.

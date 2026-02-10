@@ -84,8 +84,8 @@ platform_revenue = commission
 | `initial_driver_count` | 0 | usize | Drivers spawned immediately at simulation start |
 | `request_window_ms` | 3,600,000 | u64 | Time window (ms) over which scheduled riders spawn (default: 1 hour) |
 | `driver_spread_ms` | 3,600,000 | u64 | Time window (ms) over which scheduled drivers spawn (default: 1 hour) |
-| `lat_min`, `lat_max` | 37.6, 37.85 | f64 | Geographic bounds (degrees) for spawn positions (default: SF Bay Area) |
-| `lng_min`, `lng_max` | -122.55, -122.35 | f64 | Geographic bounds (degrees) for spawn positions |
+| `lat_min`, `lat_max` | 52.34, 52.68 | f64 | Geographic bounds (degrees) for spawn positions (default: Berlin) |
+| `lng_min`, `lng_max` | 13.08, 13.76 | f64 | Geographic bounds (degrees) for spawn positions |
 | `min_trip_cells` | 5 | u32 | Minimum trip length in H3 cells (riders only) |
 | `max_trip_cells` | 60 | u32 | Maximum trip length in H3 cells (riders only) |
 | `epoch_ms` | 0 | i64 | Real-world time (ms) corresponding to simulation time 0 (for time-of-day patterns) |
