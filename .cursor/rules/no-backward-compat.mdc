@@ -1,6 +1,0 @@
-# No Backward Compatibility Policy
-
-- When introducing new features or refactoring, do not maintain backward compatibility with old APIs or behaviors.
-- Remove deprecated code immediately rather than keeping it for compatibility.
-- Update all call sites to use the new approach.
-- This allows for cleaner code and faster iteration without legacy baggage.
