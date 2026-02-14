@@ -35,6 +35,7 @@ minimal ECS-based agent model. It currently supports:
 - **Batch matching**: Optional mode where a periodic `BatchMatchRun` event collects all unmatched waiting riders and idle drivers, runs a global matching algorithm (e.g. Hungarian), and applies matches; when enabled, per-rider `TryMatch` is not scheduled. Rejected riders re-enter the next batch.
 - **Simulation end time**: Optional `SimulationEndTimeMs` resource stops the runner when the next event is at or after that time, so runs with recurring events (e.g. batch matching) finish in bounded time.
 - **Parallel experimentation**: Run multiple simulations in parallel with varying parameters to explore parameter space and analyze marketplace health.
+- **Serverless sweep deployment path (AWS)**: API Gateway ingress invokes a parent Lambda that validates requests, computes deterministic shard plans, and dispatches child Lambdas asynchronously for distributed shard execution. Child outcomes are persisted to partitioned S3 datasets for Athena analytics. Runtime logic is owned by `sim_serverless_sweep_core` and `sim_serverless_sweep_lambda`; Terraform in `infra/aws_serverless_sweep/` remains infrastructure wiring.
 - **Pluggable routing**: A `RouteProvider` trait abstracts routing backends. Three implementations: `H3GridRouteProvider` (zero-dependency default), `OsrmRouteProvider` (OSRM HTTP, feature-gated), and `PrecomputedRouteProvider` (binary route table, feature-gated). Routes are cached in an LRU cache with H3 fallback on failure. The active provider is selected via `RouteProviderKind` in `ScenarioParams`.
 - **Traffic model**: Time-of-day speed profiles (`TrafficProfile`), spatial congestion zones (`CongestionZones`), and dynamic density-based congestion. These multiply the effective vehicle speed via `SpeedFactors.multiplier`. A Berlin profile is built-in with rush-hour slowdowns.
 - **Berlin map support**: Default geographic bounds are Berlin (lat 52.34–52.68, lng 13.08–13.76). OSRM setup scripts and Docker Compose are provided in `infra/osrm/` for running a local OSRM instance with Berlin OpenStreetMap data.
@@ -85,4 +86,4 @@ implementable stories and their status.
 - Opportunity cost and driver-value weighting in matching.
 - Driver acceptance models and rider conversion.
 - Event scheduling after match beyond fixed delays (e.g. variable trip duration).
-- Distributed experimentation (coordinator/worker execution beyond single-machine sweeps).
+- Additional distributed execution modes beyond the current AWS serverless sweep path (for example, long-running coordinator/worker execution for very large campaigns).

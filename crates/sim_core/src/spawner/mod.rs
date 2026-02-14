@@ -209,7 +209,7 @@ impl RiderSpawner {
 #[cfg(not(feature = "osrm"))]
 impl RiderSpawner {
     pub fn osrm_spawn_client(&self) -> MaybeOsrmSpawnClient<'_> {
-        ()
+        {}
     }
 }
 
@@ -279,7 +279,7 @@ impl DriverSpawner {
 #[cfg(not(feature = "osrm"))]
 impl DriverSpawner {
     pub fn osrm_spawn_client(&self) -> MaybeOsrmSpawnClient<'_> {
-        ()
+        {}
     }
 }
 

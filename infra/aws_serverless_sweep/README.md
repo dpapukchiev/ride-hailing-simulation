@@ -58,7 +58,7 @@ Run a single local command to build Rust Lambda binaries, package zip artifacts,
   -var "results_bucket_name=<bucket>"
 ```
 
-The script preflights required tooling (`cargo`, `aws`, `terraform`) and validates an active temporary AWS session via `aws sts get-caller-identity` before building. If your session is missing or expired, re-run AWS login first:
+The script preflights required tooling (`docker`, `aws`, `terraform`) and validates an active temporary AWS session via `aws sts get-caller-identity` before building. Rust compilation and packaging run inside the configured Docker Rust toolchain image (`SWEEP_DOCKER_IMAGE`). If your session is missing or expired, re-run AWS login first:
 
 ```bash
 aws sso login
@@ -75,7 +75,7 @@ Optional overrides:
 - `SWEEP_LAMBDA_PROFILE` (default `release`)
 - `SWEEP_DOCKER_IMAGE` (default `docker.io/library/rust:1-bullseye`)
 
-After deploy, copy the output `api_url` and invoke with a sweep request payload.~~~~
+After deploy, copy the output `api_url` and invoke with a sweep request payload.
 
 ## Request Contract
 

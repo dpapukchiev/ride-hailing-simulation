@@ -16,7 +16,7 @@ Each subfolder has:
 | [matching](./matching/) | Matching algorithms (Simple, Cost-based, Hungarian), per-rider and batch matching systems |
 | [pricing](./pricing/) | Pricing module, show-quote system, surge pricing |
 | [telemetry](./telemetry/) | Telemetry resources, Parquet export, snapshot system |
-| [experiments](./experiments/) | Parallel experimentation framework, parameter sweeps, health scores |
+| [experiments](./experiments/) | Parallel experimentation framework, parameter sweeps, health scores, and AWS serverless sweep operations |
 | [ui](./ui/) | Native simulation UI, controls, charts, trip table |
 | [testing](./testing/) | Unit tests, benchmarks (Criterion), load tests |
 | [project](./project/) | Workspace layout, dependencies, tooling, task runner, CI |

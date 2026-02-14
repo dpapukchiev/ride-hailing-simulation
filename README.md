@@ -71,6 +71,12 @@ See [DEVELOPMENT.md](./DEVELOPMENT.md) for the complete development narrative.
 - **Result Export**: Export experiment results to Parquet/JSON for analysis
 - **Optimal Parameter Discovery**: Find parameter combinations that maximize marketplace health
 
+### Serverless Sweeps (AWS)
+- **Deployed serverless fan-out path**: API Gateway ingress invokes a parent Lambda that validates requests, shards work deterministically, and dispatches child Lambdas asynchronously
+- **Rust runtime ownership**: Runtime logic is implemented in `crates/sim_serverless_sweep_core` and `crates/sim_serverless_sweep_lambda`
+- **Analytics-ready storage**: Child shard outcomes are written to partitioned S3 datasets and queried through Athena
+- **Operator runbook**: Deploy/invoke/verify workflow is documented in `documentation/experiments/serverless-sweep-runbook.md`
+
 ## Architecture
 
 ### High-Level Design
@@ -309,6 +315,8 @@ ride-hailing-simulation/
 │   ├── sim_experiments/   # Parallel experimentation framework
 │   │   └── examples/
 │   │       └── parameter_sweep.rs
+│   ├── sim_serverless_sweep_core/   # Shared serverless sweep contract + sharding logic
+│   ├── sim_serverless_sweep_lambda/ # AWS parent/child Lambda handlers + adapters
 │   └── sim_ui/            # Visualization UI
 │       └── src/
 │           ├── app.rs     # Application state
@@ -326,6 +334,7 @@ ride-hailing-simulation/
 │   ├── testing/           # Unit tests, benchmarks, load tests
 │   └── project/           # Workspace layout, deps, tooling, CI
 ├── xtask/                 # Cross-platform task runner (cargo xtask)
+├── infra/aws_serverless_sweep/ # Terraform + deploy flow for AWS serverless sweeps
 ├── infra/osrm/            # OSRM Docker setup for Berlin routing
 ├── SPEC.md                # High-level specification and overview
 ├── CONFIG.md              # Configuration parameters and formulas
@@ -354,13 +363,13 @@ ride-hailing-simulation/
 
 **Current Limitations:**
 - Single-machine experimentation: Large parameter sweeps hit resource limits (memory/CPU)
-- No distributed execution: Architecture designed but not yet implemented (see `crates/sim_experiments/README.md`)
-- Simplified routing: H3-based movement, not real road network routing
+- Local experiment runner remains single-machine (`rayon`) and can hit CPU/memory limits on very large sweeps
+- Real road-network routing is optional: OSRM/precomputed providers require extra setup and are not the default path in every run
 
 **Future Enhancements:**
-- Distributed experimentation: Coordinator/worker model for multi-machine parameter sweeps
-- Real routing: Integrate OSRM or similar for realistic road network movement
-- Advanced matching: Opportunity cost, shadow pricing, driver-value weighting
+- Expand beyond the current AWS serverless sweep path with additional distributed execution modes (for example, long-running coordinator/worker jobs)
+- Routing depth: Expand road-network routing workflows beyond current OSRM support (for example, broader precomputed coverage and richer traffic calibration)
+- Advanced matching: Add opportunity cost, shadow pricing, and driver-value weighting strategies on top of existing Simple/CostBased/Hungarian modes
 - Multi-service switching: Driver behavior across multiple platforms (rides, food delivery)
 - Replay system for saved simulations
 
