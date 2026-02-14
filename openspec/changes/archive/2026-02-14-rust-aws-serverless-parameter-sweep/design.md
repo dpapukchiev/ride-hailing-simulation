@@ -34,7 +34,7 @@ Constraints:
      - Keep Python for parent and only migrate child: reduces effort but keeps split-language runtime and duplicated contract logic.
 
 2. Place runtime code in workspace crates
-   - Decision: Move Lambda business/runtime logic from `infra/aws_serverless_sweep/lambda/serverless_sweep.py` into Rust crates under `crates/`.
+   - Decision: Move Lambda business/runtime logic from the legacy infra runtime module into Rust crates under `crates/`.
    - Rationale: Decouples app behavior from Terraform, enables normal Rust testing/versioning, and reuses existing experiment modules.
    - Planned boundary:
      - `crates/sim_serverless_sweep_core` (new): request validation, deterministic shard math, payload/result schemas, partition key generation.
@@ -59,15 +59,17 @@ Constraints:
 5. Use existing Parquet export path and upload artifacts to S3
    - Decision: Worker writes shard metrics using `sim_experiments` Parquet export code (currently in `crates/sim_experiments/src/export/parquet.rs`), then uploads the produced object to S3.
    - Rationale: Avoids duplicate serialization logic, keeps schema aligned with local experiment exports, and gives immediate Athena compatibility.
-   - Output layout decision (Hive-style partitions):
-     - `s3://<bucket>/<prefix>/dataset=shard_metrics/run_date=<yyyy-mm-dd>/run_id=<run_id>/status=<success|failure>/part-<shard_id>.parquet`
-     - `s3://<bucket>/<prefix>/dataset=shard_errors/run_date=<yyyy-mm-dd>/run_id=<run_id>/status=failure/part-<shard_id>.parquet`
-   - Queryability rationale:
-     - Partition on low/medium-cardinality filters used in exploration (`run_date`, `run_id`, `status`).
-     - Keep `shard_id` as a column/file suffix rather than a partition key to avoid partition explosion.
+    - Output layout decision (Hive-style partitions):
+      - `s3://<bucket>/<prefix>/dataset=shard_metrics/run_date=<yyyy-mm-dd>/run_id=<run_id>/status=<success|failure>/shard_id=<id>/point_index=<point>/part-0.parquet`
+      - `s3://<bucket>/<prefix>/dataset=trip_data/run_date=<yyyy-mm-dd>/run_id=<run_id>/status=<success|failure>/shard_id=<id>/point_index=<point>/part-0.parquet`
+      - `s3://<bucket>/<prefix>/dataset=snapshot_counts/run_date=<yyyy-mm-dd>/run_id=<run_id>/status=<success|failure>/shard_id=<id>/point_index=<point>/part-0.parquet`
+      - `s3://<bucket>/<prefix>/dataset=shard_outcomes/run_date=<yyyy-mm-dd>/run_id=<run_id>/status=<success|failure>/shard_id=<id>/part-0.parquet`
+    - Queryability rationale:
+      - Partition on `run_date`, `run_id`, and `status` for run-level filtering.
+      - Also partition by `shard_id` and `point_index` where applicable to enable direct shard/point diagnostics and predictable joins across datasets.
    - Alternatives considered:
      - Keep JSON-only outcomes: easier migration but weaker schema discipline and higher Athena scan cost.
-     - Partition by `shard_id`: simpler point lookups but poor partition scaling for large runs.
+      - Avoid shard/point partitions: lower partition counts but weaker diagnostics and less direct joins for per-point analytics.
 
 6. Build and packaging become Rust-first
    - Decision: Terraform artifact inputs continue to be `parent_lambda_zip` and `child_lambda_zip`, but these zips now package Rust binaries/bootstraps built for Lambda runtime.
@@ -95,7 +97,7 @@ Constraints:
 - [Tighter dependency graph across new crates] -> Keep core crate free of AWS SDK types; isolate cloud adapters in lambda crate.
 - [Large parameter-space materialization in worker] -> Reuse bounded shard execution patterns and validate shard bounds before evaluation.
 - [Parquet schema drift across local/cloud paths] -> Make `sim_experiments` Parquet schema the single source of truth and validate with integration tests that read produced S3 objects.
-- [Operational confusion during cutover] -> Keep old Python path only as temporary reference docs/tests until Rust parity is verified, then remove.
+- [Operational confusion during cutover] -> Keep migration sign-off criteria in runbooks and maintain rollback-to-known-good-zip guidance.
 - [Failed deploy attempts due to expired local AWS sessions] -> Add deploy-script preflight check with actionable error message instructing operators to re-run AWS login.
 
 ## Migration Plan

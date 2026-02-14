@@ -1,0 +1,30 @@
+# public-repo-secure-cloud-deployment Specification
+
+## Purpose
+TBD - created by archiving change rust-aws-serverless-parameter-sweep. Update Purpose after archive.
+## Requirements
+### Requirement: No secrets committed to repository
+The system SHALL source cloud credentials and sensitive configuration from environment variables or managed secret stores, and MUST NOT require committed plaintext secrets.
+
+#### Scenario: Deployment with env-provided secrets
+- **WHEN** a deployment pipeline runs for the serverless sweep stack
+- **THEN** sensitive values are resolved from external secret sources and no secret files are required in repository contents
+
+### Requirement: Least-privilege execution for orchestration and workers
+The system SHALL assign IAM permissions scoped to minimum required actions for parent and worker runtimes.
+
+#### Scenario: Worker access is restricted to run-scoped storage operations
+- **WHEN** a worker executes a shard
+- **THEN** its role can read required input and write only the configured output prefixes needed for that run
+
+### Requirement: Local deploy flow uses temporary AWS sessions
+The system SHALL provide a local script that builds Rust Lambda artifacts, bundles deployment inputs, and deploys the stack only when a temporary AWS login session is active.
+
+#### Scenario: Deploy script validates active temporary session
+- **WHEN** an operator runs the local deploy script without a valid temporary AWS session
+- **THEN** the script fails fast with guidance to run the AWS login command before retrying
+
+#### Scenario: Deploy script performs build-bundle-deploy sequence
+- **WHEN** an operator runs the local deploy script with a valid temporary AWS session
+- **THEN** the script builds Rust binaries, packages Lambda zip artifacts, and executes deployment with those artifacts in one command flow
+

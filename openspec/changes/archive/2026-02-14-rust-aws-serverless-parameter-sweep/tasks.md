@@ -27,11 +27,11 @@
 - [x] 5.1 Update build/packaging workflow to produce `parent_lambda_zip` and `child_lambda_zip` from Rust Lambda binaries while keeping Terraform variable interfaces stable
 - [x] 5.2 Add a local build-bundle-deploy script that runs Rust artifact build, Lambda zip packaging, and deploy in one command flow
 - [x] 5.3 Add deploy-script preflight validation for a valid temporary AWS session and fail with guidance to run AWS login when missing or expired
-- [ ] 5.4 Ensure Terraform scope remains infrastructure wiring only (API Gateway, Lambda resources, IAM, env vars) with no embedded runtime control flow
-- [ ] 5.5 Tighten IAM policies for least privilege so parent and worker roles can only perform required invoke/read/write actions on configured resources
+- [x] 5.4 Ensure Terraform scope remains infrastructure wiring only (API Gateway, Lambda resources, IAM, env vars) with no embedded runtime control flow
+- [x] 5.5 Tighten IAM policies for least privilege so parent and worker roles can only perform required invoke/read/write actions on configured resources
 
 ## 6. Validation, runbooks, and migration completion
 
-- [ ] 6.1 Add end-to-end verification that distributed run outputs land in expected partition paths and are queryable by Athena for success/failure aggregation
-- [ ] 6.2 Update operational docs/runbooks for Rust-first deployment, secret handling, rollback to prior zip artifacts, and local-vs-cloud execution expectations
-- [ ] 6.3 Remove Python runtime module from the active deployment path after parity checks pass and capture final migration sign-off criteria
+- [x] 6.1 Add end-to-end verification that distributed run outputs land in expected partition paths and are queryable by Athena for success/failure aggregation
+- [x] 6.2 Update operational docs/runbooks for Rust-first deployment, secret handling, rollback to prior zip artifacts, and local-vs-cloud execution expectations
+- [x] 6.3 Remove Python runtime module from the active deployment path after parity checks pass and capture final migration sign-off criteria
