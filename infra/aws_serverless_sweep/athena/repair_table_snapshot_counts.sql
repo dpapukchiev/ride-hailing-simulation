@@ -1,0 +1,1 @@
+MSCK REPAIR TABLE ride_sim_analytics.sweep_snapshot_counts;

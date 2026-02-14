@@ -1,3 +1,10 @@
 [workspace]
-members = ["crates/sim_core", "crates/sim_experiments", "crates/sim_ui", "xtask"]
+members = [
+    "crates/sim_core",
+    "crates/sim_experiments",
+    "crates/sim_serverless_sweep_core",
+    "crates/sim_serverless_sweep_lambda",
+    "crates/sim_ui",
+    "xtask",
+]
 resolver = "2"
