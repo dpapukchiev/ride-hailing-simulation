@@ -21,7 +21,7 @@ step() {
 
 job_check() {
     step "Cloud secret scan"
-    python scripts/check_no_cloud_secrets.py
+    ./scripts/check_no_cloud_secrets.sh
 
     step "Check formatting"
     cargo fmt --all -- --check
