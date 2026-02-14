@@ -11,13 +11,17 @@ use sim_serverless_sweep_core::contract::ChildShardPayload;
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::handlers::child::{ChildExecutionSummary, ShardExecutor};
+use crate::handlers::child::{ShardExecutor, ShardPointResult};
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct SimExperimentsShardExecutor;
 
 impl ShardExecutor for SimExperimentsShardExecutor {
-    fn execute_shard(&self, payload: &ChildShardPayload) -> Result<ChildExecutionSummary, String> {
+    fn execute_shard(
+        &self,
+        payload: &ChildShardPayload,
+        on_point_result: &mut dyn FnMut(ShardPointResult) -> Result<(), String>,
+    ) -> Result<usize, String> {
         if payload.failure_injection_shards.contains(&payload.shard_id) {
             return Err("Injected shard failure for verification".to_string());
         }
@@ -27,8 +31,6 @@ impl ShardExecutor for SimExperimentsShardExecutor {
         }
 
         let mut points_processed = 0usize;
-        let mut point_results =
-            Vec::with_capacity(payload.end_index_exclusive - payload.start_index);
         for point_index in payload.start_index..payload.end_index_exclusive {
             let parameter_set = parameter_set_for_index(payload, point_index)?;
             let (metrics, trip_data_parquet, snapshot_counts_parquet) =
@@ -38,19 +40,16 @@ impl ShardExecutor for SimExperimentsShardExecutor {
                     payload.shard_id,
                     point_index,
                 )?;
-            point_results.push(crate::handlers::child::ShardPointResult {
+            on_point_result(ShardPointResult {
                 point_index,
                 metrics,
                 trip_data_parquet,
                 snapshot_counts_parquet,
-            });
+            })?;
             points_processed += 1;
         }
 
-        Ok(ChildExecutionSummary {
-            points_processed,
-            point_results,
-        })
+        Ok(points_processed)
     }
 }
 
@@ -338,11 +337,16 @@ mod tests {
     fn executes_only_requested_shard_bounds() {
         let payload = sample_payload();
         let executor = SimExperimentsShardExecutor;
+        let mut collected_results = Vec::new();
         let summary = executor
-            .execute_shard(&payload)
+            .execute_shard(&payload, &mut |result| {
+                collected_results.push(result);
+                Ok(())
+            })
             .expect("shard execution should succeed");
 
-        assert_eq!(summary.points_processed, 1);
+        assert_eq!(summary, 1);
+        assert_eq!(collected_results.len(), 1);
     }
 
     #[test]
@@ -356,7 +360,7 @@ mod tests {
 
         let executor = SimExperimentsShardExecutor;
         let error = executor
-            .execute_shard(&payload)
+            .execute_shard(&payload, &mut |_| Ok(()))
             .expect_err("unsupported dimension should fail");
 
         assert!(error.contains("Unsupported dimension 'unknown_dimension'"));

@@ -33,6 +33,25 @@ impl OutcomeStore for S3OutcomeStore {
             })
         })
     }
+
+    fn delete_object(&self, key: &str) -> Result<(), String> {
+        let bucket = self.bucket.clone();
+        let object_key = key.to_string();
+        let client = self.s3_client.clone();
+
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async move {
+                client
+                    .delete_object()
+                    .bucket(bucket)
+                    .key(object_key)
+                    .send()
+                    .await
+                    .map(|_| ())
+                    .map_err(|error| format!("failed to delete object from s3: {error}"))
+            })
+        })
+    }
 }
 
 async fn handle_request(

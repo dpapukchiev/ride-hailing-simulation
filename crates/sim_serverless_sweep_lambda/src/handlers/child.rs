@@ -21,12 +21,6 @@ use crate::adapters::object_store::OutcomeStore;
 use crate::adapters::shard_execution::SimExperimentsShardExecutor;
 
 #[derive(Debug, Clone)]
-pub struct ChildExecutionSummary {
-    pub points_processed: usize,
-    pub point_results: Vec<ShardPointResult>,
-}
-
-#[derive(Debug, Clone)]
 pub struct ShardPointResult {
     pub point_index: usize,
     pub metrics: SimulationResult,
@@ -35,7 +29,11 @@ pub struct ShardPointResult {
 }
 
 pub trait ShardExecutor {
-    fn execute_shard(&self, payload: &ChildShardPayload) -> Result<ChildExecutionSummary, String>;
+    fn execute_shard(
+        &self,
+        payload: &ChildShardPayload,
+        on_point_result: &mut dyn FnMut(ShardPointResult) -> Result<(), String>,
+    ) -> Result<usize, String>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,24 +77,10 @@ pub fn handle_child_payload(
         });
     }
 
-    match executor.execute_shard(payload) {
-        Ok(summary) => match write_success(payload, config, summary, outcome_store) {
-            Ok(response) => Ok(response),
-            Err(success_error) => {
-                let error_message = success_error.message;
-                write_failure(payload, config, &error_message, outcome_store)?;
-                Err(ChildHandlerError {
-                    message: error_message,
-                    failure_key: Some(error_object_key(
-                        &config.prefix,
-                        &config.run_date,
-                        &payload.run_id,
-                        payload.shard_id,
-                    )),
-                })
-            }
-        },
-        Err(error_message) => {
+    match write_success(payload, config, executor, outcome_store) {
+        Ok(response) => Ok(response),
+        Err(success_error) => {
+            let error_message = success_error.message;
             write_failure(payload, config, &error_message, outcome_store)?;
             Err(ChildHandlerError {
                 message: error_message,
@@ -122,11 +106,13 @@ pub fn handle_child_payload_with_sim_runtime(
 fn write_success(
     payload: &ChildShardPayload,
     config: &ChildHandlerConfig,
-    summary: ChildExecutionSummary,
+    executor: &impl ShardExecutor,
     outcome_store: &impl OutcomeStore,
 ) -> Result<ChildSuccessResponse, ChildHandlerError> {
     let mut first_metrics_key: Option<String> = None;
-    for point_result in &summary.point_results {
+    let mut written_success_keys = Vec::new();
+
+    let mut on_point_result = |point_result: ShardPointResult| -> Result<(), String> {
         let metrics_key = metrics_object_key(
             &config.prefix,
             &config.run_date,
@@ -157,36 +143,37 @@ fn write_success(
             &payload.run_id,
             payload.shard_id,
         )
-        .map_err(|error| ChildHandlerError {
-            message: format!("Failed to serialize shard metrics to parquet: {error}"),
-            failure_key: None,
-        })?;
+        .map_err(|error| format!("Failed to serialize shard metrics to parquet: {error}"))?;
 
         outcome_store
             .write_object(&metrics_key, &parquet_body)
-            .map_err(|error| ChildHandlerError {
-                message: format!("Failed to persist shard metrics artifact: {error}"),
-                failure_key: None,
-            })?;
+            .map_err(|error| format!("Failed to persist shard metrics artifact: {error}"))?;
+        written_success_keys.push(metrics_key.clone());
 
         outcome_store
             .write_object(&trip_data_key, &point_result.trip_data_parquet)
-            .map_err(|error| ChildHandlerError {
-                message: format!("Failed to persist trip data artifact: {error}"),
-                failure_key: None,
-            })?;
+            .map_err(|error| format!("Failed to persist trip data artifact: {error}"))?;
+        written_success_keys.push(trip_data_key);
 
         outcome_store
             .write_object(&snapshot_counts_key, &point_result.snapshot_counts_parquet)
-            .map_err(|error| ChildHandlerError {
-                message: format!("Failed to persist snapshot counts artifact: {error}"),
-                failure_key: None,
-            })?;
+            .map_err(|error| format!("Failed to persist snapshot counts artifact: {error}"))?;
+        written_success_keys.push(snapshot_counts_key);
 
         if first_metrics_key.is_none() {
             first_metrics_key = Some(metrics_key);
         }
-    }
+
+        Ok(())
+    };
+
+    let points_processed = match executor.execute_shard(payload, &mut on_point_result) {
+        Ok(points_processed) => points_processed,
+        Err(error) => {
+            let rollback_errors = rollback_success_writes(outcome_store, &written_success_keys);
+            return Err(attach_rollback_errors(error, rollback_errors));
+        }
+    };
 
     let metrics_prefix = first_metrics_key.unwrap_or_else(|| {
         metrics_object_key(
@@ -216,7 +203,7 @@ fn write_success(
         record_schema: OUTCOME_RECORD_SCHEMA_VERSION.to_string(),
         output_metadata: Some(ShardOutputMetadata {
             result_key: metrics_prefix,
-            points_processed: summary.points_processed,
+            points_processed,
             format: "parquet".to_string(),
         }),
         error: None,
@@ -227,18 +214,49 @@ fn write_success(
         failure_key: None,
     })?;
 
-    outcome_store
-        .write_object(&outcome_key, &body)
-        .map_err(|error| ChildHandlerError {
-            message: format!("Failed to persist success outcome: {error}"),
-            failure_key: None,
-        })?;
+    if let Err(error) = outcome_store.write_object(&outcome_key, &body) {
+        let rollback_errors = rollback_success_writes(outcome_store, &written_success_keys);
+        return Err(attach_rollback_errors(
+            format!("Failed to persist success outcome: {error}"),
+            rollback_errors,
+        ));
+    }
 
     Ok(ChildSuccessResponse {
         status: "ok".to_string(),
         shard_id: payload.shard_id,
         outcome_key,
     })
+}
+
+fn rollback_success_writes(outcome_store: &impl OutcomeStore, keys: &[String]) -> Vec<String> {
+    keys.iter()
+        .rev()
+        .filter_map(|key| {
+            outcome_store
+                .delete_object(key)
+                .err()
+                .map(|error| format!("{key}: {error}"))
+        })
+        .collect()
+}
+
+fn attach_rollback_errors(message: String, rollback_errors: Vec<String>) -> ChildHandlerError {
+    if rollback_errors.is_empty() {
+        return ChildHandlerError {
+            message,
+            failure_key: None,
+        };
+    }
+
+    ChildHandlerError {
+        message: format!(
+            "{message}. Rollback failed for {} object(s): {}",
+            rollback_errors.len(),
+            rollback_errors.join("; ")
+        ),
+        failure_key: None,
+    }
 }
 
 fn serialize_metrics_parquet(
@@ -438,6 +456,11 @@ mod tests {
                 .insert(key.to_string(), body.to_vec());
             Ok(())
         }
+
+        fn delete_object(&self, key: &str) -> Result<(), String> {
+            self.writes.lock().expect("poisoned mutex").remove(key);
+            Ok(())
+        }
     }
 
     struct PassExecutor;
@@ -446,19 +469,20 @@ mod tests {
         fn execute_shard(
             &self,
             payload: &ChildShardPayload,
-        ) -> Result<ChildExecutionSummary, String> {
-            let points_processed = payload.end_index_exclusive - payload.start_index;
-            Ok(ChildExecutionSummary {
-                points_processed,
-                point_results: (payload.start_index..payload.end_index_exclusive)
-                    .map(|point_index| ShardPointResult {
-                        point_index,
-                        metrics: sample_simulation_result(),
-                        trip_data_parquet: b"PAR1-trip".to_vec(),
-                        snapshot_counts_parquet: b"PAR1-snap".to_vec(),
-                    })
-                    .collect(),
-            })
+            on_point_result: &mut dyn FnMut(ShardPointResult) -> Result<(), String>,
+        ) -> Result<usize, String> {
+            let mut points_processed = 0usize;
+            for point_index in payload.start_index..payload.end_index_exclusive {
+                on_point_result(ShardPointResult {
+                    point_index,
+                    metrics: sample_simulation_result(),
+                    trip_data_parquet: b"PAR1-trip".to_vec(),
+                    snapshot_counts_parquet: b"PAR1-snap".to_vec(),
+                })?;
+                points_processed += 1;
+            }
+
+            Ok(points_processed)
         }
     }
 
@@ -468,7 +492,8 @@ mod tests {
         fn execute_shard(
             &self,
             _payload: &ChildShardPayload,
-        ) -> Result<ChildExecutionSummary, String> {
+            _on_point_result: &mut dyn FnMut(ShardPointResult) -> Result<(), String>,
+        ) -> Result<usize, String> {
             Err("Injected shard failure for verification".to_string())
         }
     }
@@ -514,6 +539,11 @@ mod tests {
                 .lock()
                 .expect("poisoned mutex")
                 .insert(key.to_string(), body.to_vec());
+            Ok(())
+        }
+
+        fn delete_object(&self, key: &str) -> Result<(), String> {
+            self.writes.lock().expect("poisoned mutex").remove(key);
             Ok(())
         }
     }
@@ -694,7 +724,7 @@ mod tests {
         let failure_key = error.failure_key.expect("failure key should exist");
         assert!(failure_key.contains("dataset=shard_outcomes"));
 
-        assert!(store
+        assert!(!store
             .keys()
             .iter()
             .any(|key| key.contains("status=success") && key.ends_with(".parquet")));
