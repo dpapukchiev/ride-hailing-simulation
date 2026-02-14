@@ -116,7 +116,7 @@ During scale testing, logging became a significant performance bottleneck at 10K
 
 ### Experimentation Limits
 
-The parallel experimentation framework (using rayon) hits single-machine resource limits (memory/CPU) when running large parameter sweeps. The architecture is designed for distributed execution via a coordinator/worker model (documented in `crates/sim_experiments/README.md`), but implementation is deferred until scaling beyond a single machine becomes necessary. This demonstrates understanding of when to architect for future needs vs. when to optimize prematurely.
+The parallel experimentation framework (using rayon) still hits single-machine resource limits (memory/CPU) when running large parameter sweeps. The repository now also includes an AWS serverless fan-out deployment path (API Gateway + parent/child Lambda orchestration) for distributed shard execution, while broader long-running coordinator/worker modes remain future extensions. This demonstrates pragmatic scaling: keep local iteration fast while adding a production-relevant cloud path when needed.
 
 ## Key Skills Demonstrated
 
@@ -155,18 +155,18 @@ The parallel experimentation framework (using rayon) hits single-machine resourc
 - **Zero unsafe code** in core simulation logic
 - **Deterministic execution** with seeded RNG throughout
 - **Comprehensive telemetry** with Parquet export for analytics
-- **Parallel experimentation** framework (hits single-machine limits)
+- **Parallel experimentation** framework for local CPU parallelism plus an AWS serverless deployment path for distributed shard execution
 - **Real-time visualization** with interactive UI
 - **Multiple matching algorithms** with trait-based extensibility
 - **Clippy pedantic** with no-warnings policy
 
 ## Future Work
 
-The project demonstrates understanding of distributed systems -- the experimentation framework architecture is designed for a coordinator/worker model when scaling beyond single-machine limits becomes necessary. Other potential enhancements:
+The project demonstrates understanding of distributed systems with both local and cloud execution modes. Other potential enhancements:
 
 - **Distributed experimentation**: Multi-machine parameter sweeps via HTTP-based task distribution
-- **Real routing**: Integrate OSRM or similar for realistic road network movement
-- **Advanced matching**: Opportunity cost, shadow pricing, driver-value weighting
+- **Routing depth**: Expand road-network routing workflows beyond current OSRM support (for example, broader precomputed coverage and richer traffic calibration)
+- **Advanced matching**: Add opportunity cost, shadow pricing, and driver-value weighting strategies on top of existing Simple/CostBased/Hungarian modes
 - **Multi-service switching**: Driver behavior across multiple platforms (rides, food delivery)
 
 ## Conclusion

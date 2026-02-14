@@ -26,3 +26,17 @@ Parallel experimentation framework for parameter sweeps and marketplace health a
 **Dependencies**: `sim_core`, `rayon` (parallel execution), `serde`/`serde_json` (serialization), `arrow`/`parquet` (export).
 
 **Usage**: Define parameter space (or use pre-defined spaces from `parameter_spaces`), generate parameter sets, run parallel experiments, calculate health scores, export results. See `examples/parameter_sweep.rs` for complete example using pre-defined parameter spaces.
+
+## AWS Serverless Sweep Path
+
+The repository also includes a deployed AWS serverless sweep path for distributed shard execution.
+
+- **Ingress + orchestration**: API Gateway `POST /sweep-run` invokes a parent Lambda that validates requests, computes deterministic shard plans, and dispatches child Lambdas asynchronously.
+- **Runtime crates**:
+  - `crates/sim_serverless_sweep_core`: shared contract types, request validation, shard planning, and storage key conventions
+  - `crates/sim_serverless_sweep_lambda`: parent/child handlers plus AWS adapter boundaries
+- **Infrastructure wiring**: `infra/aws_serverless_sweep/terraform` provisions API Gateway, Lambdas, IAM, and environment wiring only.
+- **Outcome storage**: Child workers write partitioned Parquet datasets to S3 for Athena analytics (shard outcomes, shard metrics, trip data, snapshot counts).
+- **Operator docs**:
+  - Deploy and infra details: `infra/aws_serverless_sweep/README.md`
+  - Deploy/invoke/verify/rollback runbook: `documentation/experiments/serverless-sweep-runbook.md`
