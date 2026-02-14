@@ -108,6 +108,49 @@ All datasets are joinable by `run_id`, `shard_id`, and `point_index` (where appl
 
 ## Athena Analytics
 
+### Automated post-run ingestion and readiness checks
+
+Use `xtask` to run the full post-simulation pipeline for a newly completed run. This command:
+
+1. Ensures database + external tables exist.
+2. Loads partitions for all datasets.
+3. Validates run-scoped data presence and shard coverage.
+4. Emits a summary and exits non-zero if readiness checks fail.
+
+```bash
+cargo run -p xtask -- post-run-ingest \
+  --run-id <run_id> \
+  --athena-db ride_sim_analytics \
+  --athena-workgroup primary \
+  --athena-query-output s3://<bucket>/<athena-query-results-prefix> \
+  --results-bucket <bucket> \
+  --results-prefix serverless-sweeps/outcomes \
+  --expected-shards <count>
+```
+
+Required inputs:
+
+- `--run-id`: target run to validate.
+- `--athena-query-output`: S3 URI for Athena query result files.
+- `--results-bucket`: bucket backing the external-table `LOCATION` values.
+
+Optional inputs:
+
+- `--athena-db` and `--athena-workgroup` default to `ride_sim_analytics` and `primary`.
+- `--results-prefix` defaults to `serverless-sweeps/outcomes`.
+- `--expected-shards` enables strict shard coverage validation and missing-shard reporting.
+
+Environment fallbacks:
+
+- `ATHENA_QUERY_OUTPUT` for `--athena-query-output`
+- `SWEEP_RESULTS_BUCKET` for `--results-bucket`
+
+Common failure modes and recovery:
+
+- **Missing partitions / zero rows after fresh run**: wait for worker writes to finish, then rerun `post-run-ingest`.
+- **Coverage mismatch** (`observed != expected`): inspect `query_shard_coverage.sql` and `query_failure_diagnostics.sql` for missing/failed shards.
+- **Athena query failure** (permissions or location): verify workgroup access and query output S3 permissions for your operator role.
+
 Use SQL in `infra/aws_serverless_sweep/athena/`:
 
 - `create_table.sql`: creates outcomes/metrics/trip/snapshot external tables

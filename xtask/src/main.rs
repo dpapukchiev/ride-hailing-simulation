@@ -61,6 +61,30 @@ enum Commands {
         #[arg(value_enum, long, default_value_t = BuildProfile::Release)]
         profile: BuildProfile,
     },
+    /// Ensure Athena metadata/partitions are ready and validate run results
+    PostRunIngest {
+        /// Target run identifier to validate
+        #[arg(long)]
+        run_id: String,
+        /// Athena database containing the sweep tables
+        #[arg(long, default_value = "ride_sim_analytics")]
+        athena_db: String,
+        /// Athena workgroup for query execution
+        #[arg(long, default_value = "primary")]
+        athena_workgroup: String,
+        /// S3 URI where Athena writes query outputs (s3://bucket/prefix)
+        #[arg(long, env = "ATHENA_QUERY_OUTPUT")]
+        athena_query_output: String,
+        /// Results bucket used by external table LOCATION clauses
+        #[arg(long, env = "SWEEP_RESULTS_BUCKET")]
+        results_bucket: String,
+        /// Results prefix used by external table LOCATION clauses
+        #[arg(long, default_value = "serverless-sweeps/outcomes")]
+        results_prefix: String,
+        /// Optional expected number of shards for full-coverage validation
+        #[arg(long)]
+        expected_shards: Option<u64>,
+    },
 }
 
 #[derive(Clone, ValueEnum)]
@@ -131,6 +155,300 @@ fn run_git(args: &[&str]) {
     if !status.success() {
         exit(status.code().unwrap_or(1));
     }
+}
+
+fn run_command(program: &str, args: &[&str]) -> String {
+    eprintln!("+ {program} {}", args.join(" "));
+    let output = Command::new(program)
+        .args(args)
+        .output()
+        .unwrap_or_else(|error| panic!("failed to execute {program}: {error}"));
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        panic!(
+            "command `{program} {}` failed: {}",
+            args.join(" "),
+            stderr.trim()
+        );
+    }
+
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
+fn ensure_tool_available(tool: &str) {
+    let status = Command::new(tool).arg("--version").status();
+    match status {
+        Ok(ok) if ok.success() => {}
+        Ok(_) | Err(_) => panic!("required tool `{tool}` is not available on PATH"),
+    }
+}
+
+fn sanitize_sql_literal(value: &str) -> String {
+    value.replace("'", "''")
+}
+
+fn run_athena_query(query: &str, database: &str, workgroup: &str, output: &str) -> String {
+    let query_id = run_command(
+        "aws",
+        &[
+            "athena",
+            "start-query-execution",
+            "--query-string",
+            query,
+            "--query-execution-context",
+            &format!("Database={database}"),
+            "--work-group",
+            workgroup,
+            "--result-configuration",
+            &format!("OutputLocation={output}"),
+            "--query",
+            "QueryExecutionId",
+            "--output",
+            "text",
+        ],
+    );
+
+    loop {
+        let state = run_command(
+            "aws",
+            &[
+                "athena",
+                "get-query-execution",
+                "--query-execution-id",
+                &query_id,
+                "--query",
+                "QueryExecution.Status.State",
+                "--output",
+                "text",
+            ],
+        );
+
+        match state.as_str() {
+            "SUCCEEDED" => return query_id,
+            "FAILED" | "CANCELLED" => {
+                let reason = run_command(
+                    "aws",
+                    &[
+                        "athena",
+                        "get-query-execution",
+                        "--query-execution-id",
+                        &query_id,
+                        "--query",
+                        "QueryExecution.Status.StateChangeReason",
+                        "--output",
+                        "text",
+                    ],
+                );
+                panic!("athena query failed ({state}): {reason}");
+            }
+            _ => std::thread::sleep(std::time::Duration::from_millis(1_000)),
+        }
+    }
+}
+
+fn query_scalar(query: &str, database: &str, workgroup: &str, output: &str) -> String {
+    let query_id = run_athena_query(query, database, workgroup, output);
+    run_command(
+        "aws",
+        &[
+            "athena",
+            "get-query-results",
+            "--query-execution-id",
+            &query_id,
+            "--query",
+            "ResultSet.Rows[1].Data[0].VarCharValue",
+            "--output",
+            "text",
+        ],
+    )
+}
+
+fn apply_athena_template(sql: &str, db: &str, bucket: &str, prefix: &str) -> String {
+    sql.replace("ride_sim_analytics", db)
+        .replace("<results-bucket>", bucket)
+        .replace("serverless-sweeps/outcomes", prefix.trim_matches('/'))
+}
+
+fn run_sql_file(path: &str, db: &str, workgroup: &str, output: &str, bucket: &str, prefix: &str) {
+    let template =
+        fs::read_to_string(path).unwrap_or_else(|error| panic!("failed to read {path}: {error}"));
+    let sql = apply_athena_template(&template, db, bucket, prefix);
+    step(&format!("Athena SQL: {path}"));
+    run_athena_query(&sql, db, workgroup, output);
+}
+
+fn run_post_ingest(
+    run_id: &str,
+    db: &str,
+    workgroup: &str,
+    output: &str,
+    bucket: &str,
+    prefix: &str,
+    expected_shards: Option<u64>,
+) {
+    ensure_tool_available("aws");
+
+    step("Bootstrap Athena database/tables");
+    let create_files = [
+        "infra/aws_serverless_sweep/athena/create_database.sql",
+        "infra/aws_serverless_sweep/athena/create_table.sql",
+        "infra/aws_serverless_sweep/athena/create_table_shard_metrics.sql",
+        "infra/aws_serverless_sweep/athena/create_table_trip_data.sql",
+        "infra/aws_serverless_sweep/athena/create_table_snapshot_counts.sql",
+    ];
+    for path in create_files {
+        run_sql_file(path, db, workgroup, output, bucket, prefix);
+    }
+
+    step("Load partitions");
+    let repair_files = [
+        "infra/aws_serverless_sweep/athena/repair_table.sql",
+        "infra/aws_serverless_sweep/athena/repair_table_shard_metrics.sql",
+        "infra/aws_serverless_sweep/athena/repair_table_trip_data.sql",
+        "infra/aws_serverless_sweep/athena/repair_table_snapshot_counts.sql",
+    ];
+    for path in repair_files {
+        run_sql_file(path, db, workgroup, output, bucket, prefix);
+    }
+
+    step("Validate run readiness");
+    let run_id_sql = sanitize_sql_literal(run_id);
+    let outcomes_count = query_scalar(
+        &format!(
+            "SELECT CAST(COUNT(*) AS VARCHAR) FROM {db}.sweep_shard_outcomes WHERE run_id_partition = '{run_id_sql}'"
+        ),
+        db,
+        workgroup,
+        output,
+    )
+    .parse::<u64>()
+    .unwrap_or(0);
+    let distinct_shards = query_scalar(
+        &format!(
+            "SELECT CAST(COUNT(DISTINCT shard_id_partition) AS VARCHAR) FROM {db}.sweep_shard_outcomes WHERE run_id_partition = '{run_id_sql}'"
+        ),
+        db,
+        workgroup,
+        output,
+    )
+    .parse::<u64>()
+    .unwrap_or(0);
+    let successful_shards = query_scalar(
+        &format!(
+            "SELECT CAST(COUNT(*) AS VARCHAR) FROM {db}.sweep_shard_outcomes WHERE run_id_partition = '{run_id_sql}' AND status_partition = 'success'"
+        ),
+        db,
+        workgroup,
+        output,
+    )
+    .parse::<u64>()
+    .unwrap_or(0);
+    let failed_shards = query_scalar(
+        &format!(
+            "SELECT CAST(COUNT(*) AS VARCHAR) FROM {db}.sweep_shard_outcomes WHERE run_id_partition = '{run_id_sql}' AND status_partition = 'failure'"
+        ),
+        db,
+        workgroup,
+        output,
+    )
+    .parse::<u64>()
+    .unwrap_or(0);
+    let metrics_rows = query_scalar(
+        &format!(
+            "SELECT CAST(COUNT(*) AS VARCHAR) FROM {db}.sweep_shard_metrics WHERE run_id = '{run_id_sql}'"
+        ),
+        db,
+        workgroup,
+        output,
+    )
+    .parse::<u64>()
+    .unwrap_or(0);
+    let trip_rows = query_scalar(
+        &format!(
+            "SELECT CAST(COUNT(*) AS VARCHAR) FROM {db}.sweep_trip_data WHERE run_id = '{run_id_sql}'"
+        ),
+        db,
+        workgroup,
+        output,
+    )
+    .parse::<u64>()
+    .unwrap_or(0);
+    let snapshot_rows = query_scalar(
+        &format!(
+            "SELECT CAST(COUNT(*) AS VARCHAR) FROM {db}.sweep_snapshot_counts WHERE run_id = '{run_id_sql}'"
+        ),
+        db,
+        workgroup,
+        output,
+    )
+    .parse::<u64>()
+    .unwrap_or(0);
+
+    let missing_shards = if let Some(expected) = expected_shards {
+        query_scalar(
+            &format!(
+                "WITH expected AS (SELECT sequence(0, {expected} - 1) AS ids), observed AS (
+                    SELECT CAST(shard_id_partition AS BIGINT) AS shard_id
+                    FROM {db}.sweep_shard_outcomes
+                    WHERE run_id_partition = '{run_id_sql}'
+                )
+                SELECT array_join(transform(filter((SELECT ids FROM expected), x -> x NOT IN (SELECT shard_id FROM observed)), x -> CAST(x AS VARCHAR)), ',')"
+            ),
+            db,
+            workgroup,
+            output,
+        )
+    } else {
+        String::new()
+    };
+
+    let mut errors = Vec::new();
+    if outcomes_count == 0 {
+        errors.push("no shard_outcomes rows for run_id".to_string());
+    }
+    if metrics_rows == 0 {
+        errors.push("no shard_metrics rows for run_id".to_string());
+    }
+    if trip_rows == 0 {
+        errors.push("no trip_data rows for run_id".to_string());
+    }
+    if snapshot_rows == 0 {
+        errors.push("no snapshot_counts rows for run_id".to_string());
+    }
+    if let Some(expected) = expected_shards {
+        if distinct_shards != expected {
+            errors.push(format!(
+                "shard coverage mismatch: observed {distinct_shards}, expected {expected}"
+            ));
+        }
+    }
+
+    eprintln!("\nPost-run ingestion summary:");
+    eprintln!("- run_id: {run_id}");
+    eprintln!("- shard_outcomes rows: {outcomes_count}");
+    eprintln!("- successful shard outcomes: {successful_shards}");
+    eprintln!("- failed shard outcomes: {failed_shards}");
+    eprintln!("- distinct shards observed: {distinct_shards}");
+    eprintln!("- shard_metrics rows: {metrics_rows}");
+    eprintln!("- trip_data rows: {trip_rows}");
+    eprintln!("- snapshot_counts rows: {snapshot_rows}");
+    if !missing_shards.is_empty() && missing_shards != "None" {
+        eprintln!("- missing shard ids: {missing_shards}");
+    }
+
+    if !errors.is_empty() {
+        eprintln!("\nReadiness check failed:");
+        for error in errors {
+            eprintln!("  - {error}");
+        }
+        eprintln!(
+            "\nNext steps: rerun partition repair and inspect infra/aws_serverless_sweep/athena/query_failure_diagnostics.sql"
+        );
+        exit(1);
+    }
+
+    eprintln!("\nReadiness check passed.");
 }
 
 fn package_serverless_lambdas(target: &str, profile: BuildProfile) {
@@ -463,6 +781,25 @@ fn main() {
         }
         Commands::ServerlessPackage { target, profile } => {
             package_serverless_lambdas(&target, profile);
+        }
+        Commands::PostRunIngest {
+            run_id,
+            athena_db,
+            athena_workgroup,
+            athena_query_output,
+            results_bucket,
+            results_prefix,
+            expected_shards,
+        } => {
+            run_post_ingest(
+                &run_id,
+                &athena_db,
+                &athena_workgroup,
+                &athena_query_output,
+                &results_bucket,
+                &results_prefix,
+                expected_shards,
+            );
         }
     }
 }
