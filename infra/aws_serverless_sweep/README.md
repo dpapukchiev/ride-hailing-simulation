@@ -75,7 +75,7 @@ Optional overrides:
 - `SWEEP_LAMBDA_PROFILE` (default `release`)
 - `SWEEP_DOCKER_IMAGE` (default `docker.io/library/rust:1-bullseye`)
 
-After deploy, copy the output `api_url` and invoke with a sweep request payload.
+After deploy, copy the output `api_url` and invoke with a sweep request payload.~~~~
 
 ## Request Contract
 

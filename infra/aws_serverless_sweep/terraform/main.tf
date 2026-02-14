@@ -82,9 +82,14 @@ resource "aws_iam_role_policy" "parent_dispatch_policy" {
     Version = "2012-10-17",
     Statement = [
       {
-        Effect = "Allow",
-        Action = ["lambda:InvokeFunction"],
-        Resource = aws_lambda_function.child_lambda.arn
+        Effect   = "Allow",
+        Action   = ["lambda:InvokeFunction"],
+        Resource = aws_lambda_function.child_lambda.arn,
+        Condition = {
+          StringEquals = {
+            "lambda:InvocationType" = "Event"
+          }
+        }
       }
     ]
   })
@@ -99,14 +104,13 @@ resource "aws_iam_role_policy" "child_s3_policy" {
       {
         Effect = "Allow",
         Action = [
-          "s3:PutObject",
-          "s3:GetObject"
+          "s3:PutObject"
         ],
         Resource = "${aws_s3_bucket.results.arn}/${trim(var.results_prefix, "/")}/*"
       },
       {
-        Effect = "Allow",
-        Action = ["s3:ListBucket"],
+        Effect   = "Allow",
+        Action   = ["s3:ListBucket"],
         Resource = aws_s3_bucket.results.arn,
         Condition = {
           StringLike = {
@@ -170,7 +174,7 @@ resource "aws_api_gateway_model" "sweep_request" {
   name         = "SweepRunRequest"
   content_type = "application/json"
   schema = jsonencode({
-    type = "object",
+    type     = "object",
     required = ["run_id", "dimensions"],
     properties = {
       run_id = { type = "string", minLength = 1 },

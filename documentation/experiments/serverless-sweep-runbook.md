@@ -2,7 +2,7 @@
 
 See `AGENTS.md` for repo constraints and expected command workflows.
 
-This runbook covers deploy, invoke, and query steps for the AWS serverless sweep demo.
+This runbook covers deploy, invoke, rollback, and verification steps for the AWS serverless sweep flow.
 
 ## 1) Deploy
 
@@ -12,6 +12,12 @@ This runbook covers deploy, invoke, and query steps for the AWS serverless sweep
 ```
 
 This command builds Rust parent/child Lambda binaries, packages `bootstrap` zip artifacts, and applies Terraform with stable `parent_lambda_zip` / `child_lambda_zip` inputs.
+
+Secret and credential posture:
+
+- Never commit cloud credentials or secret files.
+- Use short-lived credentials only (`aws sso login` or equivalent temporary session).
+- `deploy_local.sh` preflights credentials via `aws sts get-caller-identity` and fails fast if the session is expired.
 
 Capture outputs:
 
@@ -72,6 +78,13 @@ For local verification of parent/child contract behavior, run:
 cargo test -p sim_serverless_sweep_lambda
 ```
 
+For IAM least-privilege scope checks, run Terraform validation and then inspect role policies in plan output:
+
+```bash
+terraform -chdir=infra/aws_serverless_sweep/terraform validate
+terraform -chdir=infra/aws_serverless_sweep/terraform plan
+```
+
 ## 4) Athena Setup + Queries
 
 Run SQL from:
@@ -95,3 +108,36 @@ Minimum checks:
 2. Run-level query returns expected shard attempts.
 3. Failure-rate query returns non-zero failures when `failure_injection_shards` is used.
 4. Trip/snapshot join query returns rows keyed by `(run_id, shard_id, point_index)`.
+
+Run `query_run_level_profile.sql` and `query_failure_diagnostics.sql` with your target `run_id` to verify outcomes are queryable end to end.
+
+## 5) Rollback
+
+If a new Rust runtime deployment regresses:
+
+1. Re-package a known-good artifact pair (`parent.zip`, `child.zip`) or retrieve prior build outputs.
+2. Re-apply Terraform with the known-good zip paths:
+
+```bash
+terraform -chdir=infra/aws_serverless_sweep/terraform apply \
+  -var "parent_lambda_zip=<known-good-parent.zip>" \
+  -var "child_lambda_zip=<known-good-child.zip>"
+```
+
+3. Re-run the invocation and Athena checks above.
+
+## 6) Local vs Cloud Expectations
+
+- Local Rust tests validate contracts, deterministic sharding, and handler behavior.
+- Cloud validation confirms deployment wiring, S3 persistence, and Athena queryability against real IAM and API Gateway.
+- The active deployment path is Rust-only (legacy Python runtime module removed).
+
+## 7) Migration Sign-off Criteria
+
+The migration is considered complete when all are true:
+
+1. Rust parent/child handlers pass local crate tests.
+2. Deploy script succeeds with temporary credentials only.
+3. Results land in partitioned `dataset=shard_*` S3 paths for the run.
+4. Athena queries return success/failure aggregation for the run.
+5. Terraform remains infrastructure wiring only; runtime behavior changes are done in `crates/`.
