@@ -563,3 +563,80 @@ fn percentile_f64_sorted(sorted: &[f64], p: u8) -> Option<f64> {
     let idx = ((p as usize) * (n - 1)) / 100;
     Some(sorted[idx])
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{percentile_f64_sorted, timing_distribution};
+    use sim_core::telemetry::CompletedTripRecord;
+
+    fn trip_with_time_to_match(ms: u64) -> CompletedTripRecord {
+        CompletedTripRecord {
+            trip_entity: bevy_ecs::entity::Entity::from_raw(1),
+            rider_entity: bevy_ecs::entity::Entity::from_raw(2),
+            driver_entity: bevy_ecs::entity::Entity::from_raw(3),
+            completed_at: ms,
+            requested_at: 0,
+            matched_at: ms,
+            pickup_at: ms,
+            fare: 0.0,
+            surge_impact: 0.0,
+        }
+    }
+
+    #[test]
+    fn timing_distribution_empty_is_zeroed() {
+        let trips: Vec<CompletedTripRecord> = Vec::new();
+        let dist = timing_distribution(&trips, CompletedTripRecord::time_to_match);
+
+        assert_eq!(dist.min, 0);
+        assert_eq!(dist.mean, 0);
+        assert_eq!(dist.max, 0);
+        assert!(dist.sorted.is_empty());
+        assert_eq!(dist.percentile(50), None);
+    }
+
+    #[test]
+    fn timing_distribution_non_empty_aggregates_and_sorts() {
+        let trips = vec![
+            trip_with_time_to_match(40),
+            trip_with_time_to_match(10),
+            trip_with_time_to_match(20),
+        ];
+
+        let dist = timing_distribution(&trips, CompletedTripRecord::time_to_match);
+
+        assert_eq!(dist.min, 10);
+        assert_eq!(dist.mean, 23);
+        assert_eq!(dist.max, 40);
+        assert_eq!(dist.sorted, vec![10, 20, 40]);
+    }
+
+    #[test]
+    fn timing_distribution_percentile_uses_nearest_rank_index() {
+        let trips = vec![
+            trip_with_time_to_match(40),
+            trip_with_time_to_match(10),
+            trip_with_time_to_match(20),
+        ];
+
+        let dist = timing_distribution(&trips, CompletedTripRecord::time_to_match);
+
+        assert_eq!(dist.percentile(0), Some(10));
+        assert_eq!(dist.percentile(50), Some(20));
+        assert_eq!(dist.percentile(90), Some(20));
+        assert_eq!(dist.percentile(100), Some(40));
+        assert_eq!(dist.percentile(101), None);
+    }
+
+    #[test]
+    fn percentile_f64_sorted_handles_empty_valid_and_invalid_inputs() {
+        let sorted = vec![1.0, 2.0, 4.0, 8.0];
+
+        assert_eq!(percentile_f64_sorted(&[], 50), None);
+        assert_eq!(percentile_f64_sorted(&sorted, 0), Some(1.0));
+        assert_eq!(percentile_f64_sorted(&sorted, 50), Some(2.0));
+        assert_eq!(percentile_f64_sorted(&sorted, 90), Some(4.0));
+        assert_eq!(percentile_f64_sorted(&sorted, 100), Some(8.0));
+        assert_eq!(percentile_f64_sorted(&sorted, 101), None);
+    }
+}
