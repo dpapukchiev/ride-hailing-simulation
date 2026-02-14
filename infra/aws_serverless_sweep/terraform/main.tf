@@ -84,12 +84,7 @@ resource "aws_iam_role_policy" "parent_dispatch_policy" {
       {
         Effect   = "Allow",
         Action   = ["lambda:InvokeFunction"],
-        Resource = aws_lambda_function.child_lambda.arn,
-        Condition = {
-          StringEquals = {
-            "lambda:InvocationType" = "Event"
-          }
-        }
+        Resource = aws_lambda_function.child_lambda.arn
       }
     ]
   })
