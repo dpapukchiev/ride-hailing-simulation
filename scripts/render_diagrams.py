@@ -15,6 +15,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SOURCE = REPO_ROOT / "documentation" / "diagrams" / "src"
 DEFAULT_RENDERED = REPO_ROOT / "documentation" / "diagrams" / "rendered"
 DEFAULT_CONFIG = REPO_ROOT / "scripts" / "mermaid-config.json"
+DEFAULT_CI_PUPPETEER_CONFIG = REPO_ROOT / "scripts" / "puppeteer-config-ci.json"
 
 
 def run(command: list[str]) -> None:
@@ -33,6 +34,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--rendered", type=Path, default=DEFAULT_RENDERED)
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument(
+        "--puppeteer-config",
+        type=Path,
+        default=None,
+        help=(
+            "Optional Puppeteer launch config file. "
+            "If omitted, CI runs auto-use scripts/puppeteer-config-ci.json when present."
+        ),
+    )
+    parser.add_argument(
         "--mermaid-version",
         default="11.4.2",
         help="Mermaid CLI version used via npx (default: 11.4.2)",
@@ -40,11 +50,26 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def is_ci_environment() -> bool:
+    return os.environ.get("CI", "").strip().lower() in {"1", "true", "yes"}
+
+
+def resolve_puppeteer_config(args: argparse.Namespace) -> Path | None:
+    if args.puppeteer_config is not None:
+        return args.puppeteer_config.resolve()
+
+    if is_ci_environment() and DEFAULT_CI_PUPPETEER_CONFIG.exists():
+        return DEFAULT_CI_PUPPETEER_CONFIG.resolve()
+
+    return None
+
+
 def main() -> int:
     args = parse_args()
     source = args.source.resolve()
     rendered = args.rendered.resolve()
     config = args.config.resolve()
+    puppeteer_config = resolve_puppeteer_config(args)
 
     npx_executable = "npx.cmd" if os.name == "nt" else "npx"
     if shutil.which(npx_executable) is None:
@@ -58,6 +83,13 @@ def main() -> int:
 
     if not config.exists():
         print(f"error: Mermaid config does not exist: {config}", file=sys.stderr)
+        return 1
+
+    if puppeteer_config is not None and not puppeteer_config.exists():
+        print(
+            f"error: Puppeteer config does not exist: {puppeteer_config}",
+            file=sys.stderr,
+        )
         return 1
 
     diagram_files = sorted(source.rglob("*.mmd"))
@@ -78,19 +110,21 @@ def main() -> int:
         print(
             f"render {rel_path.as_posix()} -> {output_file.relative_to(rendered).as_posix()}"
         )
-        run(
-            [
-                npx_executable,
-                "--yes",
-                f"@mermaid-js/mermaid-cli@{args.mermaid_version}",
-                "-i",
-                str(diagram),
-                "-o",
-                str(output_file),
-                "-c",
-                str(config),
-            ]
-        )
+        command = [
+            npx_executable,
+            "--yes",
+            f"@mermaid-js/mermaid-cli@{args.mermaid_version}",
+            "-i",
+            str(diagram),
+            "-o",
+            str(output_file),
+            "-c",
+            str(config),
+        ]
+        if puppeteer_config is not None:
+            command.extend(["--puppeteerConfigFile", str(puppeteer_config)])
+
+        run(command)
 
     print(f"Rendered {len(diagram_files)} diagrams.")
     return 0

@@ -34,6 +34,9 @@ Requirements:
 
 The renderer uses a pinned Mermaid CLI version for deterministic output.
 
+In CI, the renderer automatically applies `scripts/puppeteer-config-ci.json` so
+headless Chromium can run in restricted Linux sandboxes.
+
 ## Validate Render Freshness
 
 To verify all committed SVGs are up to date:
