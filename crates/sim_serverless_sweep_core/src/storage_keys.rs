@@ -4,6 +4,8 @@ pub enum DatasetKind {
     TripData,
     SnapshotCounts,
     ShardOutcomes,
+    RunContext,
+    EffectiveParameters,
 }
 
 impl DatasetKind {
@@ -13,7 +15,16 @@ impl DatasetKind {
             Self::TripData => "trip_data",
             Self::SnapshotCounts => "snapshot_counts",
             Self::ShardOutcomes => "shard_outcomes",
+            Self::RunContext => "run_context",
+            Self::EffectiveParameters => "effective_parameters",
         }
+    }
+
+    fn uses_partition_suffix_keys(self) -> bool {
+        matches!(
+            self,
+            Self::ShardOutcomes | Self::RunContext | Self::EffectiveParameters
+        )
     }
 }
 
@@ -25,8 +36,18 @@ pub fn partition_prefix(
     status: &str,
 ) -> String {
     let trimmed = base_prefix.trim_matches('/');
+    let run_id_key = if dataset.uses_partition_suffix_keys() {
+        "run_id_partition"
+    } else {
+        "run_id"
+    };
+    let status_key = if dataset.uses_partition_suffix_keys() {
+        "status_partition"
+    } else {
+        "status"
+    };
     format!(
-        "{trimmed}/dataset={}/run_date={run_date}/run_id={run_id}/status={status}",
+        "{trimmed}/dataset={}/run_date={run_date}/{run_id_key}={run_id}/{status_key}={status}",
         dataset.as_str(),
     )
 }
@@ -92,7 +113,7 @@ pub fn success_outcome_object_key(
     shard_id: usize,
 ) -> String {
     format!(
-        "{}/shard_id={shard_id}/part-0.parquet",
+        "{}/shard_id_partition={shard_id}/part-0.parquet",
         partition_prefix(
             base_prefix,
             DatasetKind::ShardOutcomes,
@@ -110,7 +131,7 @@ pub fn error_object_key(
     shard_id: usize,
 ) -> String {
     format!(
-        "{}/shard_id={shard_id}/part-0.parquet",
+        "{}/shard_id_partition={shard_id}/part-0.parquet",
         partition_prefix(
             base_prefix,
             DatasetKind::ShardOutcomes,
@@ -118,6 +139,44 @@ pub fn error_object_key(
             run_id,
             "failure",
         ),
+    )
+}
+
+pub fn run_context_object_key(
+    base_prefix: &str,
+    run_date: &str,
+    run_id: &str,
+    status: &str,
+) -> String {
+    format!(
+        "{}/part-0.parquet",
+        partition_prefix(
+            base_prefix,
+            DatasetKind::RunContext,
+            run_date,
+            run_id,
+            status,
+        )
+    )
+}
+
+pub fn effective_parameters_object_key(
+    base_prefix: &str,
+    run_date: &str,
+    run_id: &str,
+    status: &str,
+    shard_id: usize,
+    point_index: usize,
+) -> String {
+    format!(
+        "{}/shard_id_partition={shard_id}/point_index_partition={point_index}/part-0.parquet",
+        partition_prefix(
+            base_prefix,
+            DatasetKind::EffectiveParameters,
+            run_date,
+            run_id,
+            status,
+        )
     )
 }
 
@@ -147,7 +206,7 @@ mod tests {
         let key = error_object_key("outcomes", "2026-02-14", "run-123", 7);
         assert_eq!(
             key,
-            "outcomes/dataset=shard_outcomes/run_date=2026-02-14/run_id=run-123/status=failure/shard_id=7/part-0.parquet"
+            "outcomes/dataset=shard_outcomes/run_date=2026-02-14/run_id_partition=run-123/status_partition=failure/shard_id_partition=7/part-0.parquet"
         );
     }
 
@@ -156,7 +215,7 @@ mod tests {
         let key = success_outcome_object_key("outcomes", "2026-02-14", "run-123", 4);
         assert_eq!(
             key,
-            "outcomes/dataset=shard_outcomes/run_date=2026-02-14/run_id=run-123/status=success/shard_id=4/part-0.parquet"
+            "outcomes/dataset=shard_outcomes/run_date=2026-02-14/run_id_partition=run-123/status_partition=success/shard_id_partition=4/part-0.parquet"
         );
     }
 
@@ -175,6 +234,25 @@ mod tests {
         assert_eq!(
             key,
             "outcomes/dataset=snapshot_counts/run_date=2026-02-14/run_id=run-123/status=success/shard_id=2/point_index=11/part-0.parquet"
+        );
+    }
+
+    #[test]
+    fn builds_run_context_key() {
+        let key = run_context_object_key("outcomes", "2026-02-14", "run-123", "accepted");
+        assert_eq!(
+            key,
+            "outcomes/dataset=run_context/run_date=2026-02-14/run_id_partition=run-123/status_partition=accepted/part-0.parquet"
+        );
+    }
+
+    #[test]
+    fn builds_effective_parameter_key_with_point_partition() {
+        let key =
+            effective_parameters_object_key("outcomes", "2026-02-14", "run-123", "success", 2, 11);
+        assert_eq!(
+            key,
+            "outcomes/dataset=effective_parameters/run_date=2026-02-14/run_id_partition=run-123/status_partition=success/shard_id_partition=2/point_index_partition=11/part-0.parquet"
         );
     }
 }

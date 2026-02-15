@@ -6,6 +6,8 @@ use sha2::{Digest, Sha256};
 
 pub const ORCHESTRATION_SCHEMA_VERSION: &str = "v1";
 pub const OUTCOME_RECORD_SCHEMA_VERSION: &str = "v1";
+pub const RUN_CONTEXT_RECORD_SCHEMA_VERSION: &str = "v1";
+pub const EFFECTIVE_PARAMETER_RECORD_SCHEMA_VERSION: &str = "v1";
 pub const MAX_DIMENSION_VALUES: usize = 10_000;
 pub const MAX_TOTAL_PARAMETER_POINTS: usize = 200_000;
 pub const DEFAULT_MAX_SHARDS: usize = 1_000;
@@ -17,6 +19,32 @@ pub struct RunContext {
     pub run_id: String,
     pub schema_version: String,
     pub request_fingerprint: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RunContextRecord {
+    pub run_id: String,
+    pub run_date: String,
+    pub status: String,
+    pub request_source: String,
+    pub record_schema: String,
+    pub request_fingerprint: String,
+    pub config_fingerprint: String,
+    pub total_points: usize,
+    pub shard_count: usize,
+    pub shard_strategy: String,
+    pub max_shards: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EffectiveParameterRecord {
+    pub run_id: String,
+    pub shard_id: usize,
+    pub point_index: usize,
+    pub status: String,
+    pub record_schema: String,
+    pub parameter_fingerprint: String,
+    pub effective_parameters_json: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -214,8 +242,12 @@ pub fn normalize_request(payload: SweepRequest) -> Result<NormalizedSweepRequest
 }
 
 pub fn request_fingerprint(request: &NormalizedSweepRequest) -> String {
+    contract_fingerprint(request)
+}
+
+pub fn contract_fingerprint(value: impl Serialize) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(stable_contract_json(request));
+    hasher.update(stable_contract_json(value));
     format!("{:x}", hasher.finalize())
 }
 

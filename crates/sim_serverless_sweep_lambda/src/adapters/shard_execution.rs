@@ -1,9 +1,11 @@
+use std::collections::BTreeMap;
+
 use sim_core::pricing::PricingConfig;
 use sim_core::scenario::{MatchingAlgorithmType, ScenarioParams};
 use sim_core::traffic::TrafficProfileKind;
 use sim_experiments::{run_single_simulation_with_artifacts, ParameterSet};
 
-use crate::runtime::contract::ChildShardPayload;
+use crate::runtime::contract::{contract_fingerprint, stable_contract_json, ChildShardPayload};
 
 use crate::handlers::child::{ShardExecutor, ShardPointResult};
 
@@ -26,13 +28,16 @@ impl ShardExecutor for SimExperimentsShardExecutor {
 
         let mut points_processed = 0usize;
         for point_index in payload.start_index..payload.end_index_exclusive {
-            let parameter_set = parameter_set_for_index(payload, point_index)?;
+            let resolved_parameters = resolve_effective_parameters(payload, point_index)?;
+            let parameter_set = resolved_parameters.parameter_set;
             let artifacts = run_single_simulation_with_artifacts(&parameter_set)?;
             on_point_result(ShardPointResult {
                 point_index,
                 metrics: artifacts.metrics,
                 trip_data_parquet: artifacts.trip_data_parquet,
                 snapshot_counts_parquet: artifacts.snapshot_counts_parquet,
+                effective_parameters_json: resolved_parameters.effective_parameters_json,
+                parameter_fingerprint: resolved_parameters.parameter_fingerprint,
             })?;
             points_processed += 1;
         }
@@ -41,9 +46,43 @@ impl ShardExecutor for SimExperimentsShardExecutor {
     }
 }
 
+struct ResolvedEffectiveParameters {
+    parameter_set: ParameterSet,
+    effective_parameters_json: String,
+    parameter_fingerprint: String,
+}
+
+#[derive(serde::Serialize)]
+struct EffectiveParameterPayload {
+    dimensions: BTreeMap<String, serde_json::Value>,
+    seed: u64,
+}
+
+fn resolve_effective_parameters(
+    payload: &ChildShardPayload,
+    index: usize,
+) -> Result<ResolvedEffectiveParameters, String> {
+    let mut selected_dimensions = BTreeMap::new();
+    let parameter_set = parameter_set_for_index(payload, index, &mut selected_dimensions)?;
+    let effective_payload = EffectiveParameterPayload {
+        dimensions: selected_dimensions,
+        seed: parameter_set.seed,
+    };
+
+    let effective_parameters_json = stable_contract_json(&effective_payload);
+    let parameter_fingerprint = contract_fingerprint(&effective_payload);
+
+    Ok(ResolvedEffectiveParameters {
+        parameter_set,
+        effective_parameters_json,
+        parameter_fingerprint,
+    })
+}
+
 fn parameter_set_for_index(
     payload: &ChildShardPayload,
     index: usize,
+    selected_dimensions: &mut BTreeMap<String, serde_json::Value>,
 ) -> Result<ParameterSet, String> {
     let mut params = ScenarioParams::default();
     let dims: Vec<(&str, &Vec<serde_json::Value>)> = payload
@@ -60,7 +99,9 @@ fn parameter_set_for_index(
         }
         let value_idx = remainder % radix;
         remainder /= radix;
-        apply_dimension(&mut params, name, &values[value_idx])?;
+        let selected_value = values[value_idx].clone();
+        selected_dimensions.insert((*name).to_string(), selected_value.clone());
+        apply_dimension(&mut params, name, &selected_value)?;
     }
 
     if remainder != 0 {

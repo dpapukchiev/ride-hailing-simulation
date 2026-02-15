@@ -2,12 +2,12 @@ use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::runtime::contract::{
-    ChildShardPayload, OutcomeError, ShardOutcomeRecord, ShardOutputMetadata,
-    OUTCOME_RECORD_SCHEMA_VERSION,
+    ChildShardPayload, EffectiveParameterRecord, OutcomeError, ShardOutcomeRecord,
+    ShardOutputMetadata, EFFECTIVE_PARAMETER_RECORD_SCHEMA_VERSION, OUTCOME_RECORD_SCHEMA_VERSION,
 };
 use crate::runtime::storage_keys::{
-    error_object_key, metrics_object_key, snapshot_counts_object_key, success_outcome_object_key,
-    trip_data_object_key,
+    effective_parameters_object_key, error_object_key, metrics_object_key,
+    snapshot_counts_object_key, success_outcome_object_key, trip_data_object_key,
 };
 use arrow::array::{ArrayRef, StringArray, UInt64Array};
 use arrow::datatypes::{DataType, Field, Schema};
@@ -26,6 +26,8 @@ pub struct ShardPointResult {
     pub metrics: SimulationResult,
     pub trip_data_parquet: Vec<u8>,
     pub snapshot_counts_parquet: Vec<u8>,
+    pub effective_parameters_json: String,
+    pub parameter_fingerprint: String,
 }
 
 pub trait ShardExecutor {
@@ -136,6 +138,14 @@ fn write_success(
             payload.shard_id,
             point_result.point_index,
         );
+        let effective_parameters_key = effective_parameters_object_key(
+            &config.prefix,
+            &config.run_date,
+            &payload.run_id,
+            "success",
+            payload.shard_id,
+            point_result.point_index,
+        );
 
         let parquet_body = serialize_metrics_parquet(
             std::slice::from_ref(&point_result.metrics),
@@ -155,6 +165,23 @@ fn write_success(
         outcome_store
             .write_object(&snapshot_counts_key, &point_result.snapshot_counts_parquet)
             .map_err(|error| format!("Failed to persist snapshot counts artifact: {error}"))?;
+
+        let effective_parameters_record = EffectiveParameterRecord {
+            run_id: payload.run_id.clone(),
+            shard_id: payload.shard_id,
+            point_index: point_result.point_index,
+            status: "success".to_string(),
+            record_schema: EFFECTIVE_PARAMETER_RECORD_SCHEMA_VERSION.to_string(),
+            parameter_fingerprint: point_result.parameter_fingerprint,
+            effective_parameters_json: point_result.effective_parameters_json,
+        };
+        let effective_parameters_body = serialize_effective_parameters_parquet(
+            &effective_parameters_record,
+        )
+        .map_err(|error| format!("Failed to serialize effective-parameter parquet: {error}"))?;
+        outcome_store
+            .write_object(&effective_parameters_key, &effective_parameters_body)
+            .map_err(|error| format!("Failed to persist effective-parameter artifact: {error}"))?;
 
         if first_metrics_key.is_none() {
             first_metrics_key = Some(metrics_key);
@@ -326,6 +353,66 @@ fn serialize_outcome_parquet(record: &ShardOutcomeRecord) -> Result<Vec<u8>, Str
     Ok(bytes)
 }
 
+fn serialize_effective_parameters_parquet(
+    record: &EffectiveParameterRecord,
+) -> Result<Vec<u8>, String> {
+    let mut temp_path = std::env::temp_dir();
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| format!("Failed to read clock for parquet export: {error}"))?
+        .as_nanos();
+    temp_path.push(format!(
+        "serverless-effective-parameters-{timestamp}.parquet"
+    ));
+
+    let schema = std::sync::Arc::new(Schema::new(vec![
+        Field::new("run_id", DataType::Utf8, false),
+        Field::new("shard_id", DataType::UInt64, false),
+        Field::new("point_index", DataType::UInt64, false),
+        Field::new("status", DataType::Utf8, false),
+        Field::new("record_schema", DataType::Utf8, false),
+        Field::new("parameter_fingerprint", DataType::Utf8, false),
+        Field::new("effective_parameters_json", DataType::Utf8, false),
+    ]));
+
+    let batch = RecordBatch::try_new(
+        schema.clone(),
+        vec![
+            std::sync::Arc::new(StringArray::from(vec![record.run_id.clone()])) as ArrayRef,
+            std::sync::Arc::new(UInt64Array::from(vec![record.shard_id as u64])),
+            std::sync::Arc::new(UInt64Array::from(vec![record.point_index as u64])),
+            std::sync::Arc::new(StringArray::from(vec![record.status.clone()])),
+            std::sync::Arc::new(StringArray::from(vec![record.record_schema.clone()])),
+            std::sync::Arc::new(StringArray::from(vec![record
+                .parameter_fingerprint
+                .clone()])),
+            std::sync::Arc::new(StringArray::from(vec![record
+                .effective_parameters_json
+                .clone()])),
+        ],
+    )
+    .map_err(|error| {
+        format!("Failed to build effective-parameter parquet record batch: {error}")
+    })?;
+
+    let file = fs::File::create(&temp_path)
+        .map_err(|error| format!("Failed to create temporary parquet file: {error}"))?;
+    let props = WriterProperties::builder().build();
+    let mut writer =
+        ArrowWriter::try_new(file, schema, Some(props)).map_err(|error| error.to_string())?;
+    writer
+        .write(&batch)
+        .map_err(|error| format!("Failed to write effective-parameter parquet batch: {error}"))?;
+    writer
+        .close()
+        .map_err(|error| format!("Failed to close effective-parameter parquet writer: {error}"))?;
+
+    let bytes = fs::read(&temp_path)
+        .map_err(|error| format!("Failed to read exported parquet file: {error}"))?;
+    let _ = fs::remove_file(&temp_path);
+    Ok(bytes)
+}
+
 fn write_failure(
     payload: &ChildShardPayload,
     config: &ChildHandlerConfig,
@@ -437,6 +524,8 @@ mod tests {
                     metrics: sample_simulation_result(),
                     trip_data_parquet: b"PAR1-trip".to_vec(),
                     snapshot_counts_parquet: b"PAR1-snap".to_vec(),
+                    effective_parameters_json: format!("{{\"point_index\":{point_index}}}"),
+                    parameter_fingerprint: format!("fingerprint-{point_index}"),
                 })?;
                 points_processed += 1;
             }
@@ -566,7 +655,7 @@ mod tests {
                 .expect("child should succeed");
 
         assert_eq!(response.status, "ok");
-        assert_eq!(store.keys().len(), 7);
+        assert_eq!(store.keys().len(), 9);
         assert!(store
             .keys()
             .iter()
@@ -583,6 +672,10 @@ mod tests {
             .keys()
             .iter()
             .any(|key| key.contains("dataset=snapshot_counts") && key.ends_with(".parquet")));
+        assert!(store
+            .keys()
+            .iter()
+            .any(|key| key.contains("dataset=effective_parameters") && key.ends_with(".parquet")));
 
         let parquet_key = store
             .keys()
@@ -609,7 +702,7 @@ mod tests {
         assert!(error
             .failure_key
             .expect("failure key should exist")
-            .contains("status=failure"));
+            .contains("status_partition=failure"));
         assert_eq!(store.keys().len(), 1);
         assert!(store.keys()[0].contains("dataset=shard_outcomes"));
 
@@ -668,7 +761,7 @@ mod tests {
 
     #[test]
     fn child_persists_failure_record_when_success_outcome_write_fails() {
-        let store = SelectiveFailStore::new("dataset=shard_outcomes/run_date=2026-02-14/run_id=run-123/status=success/shard_id=1/part-0.parquet");
+        let store = SelectiveFailStore::new("dataset=shard_outcomes/run_date=2026-02-14/run_id_partition=run-123/status_partition=success/shard_id_partition=1/part-0.parquet");
         let payload = sample_payload();
         let config = sample_config();
 
@@ -682,12 +775,58 @@ mod tests {
         assert!(store
             .keys()
             .iter()
-            .any(|key| key.contains("status=success") && key.ends_with(".parquet")));
+            .any(|key| key.contains("status_partition=success") && key.ends_with(".parquet")));
         assert!(store.keys().iter().any(|key| key == &failure_key));
 
         let failure_record = store
             .body(&failure_key)
             .expect("failure body should exist for key");
         assert!(failure_record.starts_with(b"PAR1"));
+    }
+
+    #[test]
+    fn effective_parameter_keys_match_metric_join_keys() {
+        let store = RecordingStore::new();
+        let payload = sample_payload();
+        let config = sample_config();
+        handle_child_payload(&payload, &config, &PassExecutor, &store)
+            .expect("child should succeed");
+
+        let mut metric_suffixes = Vec::new();
+        let mut effective_suffixes = Vec::new();
+        for key in store.keys() {
+            if key.contains("dataset=shard_metrics") {
+                metric_suffixes.push(join_identity(&key));
+            }
+            if key.contains("dataset=effective_parameters") {
+                effective_suffixes.push(join_identity(&key));
+            }
+        }
+
+        metric_suffixes.sort();
+        effective_suffixes.sort();
+        assert_eq!(metric_suffixes, effective_suffixes);
+    }
+
+    fn join_identity(key: &str) -> String {
+        let run_date = partition_value(key, &["run_date="]);
+        let run_id = partition_value(key, &["run_id=", "run_id_partition="]);
+        let status = partition_value(key, &["status=", "status_partition="]);
+        let shard_id = partition_value(key, &["shard_id=", "shard_id_partition="]);
+        let point_index = partition_value(key, &["point_index=", "point_index_partition="]);
+
+        format!(
+            "run_date={run_date}/run_id={run_id}/status={status}/shard_id={shard_id}/point_index={point_index}"
+        )
+    }
+
+    fn partition_value<'a>(key: &'a str, prefixes: &[&str]) -> &'a str {
+        key.split('/')
+            .find_map(|segment| {
+                prefixes
+                    .iter()
+                    .find_map(|prefix| segment.strip_prefix(prefix))
+            })
+            .expect("expected partition segment in key")
     }
 }
