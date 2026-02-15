@@ -21,29 +21,64 @@ step() {
 run_parallel() {
     local pids=()
     local names=()
+    local logs=()
+    local statuses=()
+    local idx=0
+    local logs_dir
+
+    logs_dir="$(mktemp -d)"
 
     while (($#)); do
         local name="$1"
         local cmd="$2"
+        local log_file
         shift 2
 
         echo "→ $name"
-        bash -lc "$cmd" &
+        log_file="$logs_dir/task_${idx}.log"
+        bash -lc "$cmd" >"$log_file" 2>&1 &
         pids+=("$!")
         names+=("$name")
+        logs+=("$log_file")
+        idx=$((idx + 1))
     done
 
     local failed=0
     for i in "${!pids[@]}"; do
-        if ! wait "${pids[$i]}"; then
-            echo "✗ ${names[$i]} failed"
+        if wait "${pids[$i]}"; then
+            statuses+=("0")
+        else
+            local status=$?
+            statuses+=("$status")
             failed=1
         fi
     done
 
+    echo ""
+    echo "Parallel summary:"
+    for i in "${!names[@]}"; do
+        if [[ "${statuses[$i]}" == "0" ]]; then
+            echo "✓ ${names[$i]}"
+        else
+            echo "✗ ${names[$i]} (exit ${statuses[$i]})"
+        fi
+    done
+
     if ((failed)); then
+        echo ""
+        echo "Failed step logs:"
+        for i in "${!names[@]}"; do
+            if [[ "${statuses[$i]}" != "0" ]]; then
+                echo ""
+                echo "--- ${names[$i]} ---"
+                cat "${logs[$i]}"
+            fi
+        done
+        rm -rf "$logs_dir"
         exit 1
     fi
+
+    rm -rf "$logs_dir"
 }
 
 # ── jobs ─────────────────────────────────────────────────────────────────────
