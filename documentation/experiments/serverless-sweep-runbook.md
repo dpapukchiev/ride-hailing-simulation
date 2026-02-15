@@ -87,7 +87,19 @@ terraform -chdir=infra/aws_serverless_sweep/terraform plan
 
 ## 4) Athena Setup + Queries
 
-Run SQL from:
+Run one command to apply Athena setup SQL in deterministic order:
+
+```bash
+python3 infra/aws_serverless_sweep/athena/apply_athena_sql.py \
+  --query-results-s3 "s3://<athena-query-results-bucket>/queries/" \
+  --results-bucket "<results-bucket>" \
+  --results-prefix "serverless-sweeps/outcomes" \
+  --workgroup "primary"
+```
+
+The order is controlled by `infra/aws_serverless_sweep/athena/athena_bootstrap.plan`; edit this file to add or reorder SQL steps.
+
+Additional Athena SQL files are available in:
 
 - `infra/aws_serverless_sweep/athena/create_table.sql`
 - `infra/aws_serverless_sweep/athena/create_table_shard_metrics.sql`

@@ -108,7 +108,19 @@ All datasets are joinable by `run_id`, `shard_id`, and `point_index` (where appl
 
 ## Athena Analytics
 
-Use SQL in `infra/aws_serverless_sweep/athena/`:
+Bootstrap the Athena data layer in one command:
+
+```bash
+python3 infra/aws_serverless_sweep/athena/apply_athena_sql.py \
+  --query-results-s3 "s3://<athena-query-results-bucket>/queries/" \
+  --results-bucket "<results-bucket>" \
+  --results-prefix "serverless-sweeps/outcomes" \
+  --workgroup "primary"
+```
+
+To add or reorder setup queries, edit `infra/aws_serverless_sweep/athena/athena_bootstrap.plan`.
+
+Athena SQL assets live in `infra/aws_serverless_sweep/athena/`:
 
 - `create_table.sql`: creates outcomes/metrics/trip/snapshot external tables
 - `create_table_shard_metrics.sql`, `create_table_trip_data.sql`, `create_table_snapshot_counts.sql`
