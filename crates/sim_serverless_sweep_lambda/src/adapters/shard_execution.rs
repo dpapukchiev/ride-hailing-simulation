@@ -1,15 +1,9 @@
-use bevy_ecs::prelude::World;
 use sim_core::pricing::PricingConfig;
-use sim_core::runner::{initialize_simulation, run_until_empty, simulation_schedule};
 use sim_core::scenario::{MatchingAlgorithmType, ScenarioParams};
-use sim_core::telemetry::{SimSnapshots, SimTelemetry};
-use sim_core::telemetry_export::{write_snapshot_counts_parquet, write_trips_parquet};
 use sim_core::traffic::TrafficProfileKind;
-use sim_experiments::metrics::extract_metrics;
-use sim_experiments::{ParameterSet, SimulationResult};
-use sim_serverless_sweep_core::contract::ChildShardPayload;
-use std::fs;
-use std::time::{SystemTime, UNIX_EPOCH};
+use sim_experiments::{run_single_simulation_with_artifacts, ParameterSet};
+
+use crate::runtime::contract::ChildShardPayload;
 
 use crate::handlers::child::{ShardExecutor, ShardPointResult};
 
@@ -33,97 +27,18 @@ impl ShardExecutor for SimExperimentsShardExecutor {
         let mut points_processed = 0usize;
         for point_index in payload.start_index..payload.end_index_exclusive {
             let parameter_set = parameter_set_for_index(payload, point_index)?;
-            let (metrics, trip_data_parquet, snapshot_counts_parquet) =
-                run_single_simulation_with_exports(
-                    &parameter_set,
-                    &payload.run_id,
-                    payload.shard_id,
-                    point_index,
-                )?;
+            let artifacts = run_single_simulation_with_artifacts(&parameter_set)?;
             on_point_result(ShardPointResult {
                 point_index,
-                metrics,
-                trip_data_parquet,
-                snapshot_counts_parquet,
+                metrics: artifacts.metrics,
+                trip_data_parquet: artifacts.trip_data_parquet,
+                snapshot_counts_parquet: artifacts.snapshot_counts_parquet,
             })?;
             points_processed += 1;
         }
 
         Ok(points_processed)
     }
-}
-
-fn run_single_simulation_with_exports(
-    param_set: &ParameterSet,
-    run_id: &str,
-    shard_id: usize,
-    point_index: usize,
-) -> Result<(SimulationResult, Vec<u8>, Vec<u8>), String> {
-    let mut world = World::new();
-    let mut params = param_set.scenario_params();
-
-    if params.simulation_end_time_ms.is_none() {
-        let request_window_ms = params.request_window_ms;
-        let end_time_ms = request_window_ms.saturating_add(2 * 60 * 60 * 1000);
-        params.simulation_end_time_ms = Some(end_time_ms);
-    }
-
-    sim_core::scenario::build_scenario(&mut world, params);
-    initialize_simulation(&mut world);
-
-    let mut schedule = simulation_schedule();
-    let _steps = run_until_empty(&mut world, &mut schedule, 2_000_000);
-
-    let metrics = extract_metrics(&mut world);
-    world
-        .get_resource::<SimTelemetry>()
-        .ok_or_else(|| "SimTelemetry resource not found".to_string())?;
-    let snapshots = world
-        .get_resource::<SimSnapshots>()
-        .ok_or_else(|| "SimSnapshots resource not found".to_string())?;
-
-    let trip_data_parquet = serialize_to_parquet_bytes(
-        |path| write_trips_parquet(path, snapshots),
-        run_id,
-        shard_id,
-        point_index,
-        "trip-data",
-    )?;
-    let snapshot_counts_parquet = serialize_to_parquet_bytes(
-        |path| write_snapshot_counts_parquet(path, snapshots),
-        run_id,
-        shard_id,
-        point_index,
-        "snapshot-counts",
-    )?;
-
-    Ok((metrics, trip_data_parquet, snapshot_counts_parquet))
-}
-
-fn serialize_to_parquet_bytes<F>(
-    write_fn: F,
-    run_id: &str,
-    shard_id: usize,
-    point_index: usize,
-    suffix: &str,
-) -> Result<Vec<u8>, String>
-where
-    F: FnOnce(&std::path::Path) -> Result<(), Box<dyn std::error::Error>>,
-{
-    let mut temp_path = std::env::temp_dir();
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|error| format!("Failed to read clock for parquet export: {error}"))?
-        .as_nanos();
-    temp_path.push(format!(
-        "serverless-shard-{run_id}-{shard_id}-{point_index}-{suffix}-{timestamp}.parquet"
-    ));
-
-    write_fn(&temp_path).map_err(|error| format!("Parquet export failed: {error}"))?;
-    let bytes = fs::read(&temp_path)
-        .map_err(|error| format!("Failed to read exported parquet file: {error}"))?;
-    let _ = fs::remove_file(&temp_path);
-    Ok(bytes)
 }
 
 fn parameter_set_for_index(
@@ -308,8 +223,8 @@ fn parse_traffic_profile(value: &serde_json::Value) -> Result<TrafficProfileKind
 mod tests {
     use std::collections::BTreeMap;
 
+    use crate::runtime::contract::ChildShardPayload;
     use serde_json::Value;
-    use sim_serverless_sweep_core::contract::ChildShardPayload;
 
     use super::*;
 

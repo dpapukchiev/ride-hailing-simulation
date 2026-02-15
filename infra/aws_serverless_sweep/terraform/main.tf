@@ -18,6 +18,8 @@ locals {
   shard_dlq_name      = "${var.project_name}-shards-dlq"
 }
 
+data "aws_caller_identity" "current" {}
+
 resource "aws_s3_bucket" "results" {
   bucket = var.results_bucket_name
 }
@@ -50,6 +52,30 @@ resource "aws_sqs_queue" "shard_queue" {
   redrive_policy = jsonencode({
     deadLetterTargetArn = aws_sqs_queue.shard_dlq.arn
     maxReceiveCount     = 3
+  })
+}
+
+resource "aws_sqs_queue_policy" "shard_queue" {
+  queue_url = aws_sqs_queue.shard_queue.id
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Sid    = "AllowAccountLambdaAndOperators",
+        Effect = "Allow",
+        Principal = {
+          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
+        },
+        Action = [
+          "sqs:SendMessage",
+          "sqs:ReceiveMessage",
+          "sqs:DeleteMessage",
+          "sqs:GetQueueAttributes",
+          "sqs:ChangeMessageVisibility"
+        ],
+        Resource = aws_sqs_queue.shard_queue.arn
+      }
+    ]
   })
 }
 

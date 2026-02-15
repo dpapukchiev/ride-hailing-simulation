@@ -116,7 +116,7 @@ During scale testing, logging became a significant performance bottleneck at 10K
 
 ### Experimentation Limits
 
-The parallel experimentation framework (using rayon) still hits single-machine resource limits (memory/CPU) when running large parameter sweeps. The repository now also includes an AWS serverless fan-out deployment path (API Gateway + parent/child Lambda orchestration) for distributed shard execution, while broader long-running coordinator/worker modes remain future extensions. This demonstrates pragmatic scaling: keep local iteration fast while adding a production-relevant cloud path when needed.
+The parallel experimentation framework (using rayon) still hits single-machine resource limits (memory/CPU) when running large parameter sweeps. The repository now also includes an AWS serverless fan-out deployment path (API Gateway + unified Lambda + SQS queue-driven worker execution) for distributed shard execution, while broader long-running coordinator/worker modes remain future extensions. This demonstrates pragmatic scaling: keep local iteration fast while adding a production-relevant cloud path when needed.
 
 ## Key Skills Demonstrated
 

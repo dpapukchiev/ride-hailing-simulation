@@ -8,6 +8,8 @@ Shared domain logic for serverless parameter sweeps.
 - Deterministic request validation and shard planning
 - Partition and object-key helpers for worker output layouts
 
+These primitives are consumed by `sim_serverless_sweep_lambda` through its runtime boundary module.
+
 ## Out of scope
 
 - AWS Lambda runtime handlers
