@@ -5,6 +5,7 @@
 # Usage:
 #   ./ci.sh              # runs the "check" job (fmt + clippy + tests)
 #   ./ci.sh check        # same as above
+#   ./ci.sh render-diagrams  # renders Mermaid diagrams
 #   ./ci.sh examples     # builds & runs example scenarios
 #   ./ci.sh bench        # runs benchmarks
 #   ./ci.sh all          # runs check + examples + bench
@@ -17,34 +18,57 @@ step() {
     echo "═══ $1 ═══"
 }
 
+run_parallel() {
+    local pids=()
+    local names=()
+
+    while (($#)); do
+        local name="$1"
+        local cmd="$2"
+        shift 2
+
+        echo "→ $name"
+        bash -lc "$cmd" &
+        pids+=("$!")
+        names+=("$name")
+    done
+
+    local failed=0
+    for i in "${!pids[@]}"; do
+        if ! wait "${pids[$i]}"; then
+            echo "✗ ${names[$i]} failed"
+            failed=1
+        fi
+    done
+
+    if ((failed)); then
+        exit 1
+    fi
+}
+
 # ── jobs ─────────────────────────────────────────────────────────────────────
 
 job_check() {
-    step "Cloud secret scan"
-    bash ./scripts/check_no_cloud_secrets.sh
+    step "Check job (max parallel)"
+    run_parallel \
+        "Cloud secret scan" "bash ./scripts/check_no_cloud_secrets.sh" \
+        "Diagram artifact check" "bash ./scripts/check_rendered_diagrams.sh" \
+        "Check formatting" "cargo fmt --all -- --check" \
+        "Clippy" "cargo clippy --all-targets --all-features -- -D warnings" \
+        "Test sim_core" "cargo test -p sim_core" \
+        "Test sim_experiments" "cargo test -p sim_experiments"
+}
 
-    step "Diagram render freshness"
-    bash ./scripts/check_rendered_diagrams.sh
-
-    step "Check formatting"
-    cargo fmt --all -- --check
-
-    step "Clippy"
-    cargo clippy --all-targets --all-features -- -D warnings
-
-    step "Test sim_core"
-    cargo test -p sim_core
-
-    step "Test sim_experiments"
-    cargo test -p sim_experiments
+job_render_diagrams() {
+    step "Render diagrams"
+    python scripts/render_diagrams.py --puppeteer-config scripts/puppeteer-config-ci.json
 }
 
 job_examples() {
-    step "Run scenario_run (500 riders, 100 drivers)"
-    cargo run -p sim_core --example scenario_run --release
-
-    step "Run scenario_run_large (10K riders, 7K drivers)"
-    cargo run -p sim_core --example scenario_run_large --release
+    step "Run examples (parallel)"
+    run_parallel \
+        "scenario_run (500 riders, 100 drivers)" "cargo run -p sim_core --example scenario_run --release" \
+        "scenario_run_large (10K riders, 7K drivers)" "cargo run -p sim_core --example scenario_run_large --release"
 }
 
 job_bench() {
@@ -60,6 +84,9 @@ case "$JOB" in
     check)
         job_check
         ;;
+    render-diagrams)
+        job_render_diagrams
+        ;;
     examples)
         job_examples
         ;;
@@ -67,13 +94,15 @@ case "$JOB" in
         job_bench
         ;;
     all)
-        job_check
-        job_examples
-        job_bench
+        step "Run all jobs (max parallel)"
+        run_parallel \
+            "check" "bash ./ci.sh check" \
+            "examples" "bash ./ci.sh examples" \
+            "bench" "bash ./ci.sh bench"
         ;;
     *)
         echo "Unknown job: $JOB"
-        echo "Usage: $0 {check|examples|bench|all}"
+        echo "Usage: $0 {check|render-diagrams|examples|bench|all}"
         exit 1
         ;;
 esac
