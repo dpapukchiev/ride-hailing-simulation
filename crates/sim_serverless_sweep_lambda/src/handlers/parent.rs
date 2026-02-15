@@ -29,6 +29,28 @@ pub fn handle_parent_event(
     child_lambda_arn: Option<&str>,
     invoker: &dyn ChildInvoker,
 ) -> ApiGatewayResponse {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        handle_parent_event_impl(event, child_lambda_arn, invoker)
+    }));
+
+    match result {
+        Ok(response) => response,
+        Err(panic_payload) => error_response(
+            500,
+            json!({
+                "error": "internal_error",
+                "message": "Parent handler panicked while processing the request",
+                "details": panic_payload_message(panic_payload),
+            }),
+        ),
+    }
+}
+
+fn handle_parent_event_impl(
+    event: Value,
+    child_lambda_arn: Option<&str>,
+    invoker: &dyn ChildInvoker,
+) -> ApiGatewayResponse {
     let payload = match normalize_apigw_event(event) {
         Ok(value) => value,
         Err(message) => return validation_error_response(&message),
@@ -90,16 +112,35 @@ pub fn handle_parent_event(
             }
         };
 
-        if let Err(error) = invoker.invoke_child_async(&bytes) {
-            return error_response(
-                502,
-                json!({
-                    "error": "dispatch_failed",
-                    "message": error,
-                    "child_lambda_arn": child_lambda_arn,
-                    "run_context": run_context,
-                }),
-            );
+        let dispatch_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            invoker.invoke_child_async(&bytes)
+        }));
+
+        match dispatch_result {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                return error_response(
+                    502,
+                    json!({
+                        "error": "dispatch_failed",
+                        "message": error,
+                        "child_lambda_arn": child_lambda_arn,
+                        "run_context": run_context,
+                    }),
+                );
+            }
+            Err(panic_payload) => {
+                return error_response(
+                    500,
+                    json!({
+                        "error": "dispatch_panicked",
+                        "message": "Child dispatch panicked before completion",
+                        "details": panic_payload_message(panic_payload),
+                        "child_lambda_arn": child_lambda_arn,
+                        "run_context": run_context,
+                    }),
+                );
+            }
         }
 
         dispatches.push(DispatchRecord {
@@ -117,6 +158,16 @@ pub fn handle_parent_event(
         schema_version: ORCHESTRATION_SCHEMA_VERSION.to_string(),
     };
     success_response(202, response)
+}
+
+fn panic_payload_message(panic_payload: Box<dyn std::any::Any + Send>) -> String {
+    if let Some(message) = panic_payload.downcast_ref::<&str>() {
+        return (*message).to_string();
+    }
+    if let Some(message) = panic_payload.downcast_ref::<String>() {
+        return message.clone();
+    }
+    "panic payload was not a string".to_string()
 }
 
 fn normalize_apigw_event(event: Value) -> Result<Value, String> {
@@ -174,6 +225,8 @@ mod tests {
         payloads: Mutex<Vec<Vec<u8>>>,
     }
 
+    struct PanickingInvoker;
+
     impl CapturingInvoker {
         fn new() -> Self {
             Self {
@@ -193,6 +246,12 @@ mod tests {
                 .expect("poisoned mutex")
                 .push(payload.to_vec());
             Ok(())
+        }
+    }
+
+    impl ChildInvoker for PanickingInvoker {
+        fn invoke_child_async(&self, _payload: &[u8]) -> Result<(), String> {
+            panic!("simulated dispatch panic")
         }
     }
 
@@ -241,5 +300,31 @@ mod tests {
         assert_eq!(first.run_id, "dispatch-run");
         assert_eq!(first.end_index_exclusive, second.start_index);
         assert_eq!(second.failure_injection_shards, vec![1]);
+    }
+
+    #[test]
+    fn returns_detailed_error_when_dispatch_panics() {
+        let response = handle_parent_event(
+            json!({
+                "body": {
+                    "run_id": "panic-run",
+                    "dimensions": {
+                        "commission_rate": [0.1],
+                        "num_drivers": [100]
+                    },
+                    "shard_count": 1,
+                    "seed": 7
+                }
+            }),
+            Some("arn:aws:lambda:example:child"),
+            &PanickingInvoker,
+        );
+
+        assert_eq!(response.status_code, 500);
+
+        let body: Value = serde_json::from_str(&response.body).expect("response body should parse");
+        assert_eq!(body["error"], "dispatch_panicked");
+        assert_eq!(body["message"], "Child dispatch panicked before completion");
+        assert_eq!(body["details"], "simulated dispatch panic");
     }
 }
