@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-python scripts/render_diagrams.py
+python scripts/render_diagrams.py --puppeteer-config scripts/puppeteer-config-ci.json
 
 if ! git diff --quiet -- documentation/diagrams/rendered; then
     echo "Diagram render outputs are stale." >&2

@@ -39,7 +39,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Optional Puppeteer launch config file. "
-            "If omitted, CI runs auto-use scripts/puppeteer-config-ci.json when present."
+            "If omitted, scripts/puppeteer-config-ci.json is auto-used when present."
         ),
     )
     parser.add_argument(
@@ -50,15 +50,11 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def is_ci_environment() -> bool:
-    return os.environ.get("CI", "").strip().lower() in {"1", "true", "yes"}
-
-
 def resolve_puppeteer_config(args: argparse.Namespace) -> Path | None:
     if args.puppeteer_config is not None:
         return args.puppeteer_config.resolve()
 
-    if is_ci_environment() and DEFAULT_CI_PUPPETEER_CONFIG.exists():
+    if DEFAULT_CI_PUPPETEER_CONFIG.exists():
         return DEFAULT_CI_PUPPETEER_CONFIG.resolve()
 
     return None
