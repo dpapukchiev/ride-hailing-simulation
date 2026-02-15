@@ -72,9 +72,9 @@ See [DEVELOPMENT.md](./DEVELOPMENT.md) for the complete development narrative.
 - **Optimal Parameter Discovery**: Find parameter combinations that maximize marketplace health
 
 ### Serverless Sweeps (AWS)
-- **Deployed serverless fan-out path**: API Gateway ingress invokes a parent Lambda that validates requests, shards work deterministically, and dispatches child Lambdas asynchronously
-- **Rust runtime ownership**: Runtime logic is implemented in `crates/sim_serverless_sweep_core` and `crates/sim_serverless_sweep_lambda`
-- **Analytics-ready storage**: Child shard outcomes are written to partitioned S3 datasets and queried through Athena
+- **Deployed serverless fan-out path**: API Gateway ingress invokes a unified runtime Lambda that validates requests, shards work deterministically, and enqueues shard messages to SQS
+- **Rust runtime ownership**: Runtime handlers use a single runtime boundary in `crates/sim_serverless_sweep_lambda` (with shared contract/sharding primitives re-exported from core)
+- **Analytics-ready storage**: Worker shard outcomes are written to partitioned S3 datasets and queried through Athena
 - **Operator runbook**: Deploy/invoke/verify workflow is documented in `documentation/experiments/serverless-sweep-runbook.md`
 
 ## Architecture
@@ -316,7 +316,7 @@ ride-hailing-simulation/
 │   │   └── examples/
 │   │       └── parameter_sweep.rs
 │   ├── sim_serverless_sweep_core/   # Shared serverless sweep contract + sharding logic
-│   ├── sim_serverless_sweep_lambda/ # AWS parent/child Lambda handlers + adapters
+│   ├── sim_serverless_sweep_lambda/ # Unified AWS runtime handlers + adapters
 │   └── sim_ui/            # Visualization UI
 │       └── src/
 │           ├── app.rs     # Application state

@@ -8,9 +8,70 @@ use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use sim_core::runner::{initialize_simulation, run_until_empty, simulation_schedule};
 use sim_core::scenario::build_scenario;
+use sim_core::telemetry::{SimSnapshots, SimTelemetry};
+use sim_core::telemetry_export::{write_snapshot_counts_parquet, write_trips_parquet};
+use std::fs;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::metrics::{extract_metrics, SimulationResult};
 use crate::parameters::ParameterSet;
+
+#[derive(Debug, Clone)]
+pub struct SimulationArtifacts {
+    pub metrics: SimulationResult,
+    pub trip_data_parquet: Vec<u8>,
+    pub snapshot_counts_parquet: Vec<u8>,
+}
+
+/// Shared simulation primitive used by local sweeps and serverless workers.
+///
+/// Runs one parameter set to completion and returns metrics plus exported
+/// telemetry parquet payloads.
+pub fn run_single_simulation_with_artifacts(
+    param_set: &ParameterSet,
+) -> Result<SimulationArtifacts, String> {
+    let mut world = World::new();
+    let mut params = param_set.scenario_params();
+
+    if params.simulation_end_time_ms.is_none() {
+        let request_window_ms = params.request_window_ms;
+        let end_time_ms = request_window_ms.saturating_add(2 * 60 * 60 * 1000);
+        params.simulation_end_time_ms = Some(end_time_ms);
+    }
+
+    build_scenario(&mut world, params);
+    initialize_simulation(&mut world);
+
+    let mut schedule = simulation_schedule();
+    let _steps = run_until_empty(&mut world, &mut schedule, 2_000_000);
+
+    let metrics = extract_metrics(&mut world);
+    world
+        .get_resource::<SimTelemetry>()
+        .ok_or_else(|| "SimTelemetry resource not found".to_string())?;
+    let snapshots = world
+        .get_resource::<SimSnapshots>()
+        .ok_or_else(|| "SimSnapshots resource not found".to_string())?;
+
+    let trip_data_parquet = serialize_to_parquet_bytes(
+        |path| write_trips_parquet(path, snapshots),
+        &param_set.experiment_id,
+        param_set.run_id,
+        "trip-data",
+    )?;
+    let snapshot_counts_parquet = serialize_to_parquet_bytes(
+        |path| write_snapshot_counts_parquet(path, snapshots),
+        &param_set.experiment_id,
+        param_set.run_id,
+        "snapshot-counts",
+    )?;
+
+    Ok(SimulationArtifacts {
+        metrics,
+        trip_data_parquet,
+        snapshot_counts_parquet,
+    })
+}
 
 /// Run a single simulation with the given parameter set.
 ///
@@ -25,26 +86,34 @@ use crate::parameters::ParameterSet;
 ///
 /// A `SimulationResult` containing all extracted metrics.
 pub fn run_single_simulation(param_set: &ParameterSet) -> SimulationResult {
-    let mut world = World::new();
-    let mut params = param_set.scenario_params();
+    run_single_simulation_with_artifacts(param_set)
+        .expect("single simulation should execute and export telemetry")
+        .metrics
+}
 
-    // Set simulation end time if not already set (fallback to prevent infinite loops)
-    // If simulation_duration_hours was set in ParameterSpace, it should already be in params
-    if params.simulation_end_time_ms.is_none() {
-        let request_window_ms = params.request_window_ms;
-        // Default: request window + 2 hours buffer for trips to complete
-        let end_time_ms = request_window_ms.saturating_add(2 * 60 * 60 * 1000);
-        params.simulation_end_time_ms = Some(end_time_ms);
-    }
+fn serialize_to_parquet_bytes<F>(
+    write_fn: F,
+    id: &str,
+    index: usize,
+    suffix: &str,
+) -> Result<Vec<u8>, String>
+where
+    F: FnOnce(&std::path::Path) -> Result<(), Box<dyn std::error::Error>>,
+{
+    let mut temp_path = std::env::temp_dir();
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| format!("Failed to read clock for parquet export: {error}"))?
+        .as_nanos();
+    temp_path.push(format!(
+        "sim-experiment-{id}-{index}-{suffix}-{timestamp}.parquet"
+    ));
 
-    build_scenario(&mut world, params);
-    initialize_simulation(&mut world);
-
-    let mut schedule = simulation_schedule();
-    // Allow enough steps for large simulations (2M should be sufficient)
-    let _steps = run_until_empty(&mut world, &mut schedule, 2_000_000);
-
-    extract_metrics(&mut world)
+    write_fn(&temp_path).map_err(|error| format!("Parquet export failed: {error}"))?;
+    let bytes = fs::read(&temp_path)
+        .map_err(|error| format!("Failed to read exported parquet file: {error}"))?;
+    let _ = fs::remove_file(&temp_path);
+    Ok(bytes)
 }
 
 /// Run multiple simulations in parallel.

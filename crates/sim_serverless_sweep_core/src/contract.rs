@@ -55,6 +55,7 @@ pub struct NormalizedSweepRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ChildShardPayload {
     pub run_id: String,
+    pub run_date: Option<String>,
     pub dimensions: Dimensions,
     pub total_points: usize,
     pub shard_id: usize,

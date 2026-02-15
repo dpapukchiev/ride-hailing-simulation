@@ -54,4 +54,6 @@ pub use export::{
 pub use health::{calculate_health_scores, HealthWeights};
 pub use metrics::SimulationResult;
 pub use parameters::{ParameterSet, ParameterSpace};
-pub use runner::run_parallel_experiments;
+pub use runner::{
+    run_parallel_experiments, run_single_simulation_with_artifacts, SimulationArtifacts,
+};

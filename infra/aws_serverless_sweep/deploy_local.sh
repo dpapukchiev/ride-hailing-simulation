@@ -68,13 +68,11 @@ MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL="*" docker run --rm --pull=always \
     "${DOCKER_IMAGE}" \
     sh -ec "export PATH=/usr/local/cargo/bin:\$PATH && rm -rf target/debug target/release target/${TARGET}/debug/build target/${TARGET}/release/build && apt-get update && apt-get install -y clang cmake make perl pkg-config && rustup target add ${TARGET} && CC=clang CXX=clang++ cargo run -p xtask -- serverless-package --target ${TARGET} --profile ${PROFILE}"
 
-PARENT_ZIP="${DIST_DIR}/parent.zip"
-CHILD_ZIP="${DIST_DIR}/child.zip"
+RUNTIME_ZIP="${DIST_DIR}/runtime.zip"
 
-if [[ ! -f "${PARENT_ZIP}" || ! -f "${CHILD_ZIP}" ]]; then
-    echo "Expected packaged artifacts at:"
-    echo "- ${PARENT_ZIP}"
-    echo "- ${CHILD_ZIP}"
+if [[ ! -f "${RUNTIME_ZIP}" ]]; then
+    echo "Expected packaged artifact at:"
+    echo "- ${RUNTIME_ZIP}"
     exit 1
 fi
 
@@ -83,8 +81,7 @@ terraform -chdir="${TERRAFORM_DIR}" init
 
 step "Terraform apply"
 terraform -chdir="${TERRAFORM_DIR}" apply \
-    -var "parent_lambda_zip=${PARENT_ZIP}" \
-    -var "child_lambda_zip=${CHILD_ZIP}" \
+    -var "runtime_lambda_zip=${RUNTIME_ZIP}" \
     "$@"
 
 echo ""

@@ -4,11 +4,10 @@ AWS-facing handlers and adapters for serverless sweep orchestration.
 
 ## Ownership
 
-- Parent and child handler flows
-- Adapter traits for child invocation and object storage
-- Serialization glue between API/Lambda payloads and core domain types
+- Unified runtime flow for API orchestration and SQS-driven shard execution
+- Adapter traits for object storage and shard execution
+- Runtime boundary module (`src/runtime.rs`) that re-exports contract/sharding/storage primitives
 
 ## Out of scope
 
-- Deterministic shard math and contract normalization (owned by `sim_serverless_sweep_core`)
 - Terraform resources and IAM policy wiring

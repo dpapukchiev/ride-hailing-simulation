@@ -1,12 +1,9 @@
-# crate-owned-serverless-runtime-logic Specification
+## MODIFIED Requirements
 
-## Purpose
-TBD - created by archiving change rust-aws-serverless-parameter-sweep. Update Purpose after archive.
-## Requirements
 ### Requirement: Runtime logic resides in Rust crates
 The system SHALL implement cloud runtime and sweep execution logic under `crates/` with a simplified ownership model that minimizes cross-crate orchestration indirection.
 
-#### Scenario: Runtime behavior changes without Terraform logic edits
+#### Scenario: Runtime behavior changes without infrastructure logic edits
 - **WHEN** runtime orchestration behavior is updated
 - **THEN** the change is implemented in Rust crate code and infrastructure changes remain limited to wiring
 
@@ -23,4 +20,3 @@ The system SHALL keep orchestration and worker payload contracts in a single run
 #### Scenario: Payload schema update remains coherent
 - **WHEN** a contract field is added or modified
 - **THEN** orchestration enqueue logic and worker decode logic are changed and tested in one code ownership boundary
-

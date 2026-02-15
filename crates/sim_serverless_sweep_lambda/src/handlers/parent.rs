@@ -1,12 +1,11 @@
-use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
-use sim_serverless_sweep_core::contract::{
+use crate::runtime::contract::{
     normalize_request, request_fingerprint, ChildShardPayload, DispatchRecord,
     ParentAcceptedResponse, RunContext, SweepRequest, ORCHESTRATION_SCHEMA_VERSION,
 };
-use sim_serverless_sweep_core::sharding::compute_shard_plan;
-
-use crate::adapters::invoke::ChildInvoker;
+use crate::runtime::sharding::compute_shard_plan;
+use chrono::Utc;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ApiGatewayResponse {
@@ -26,11 +25,11 @@ pub fn build_run_context(run_id: impl Into<String>, request_fingerprint: String)
 
 pub fn handle_parent_event(
     event: Value,
-    child_lambda_arn: Option<&str>,
-    invoker: &dyn ChildInvoker,
+    dispatch_target: Option<&str>,
+    dispatch: &dyn Fn(&[u8]) -> Result<(), String>,
 ) -> ApiGatewayResponse {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        handle_parent_event_impl(event, child_lambda_arn, invoker)
+        handle_parent_event_impl(event, dispatch_target, dispatch)
     }));
 
     match result {
@@ -48,8 +47,8 @@ pub fn handle_parent_event(
 
 fn handle_parent_event_impl(
     event: Value,
-    child_lambda_arn: Option<&str>,
-    invoker: &dyn ChildInvoker,
+    dispatch_target: Option<&str>,
+    dispatch: &dyn Fn(&[u8]) -> Result<(), String>,
 ) -> ApiGatewayResponse {
     let payload = match normalize_apigw_event(event) {
         Ok(value) => value,
@@ -66,14 +65,14 @@ fn handle_parent_event_impl(
         Err(error) => return validation_error_response(error.message()),
     };
 
-    let child_lambda_arn = match child_lambda_arn {
+    let dispatch_target = match dispatch_target {
         Some(value) if !value.trim().is_empty() => value,
         _ => {
             return error_response(
                 500,
                 json!({
                     "error": "misconfiguration",
-                    "message": "CHILD_LAMBDA_ARN must be configured",
+                    "message": "SHARD_QUEUE_URL must be configured",
                 }),
             );
         }
@@ -81,6 +80,7 @@ fn handle_parent_event_impl(
 
     let run_context =
         build_run_context(normalized.run_id.clone(), request_fingerprint(&normalized));
+    let run_date = Utc::now().format("%Y-%m-%d").to_string();
     let shard_plan = match compute_shard_plan(&normalized) {
         Ok(value) => value,
         Err(error) => return validation_error_response(error.message()),
@@ -90,6 +90,7 @@ fn handle_parent_event_impl(
     for assignment in shard_plan {
         let child_payload = ChildShardPayload {
             run_id: normalized.run_id.clone(),
+            run_date: Some(run_date.clone()),
             dimensions: normalized.dimensions.clone(),
             total_points: normalized.total_points,
             shard_id: assignment.shard_id,
@@ -112,9 +113,8 @@ fn handle_parent_event_impl(
             }
         };
 
-        let dispatch_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            invoker.invoke_child_async(&bytes)
-        }));
+        let dispatch_result =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| dispatch(&bytes)));
 
         match dispatch_result {
             Ok(Ok(())) => {}
@@ -124,7 +124,7 @@ fn handle_parent_event_impl(
                     json!({
                         "error": "dispatch_failed",
                         "message": error,
-                        "child_lambda_arn": child_lambda_arn,
+                        "dispatch_target": dispatch_target,
                         "run_context": run_context,
                     }),
                 );
@@ -136,7 +136,7 @@ fn handle_parent_event_impl(
                         "error": "dispatch_panicked",
                         "message": "Child dispatch panicked before completion",
                         "details": panic_payload_message(panic_payload),
-                        "child_lambda_arn": child_lambda_arn,
+                        "dispatch_target": dispatch_target,
                         "run_context": run_context,
                     }),
                 );
@@ -217,60 +217,34 @@ fn error_response(status_code: u16, payload: Value) -> ApiGatewayResponse {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Mutex;
+    use std::sync::{Arc, Mutex};
 
     use super::*;
 
-    struct CapturingInvoker {
-        payloads: Mutex<Vec<Vec<u8>>>,
-    }
-
-    struct PanickingInvoker;
-
-    impl CapturingInvoker {
-        fn new() -> Self {
-            Self {
-                payloads: Mutex::new(Vec::new()),
-            }
-        }
-
-        fn payloads(&self) -> Vec<Vec<u8>> {
-            self.payloads.lock().expect("poisoned mutex").clone()
-        }
-    }
-
-    impl ChildInvoker for CapturingInvoker {
-        fn invoke_child_async(&self, payload: &[u8]) -> Result<(), String> {
-            self.payloads
-                .lock()
-                .expect("poisoned mutex")
-                .push(payload.to_vec());
-            Ok(())
-        }
-    }
-
-    impl ChildInvoker for PanickingInvoker {
-        fn invoke_child_async(&self, _payload: &[u8]) -> Result<(), String> {
-            panic!("simulated dispatch panic")
-        }
-    }
-
     #[test]
     fn rejects_invalid_payload_without_dispatching() {
-        let invoker = CapturingInvoker::new();
+        let payloads: Arc<Mutex<Vec<Vec<u8>>>> = Arc::new(Mutex::new(Vec::new()));
+        let payloads_for_dispatch = Arc::clone(&payloads);
         let response = handle_parent_event(
             json!({"body": "{\"run_id\":\"missing-dimensions\"}"}),
             Some("arn:aws:lambda:example:child"),
-            &invoker,
+            &move |payload| {
+                payloads_for_dispatch
+                    .lock()
+                    .expect("poisoned mutex")
+                    .push(payload.to_vec());
+                Ok(())
+            },
         );
 
         assert_eq!(response.status_code, 400);
-        assert!(invoker.payloads().is_empty());
+        assert!(payloads.lock().expect("poisoned mutex").is_empty());
     }
 
     #[test]
     fn dispatches_reproducible_child_payloads() {
-        let invoker = CapturingInvoker::new();
+        let payloads: Arc<Mutex<Vec<Vec<u8>>>> = Arc::new(Mutex::new(Vec::new()));
+        let payloads_for_dispatch = Arc::clone(&payloads);
         let response = handle_parent_event(
             json!({
                 "body": {
@@ -285,11 +259,17 @@ mod tests {
                 }
             }),
             Some("arn:aws:lambda:example:child"),
-            &invoker,
+            &move |payload| {
+                payloads_for_dispatch
+                    .lock()
+                    .expect("poisoned mutex")
+                    .push(payload.to_vec());
+                Ok(())
+            },
         );
 
         assert_eq!(response.status_code, 202);
-        let payloads = invoker.payloads();
+        let payloads = payloads.lock().expect("poisoned mutex").clone();
         assert_eq!(payloads.len(), 2);
 
         let first: ChildShardPayload =
@@ -298,6 +278,8 @@ mod tests {
             serde_json::from_slice(&payloads[1]).expect("payload should parse");
 
         assert_eq!(first.run_id, "dispatch-run");
+        assert_eq!(first.run_date, second.run_date);
+        assert!(first.run_date.is_some());
         assert_eq!(first.end_index_exclusive, second.start_index);
         assert_eq!(second.failure_injection_shards, vec![1]);
     }
@@ -317,7 +299,7 @@ mod tests {
                 }
             }),
             Some("arn:aws:lambda:example:child"),
-            &PanickingInvoker,
+            &|_payload| panic!("simulated dispatch panic"),
         );
 
         assert_eq!(response.status_code, 500);

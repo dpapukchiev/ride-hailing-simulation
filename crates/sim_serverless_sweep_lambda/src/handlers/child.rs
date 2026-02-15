@@ -1,6 +1,14 @@
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::runtime::contract::{
+    ChildShardPayload, OutcomeError, ShardOutcomeRecord, ShardOutputMetadata,
+    OUTCOME_RECORD_SCHEMA_VERSION,
+};
+use crate::runtime::storage_keys::{
+    error_object_key, metrics_object_key, snapshot_counts_object_key, success_outcome_object_key,
+    trip_data_object_key,
+};
 use arrow::array::{ArrayRef, StringArray, UInt64Array};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
@@ -8,14 +16,6 @@ use parquet::arrow::ArrowWriter;
 use parquet::file::properties::WriterProperties;
 use serde::{Deserialize, Serialize};
 use sim_experiments::{export_to_parquet, SimulationResult};
-use sim_serverless_sweep_core::contract::{
-    ChildShardPayload, OutcomeError, ShardOutcomeRecord, ShardOutputMetadata,
-    OUTCOME_RECORD_SCHEMA_VERSION,
-};
-use sim_serverless_sweep_core::storage_keys::{
-    error_object_key, metrics_object_key, snapshot_counts_object_key, success_outcome_object_key,
-    trip_data_object_key,
-};
 
 use crate::adapters::object_store::OutcomeStore;
 use crate::adapters::shard_execution::SimExperimentsShardExecutor;
@@ -110,7 +110,6 @@ fn write_success(
     outcome_store: &impl OutcomeStore,
 ) -> Result<ChildSuccessResponse, ChildHandlerError> {
     let mut first_metrics_key: Option<String> = None;
-    let mut written_success_keys = Vec::new();
 
     let mut on_point_result = |point_result: ShardPointResult| -> Result<(), String> {
         let metrics_key = metrics_object_key(
@@ -148,17 +147,14 @@ fn write_success(
         outcome_store
             .write_object(&metrics_key, &parquet_body)
             .map_err(|error| format!("Failed to persist shard metrics artifact: {error}"))?;
-        written_success_keys.push(metrics_key.clone());
 
         outcome_store
             .write_object(&trip_data_key, &point_result.trip_data_parquet)
             .map_err(|error| format!("Failed to persist trip data artifact: {error}"))?;
-        written_success_keys.push(trip_data_key);
 
         outcome_store
             .write_object(&snapshot_counts_key, &point_result.snapshot_counts_parquet)
             .map_err(|error| format!("Failed to persist snapshot counts artifact: {error}"))?;
-        written_success_keys.push(snapshot_counts_key);
 
         if first_metrics_key.is_none() {
             first_metrics_key = Some(metrics_key);
@@ -167,13 +163,12 @@ fn write_success(
         Ok(())
     };
 
-    let points_processed = match executor.execute_shard(payload, &mut on_point_result) {
-        Ok(points_processed) => points_processed,
-        Err(error) => {
-            let rollback_errors = rollback_success_writes(outcome_store, &written_success_keys);
-            return Err(attach_rollback_errors(error, rollback_errors));
-        }
-    };
+    let points_processed = executor
+        .execute_shard(payload, &mut on_point_result)
+        .map_err(|error| ChildHandlerError {
+            message: error,
+            failure_key: None,
+        })?;
 
     let metrics_prefix = first_metrics_key.unwrap_or_else(|| {
         metrics_object_key(
@@ -214,49 +209,18 @@ fn write_success(
         failure_key: None,
     })?;
 
-    if let Err(error) = outcome_store.write_object(&outcome_key, &body) {
-        let rollback_errors = rollback_success_writes(outcome_store, &written_success_keys);
-        return Err(attach_rollback_errors(
-            format!("Failed to persist success outcome: {error}"),
-            rollback_errors,
-        ));
-    }
+    outcome_store
+        .write_object(&outcome_key, &body)
+        .map_err(|error| ChildHandlerError {
+            message: format!("Failed to persist success outcome: {error}"),
+            failure_key: None,
+        })?;
 
     Ok(ChildSuccessResponse {
         status: "ok".to_string(),
         shard_id: payload.shard_id,
         outcome_key,
     })
-}
-
-fn rollback_success_writes(outcome_store: &impl OutcomeStore, keys: &[String]) -> Vec<String> {
-    keys.iter()
-        .rev()
-        .filter_map(|key| {
-            outcome_store
-                .delete_object(key)
-                .err()
-                .map(|error| format!("{key}: {error}"))
-        })
-        .collect()
-}
-
-fn attach_rollback_errors(message: String, rollback_errors: Vec<String>) -> ChildHandlerError {
-    if rollback_errors.is_empty() {
-        return ChildHandlerError {
-            message,
-            failure_key: None,
-        };
-    }
-
-    ChildHandlerError {
-        message: format!(
-            "{message}. Rollback failed for {} object(s): {}",
-            rollback_errors.len(),
-            rollback_errors.join("; ")
-        ),
-        failure_key: None,
-    }
 }
 
 fn serialize_metrics_parquet(
@@ -456,11 +420,6 @@ mod tests {
                 .insert(key.to_string(), body.to_vec());
             Ok(())
         }
-
-        fn delete_object(&self, key: &str) -> Result<(), String> {
-            self.writes.lock().expect("poisoned mutex").remove(key);
-            Ok(())
-        }
     }
 
     struct PassExecutor;
@@ -541,11 +500,6 @@ mod tests {
                 .insert(key.to_string(), body.to_vec());
             Ok(())
         }
-
-        fn delete_object(&self, key: &str) -> Result<(), String> {
-            self.writes.lock().expect("poisoned mutex").remove(key);
-            Ok(())
-        }
     }
 
     fn sample_simulation_result() -> SimulationResult {
@@ -575,6 +529,7 @@ mod tests {
     fn sample_payload() -> ChildShardPayload {
         ChildShardPayload {
             run_id: "run-123".to_string(),
+            run_date: Some("2026-02-14".to_string()),
             dimensions: BTreeMap::from([
                 (
                     "commission_rate".to_string(),
@@ -724,7 +679,7 @@ mod tests {
         let failure_key = error.failure_key.expect("failure key should exist");
         assert!(failure_key.contains("dataset=shard_outcomes"));
 
-        assert!(!store
+        assert!(store
             .keys()
             .iter()
             .any(|key| key.contains("status=success") && key.ends_with(".parquet")));

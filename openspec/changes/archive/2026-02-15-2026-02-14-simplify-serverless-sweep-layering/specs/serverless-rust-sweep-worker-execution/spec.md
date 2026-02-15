@@ -1,8 +1,5 @@
-# serverless-rust-sweep-worker-execution Specification
+## MODIFIED Requirements
 
-## Purpose
-TBD - created by archiving change rust-aws-serverless-parameter-sweep. Update Purpose after archive.
-## Requirements
 ### Requirement: Rust worker executes bounded sweep shards
 The system SHALL execute each assigned shard in Rust from queue-delivered work messages using explicit shard bounds.
 
@@ -21,4 +18,3 @@ The system SHALL persist a per-shard outcome record to S3 that includes run ID, 
 - **WHEN** a shard fails due to runtime or domain errors
 - **THEN** the worker writes a failure outcome record with error details
 - **AND** retry processing remains idempotent for the same run/shard identity
-

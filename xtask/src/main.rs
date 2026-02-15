@@ -146,9 +146,7 @@ fn package_serverless_lambdas(target: &str, profile: BuildProfile) {
         "--target",
         target,
         "--bin",
-        "parent_lambda",
-        "--bin",
-        "child_lambda",
+        "sweep_runtime",
     ];
     if let Some(flag) = profile.as_cargo_flag() {
         cargo_args.push(flag);
@@ -162,18 +160,13 @@ fn package_serverless_lambdas(target: &str, profile: BuildProfile) {
     fs::create_dir_all(dist_dir).expect("failed to create lambda dist directory");
 
     package_lambda_zip(
-        &target_dir.join(binary_name("parent_lambda", target)),
-        &dist_dir.join("parent.zip"),
-    );
-    package_lambda_zip(
-        &target_dir.join(binary_name("child_lambda", target)),
-        &dist_dir.join("child.zip"),
+        &target_dir.join(binary_name("sweep_runtime", target)),
+        &dist_dir.join("runtime.zip"),
     );
 
     eprintln!(
-        "\nPackaged artifacts:\n- {}\n- {}",
-        dist_dir.join("parent.zip").display(),
-        dist_dir.join("child.zip").display()
+        "\nPackaged artifact:\n- {}",
+        dist_dir.join("runtime.zip").display()
     );
 }
 
