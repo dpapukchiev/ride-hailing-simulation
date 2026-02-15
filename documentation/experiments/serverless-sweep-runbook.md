@@ -97,6 +97,8 @@ python3 infra/aws_serverless_sweep/athena/apply_athena_sql.py \
   --workgroup "primary"
 ```
 
+`--results-bucket` accepts either a plain bucket name (`my-bucket`) or an S3 URI (`s3://my-bucket[/optional/prefix]`).
+
 The order is controlled by `infra/aws_serverless_sweep/athena/athena_bootstrap.plan`; edit this file to add or reorder SQL steps.
 
 Additional Athena SQL files are available in:
