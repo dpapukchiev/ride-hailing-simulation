@@ -22,16 +22,10 @@ variable "results_prefix" {
   default     = "serverless-sweeps/outcomes"
 }
 
-variable "parent_lambda_zip" {
-  description = "Path to parent Lambda zip artifact"
+variable "runtime_lambda_zip" {
+  description = "Path to unified runtime Lambda zip artifact"
   type        = string
-  default     = "../dist/parent.zip"
-}
-
-variable "child_lambda_zip" {
-  description = "Path to child Lambda zip artifact"
-  type        = string
-  default     = "../dist/child.zip"
+  default     = "../dist/runtime.zip"
 }
 
 variable "max_shards" {

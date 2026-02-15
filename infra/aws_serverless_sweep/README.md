@@ -5,19 +5,19 @@ See `AGENTS.md` for repo workflow expectations before changing these files.
 This directory contains a minimal sandbox deployment for distributed parameter sweeps:
 
 - API Gateway ingress (`POST /sweep-run`)
-- Parent Lambda for request validation + deterministic sharding + async dispatch
-- Child Lambda for shard execution + outcome persistence
+- Unified runtime Lambda for request validation + deterministic sharding + queue dispatch + shard execution
+- SQS queue for shard fan-out and retry buffering
 - S3 partitioned outcomes for Athena analytics
-- Least-privilege IAM policies for parent/child roles
+- Least-privilege IAM policies for runtime, queue access, and analytics reads
 
 ## Runtime Ownership
 
 Runtime behavior is owned by Rust crates under `crates/`:
 
 - `crates/sim_serverless_sweep_core`: contract types, request validation, deterministic sharding, and storage key conventions
-- `crates/sim_serverless_sweep_lambda`: parent/child handler flows plus AWS adapter boundaries
+- `crates/sim_serverless_sweep_lambda`: unified runtime handlers and AWS adapter boundaries
 
-Terraform in this directory wires infrastructure only (API Gateway, Lambda resources, IAM, env vars, and artifact paths).
+Terraform in this directory wires infrastructure only (API Gateway, Lambda resources, SQS, IAM, env vars, and artifact paths).
 Lambda resources use the Rust custom runtime (`provided.al2023`) and packaged `bootstrap` binaries.
 
 ## Required Deploy-Time Inputs
@@ -28,8 +28,7 @@ Set these as Terraform variables (`*.tfvars`, environment, or CI secrets):
 - `project_name`: resource name prefix
 - `results_bucket_name`: S3 bucket name for outcomes
 - `results_prefix`: S3 key prefix for partitioned output
-- `parent_lambda_zip`: packaged parent lambda zip path
-- `child_lambda_zip`: packaged child lambda zip path
+- `runtime_lambda_zip`: packaged runtime lambda zip path
 - `max_shards`: upper bound on fan-out per run
 - `athena_database`: Glue/Athena database
 - `athena_table`: table name for outcome records
@@ -38,20 +37,16 @@ No credentials or long-lived secrets are tracked in the repository.
 
 ## Lambda Environment Variables
 
-Parent Lambda:
+Unified Runtime Lambda:
 
-- `CHILD_LAMBDA_ARN`: worker function ARN to invoke asynchronously
-- `MAX_SHARDS`: fan-out limit
-
-Child Lambda:
-
+- `SHARD_QUEUE_URL`: queue URL for shard work dispatch
 - `SWEEP_RESULTS_BUCKET`: destination S3 bucket
 - `SWEEP_RESULTS_PREFIX`: destination S3 partition prefix
-- `MAX_SHARDS`: safety limit
+- `MAX_SHARDS`: safety fan-out limit
 
 ## Build and Deploy
 
-Run a single local command to build Rust Lambda binaries, package zip artifacts, and deploy Terraform:
+Run a single local command to build the Rust Lambda binary, package zip artifact, and deploy Terraform:
 
 ```bash
 ./infra/aws_serverless_sweep/deploy_local.sh \
@@ -64,18 +59,9 @@ The script preflights required tooling (`cargo`, `aws`, `terraform`) and validat
 aws sso login
 ```
 
-The script keeps the Terraform deploy interface stable by wiring:
+The script wires:
 
-- `parent_lambda_zip=infra/aws_serverless_sweep/dist/parent.zip`
-- `child_lambda_zip=infra/aws_serverless_sweep/dist/child.zip`
-
-Optional overrides:
-
-- `SWEEP_LAMBDA_TARGET` (default `x86_64-unknown-linux-gnu`)
-- `SWEEP_LAMBDA_PROFILE` (default `release`)
-- `SWEEP_DOCKER_IMAGE` (default `docker.io/library/rust:1-bullseye`)
-
-After deploy, copy the output `api_url` and invoke with a sweep request payload.~~~~
+- `runtime_lambda_zip=infra/aws_serverless_sweep/dist/runtime.zip`
 
 ## Request Contract
 
@@ -105,14 +91,3 @@ Outcomes are written as Parquet-only datasets under partitioned keys:
 - `<results_prefix>/dataset=shard_outcomes/run_date=<yyyy-mm-dd>/run_id=<run_id>/status=<success|failure>/shard_id=<id>/part-0.parquet`
 
 All datasets are joinable by `run_id`, `shard_id`, and `point_index` (where applicable).
-
-## Athena Analytics
-
-Use SQL in `infra/aws_serverless_sweep/athena/`:
-
-- `create_table.sql`: creates outcomes/metrics/trip/snapshot external tables
-- `create_table_shard_metrics.sql`, `create_table_trip_data.sql`, `create_table_snapshot_counts.sql`
-- `repair_table.sql`: discovers partitions for outcomes table
-- `repair_table_shard_metrics.sql`, `repair_table_trip_data.sql`, `repair_table_snapshot_counts.sql`
-- `query_run_level_profile.sql`, `query_failure_diagnostics.sql`, `query_shard_coverage.sql`
-- `query_trip_snapshot_join.sql`: joins per-point metrics with trip and snapshot datasets

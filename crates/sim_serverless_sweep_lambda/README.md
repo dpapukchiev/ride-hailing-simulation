@@ -4,8 +4,8 @@ AWS-facing handlers and adapters for serverless sweep orchestration.
 
 ## Ownership
 
-- Parent and child handler flows
-- Adapter traits for child invocation and object storage
+- Unified runtime flow for API orchestration and SQS-driven shard execution
+- Adapter traits for shard dispatch and object storage
 - Serialization glue between API/Lambda payloads and core domain types
 
 ## Out of scope

@@ -26,7 +26,7 @@ pub fn build_run_context(run_id: impl Into<String>, request_fingerprint: String)
 
 pub fn handle_parent_event(
     event: Value,
-    child_lambda_arn: Option<&str>,
+    dispatch_target: Option<&str>,
     invoker: &dyn ChildInvoker,
 ) -> ApiGatewayResponse {
     let payload = match normalize_apigw_event(event) {
@@ -44,14 +44,14 @@ pub fn handle_parent_event(
         Err(error) => return validation_error_response(error.message()),
     };
 
-    let child_lambda_arn = match child_lambda_arn {
+    let dispatch_target = match dispatch_target {
         Some(value) if !value.trim().is_empty() => value,
         _ => {
             return error_response(
                 500,
                 json!({
                     "error": "misconfiguration",
-                    "message": "CHILD_LAMBDA_ARN must be configured",
+                    "message": "SHARD_QUEUE_URL must be configured",
                 }),
             );
         }
@@ -96,7 +96,7 @@ pub fn handle_parent_event(
                 json!({
                     "error": "dispatch_failed",
                     "message": error,
-                    "child_lambda_arn": child_lambda_arn,
+                    "dispatch_target": dispatch_target,
                     "run_context": run_context,
                 }),
             );

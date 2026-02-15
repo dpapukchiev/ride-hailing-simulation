@@ -13,8 +13,9 @@ provider "aws" {
 }
 
 locals {
-  parent_lambda_name = "${var.project_name}-parent"
-  child_lambda_name  = "${var.project_name}-child"
+  runtime_lambda_name = "${var.project_name}-runtime"
+  shard_queue_name    = "${var.project_name}-shards"
+  shard_dlq_name      = "${var.project_name}-shards-dlq"
 }
 
 resource "aws_s3_bucket" "results" {
@@ -37,8 +38,23 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "results" {
   }
 }
 
-resource "aws_iam_role" "parent_lambda_role" {
-  name = "${local.parent_lambda_name}-role"
+resource "aws_sqs_queue" "shard_dlq" {
+  name                      = local.shard_dlq_name
+  message_retention_seconds = 1209600
+}
+
+resource "aws_sqs_queue" "shard_queue" {
+  name                       = local.shard_queue_name
+  visibility_timeout_seconds = 900
+  message_retention_seconds  = 1209600
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.shard_dlq.arn
+    maxReceiveCount     = 3
+  })
+}
+
+resource "aws_iam_role" "runtime_lambda_role" {
+  name = "${local.runtime_lambda_name}-role"
   assume_role_policy = jsonencode({
     Version = "2012-10-17",
     Statement = [{
@@ -51,55 +67,22 @@ resource "aws_iam_role" "parent_lambda_role" {
   })
 }
 
-resource "aws_iam_role" "child_lambda_role" {
-  name = "${local.child_lambda_name}-role"
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17",
-    Statement = [{
-      Effect = "Allow",
-      Principal = {
-        Service = "lambda.amazonaws.com"
-      },
-      Action = "sts:AssumeRole"
-    }]
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "parent_basic_logs" {
-  role       = aws_iam_role.parent_lambda_role.name
+resource "aws_iam_role_policy_attachment" "runtime_basic" {
+  role       = aws_iam_role.runtime_lambda_role.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
-resource "aws_iam_role_policy_attachment" "child_basic_logs" {
-  role       = aws_iam_role.child_lambda_role.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-}
-
-resource "aws_iam_role_policy" "parent_dispatch_policy" {
-  name = "${local.parent_lambda_name}-dispatch"
-  role = aws_iam_role.parent_lambda_role.id
-  policy = jsonencode({
-    Version = "2012-10-17",
-    Statement = [
-      {
-        Effect   = "Allow",
-        Action   = ["lambda:InvokeFunction"],
-        Resource = aws_lambda_function.child_lambda.arn
-      }
-    ]
-  })
-}
-
-resource "aws_iam_role_policy" "child_s3_policy" {
-  name = "${local.child_lambda_name}-s3"
-  role = aws_iam_role.child_lambda_role.id
+resource "aws_iam_role_policy" "runtime_s3_policy" {
+  name = "${local.runtime_lambda_name}-s3"
+  role = aws_iam_role.runtime_lambda_role.id
   policy = jsonencode({
     Version = "2012-10-17",
     Statement = [
       {
         Effect = "Allow",
         Action = [
-          "s3:PutObject"
+          "s3:PutObject",
+          "s3:DeleteObject"
         ],
         Resource = "${aws_s3_bucket.results.arn}/${trim(var.results_prefix, "/")}/*"
       },
@@ -117,13 +100,48 @@ resource "aws_iam_role_policy" "child_s3_policy" {
   })
 }
 
-resource "aws_lambda_function" "child_lambda" {
-  function_name    = local.child_lambda_name
-  role             = aws_iam_role.child_lambda_role.arn
+resource "aws_iam_role_policy" "runtime_sqs_producer_policy" {
+  name = "${local.runtime_lambda_name}-sqs-producer"
+  role = aws_iam_role.runtime_lambda_role.id
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect   = "Allow",
+        Action   = ["sqs:SendMessage"],
+        Resource = aws_sqs_queue.shard_queue.arn
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "runtime_sqs_consumer_policy" {
+  name = "${local.runtime_lambda_name}-sqs-consumer"
+  role = aws_iam_role.runtime_lambda_role.id
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect = "Allow",
+        Action = [
+          "sqs:ReceiveMessage",
+          "sqs:DeleteMessage",
+          "sqs:GetQueueAttributes",
+          "sqs:ChangeMessageVisibility"
+        ],
+        Resource = aws_sqs_queue.shard_queue.arn
+      }
+    ]
+  })
+}
+
+resource "aws_lambda_function" "runtime_lambda" {
+  function_name    = local.runtime_lambda_name
+  role             = aws_iam_role.runtime_lambda_role.arn
   runtime          = "provided.al2023"
   handler          = "bootstrap"
-  filename         = var.child_lambda_zip
-  source_code_hash = filebase64sha256(var.child_lambda_zip)
+  filename         = var.runtime_lambda_zip
+  source_code_hash = filebase64sha256(var.runtime_lambda_zip)
   timeout          = 900
   memory_size      = 1024
 
@@ -132,26 +150,16 @@ resource "aws_lambda_function" "child_lambda" {
       SWEEP_RESULTS_BUCKET = aws_s3_bucket.results.bucket
       SWEEP_RESULTS_PREFIX = var.results_prefix
       MAX_SHARDS           = tostring(var.max_shards)
+      SHARD_QUEUE_URL      = aws_sqs_queue.shard_queue.id
     }
   }
 }
 
-resource "aws_lambda_function" "parent_lambda" {
-  function_name    = local.parent_lambda_name
-  role             = aws_iam_role.parent_lambda_role.arn
-  runtime          = "provided.al2023"
-  handler          = "bootstrap"
-  filename         = var.parent_lambda_zip
-  source_code_hash = filebase64sha256(var.parent_lambda_zip)
-  timeout          = 60
-  memory_size      = 512
-
-  environment {
-    variables = {
-      CHILD_LAMBDA_ARN = aws_lambda_function.child_lambda.arn
-      MAX_SHARDS       = tostring(var.max_shards)
-    }
-  }
+resource "aws_lambda_event_source_mapping" "runtime_sqs" {
+  event_source_arn = aws_sqs_queue.shard_queue.arn
+  function_name    = aws_lambda_function.runtime_lambda.arn
+  batch_size       = 1
+  enabled          = true
 }
 
 resource "aws_api_gateway_rest_api" "sweep_api" {
@@ -207,19 +215,19 @@ resource "aws_api_gateway_method" "sweep_post" {
   }
 }
 
-resource "aws_api_gateway_integration" "parent_proxy" {
+resource "aws_api_gateway_integration" "runtime_proxy" {
   rest_api_id             = aws_api_gateway_rest_api.sweep_api.id
   resource_id             = aws_api_gateway_resource.sweep_run.id
   http_method             = aws_api_gateway_method.sweep_post.http_method
   integration_http_method = "POST"
   type                    = "AWS_PROXY"
-  uri                     = aws_lambda_function.parent_lambda.invoke_arn
+  uri                     = aws_lambda_function.runtime_lambda.invoke_arn
 }
 
 resource "aws_lambda_permission" "allow_apigw" {
   statement_id  = "AllowExecutionFromApiGateway"
   action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.parent_lambda.function_name
+  function_name = aws_lambda_function.runtime_lambda.function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_api_gateway_rest_api.sweep_api.execution_arn}/*/*"
 }
@@ -230,7 +238,7 @@ resource "aws_api_gateway_deployment" "deployment" {
   triggers = {
     redeploy = sha1(jsonencode([
       aws_api_gateway_method.sweep_post.id,
-      aws_api_gateway_integration.parent_proxy.id,
+      aws_api_gateway_integration.runtime_proxy.id,
       aws_api_gateway_model.sweep_request.id,
     ]))
   }
@@ -289,6 +297,10 @@ output "api_url" {
 
 output "results_bucket" {
   value = aws_s3_bucket.results.bucket
+}
+
+output "shard_queue_url" {
+  value = aws_sqs_queue.shard_queue.id
 }
 
 output "athena_query_policy_arn" {

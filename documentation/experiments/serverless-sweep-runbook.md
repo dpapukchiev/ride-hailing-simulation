@@ -11,7 +11,7 @@ This runbook covers deploy, invoke, rollback, and verification steps for the AWS
   -var "results_bucket_name=<unique-bucket-name>"
 ```
 
-This command builds Rust parent/child Lambda binaries, packages `bootstrap` zip artifacts, and applies Terraform with stable `parent_lambda_zip` / `child_lambda_zip` inputs.
+This command builds the unified Rust runtime Lambda binary, packages the `bootstrap` zip artifact, and applies Terraform with stable `runtime_lambda_zip` input.
 
 Secret and credential posture:
 
@@ -43,11 +43,11 @@ curl -X POST "<api_url>" \
   }'
 ```
 
-Expected parent response:
+Expected runtime response:
 
 - HTTP `202`
 - `shards_dispatched > 0`
-- one dispatch record per shard
+- one dispatch record per queued shard message
 
 Ingress validation check:
 
@@ -55,7 +55,7 @@ Ingress validation check:
 curl -X POST "<api_url>" -H "content-type: application/json" -d '{"run_id":"bad"}'
 ```
 
-Expected: API Gateway validation error and no parent invocation.
+Expected: API Gateway validation error and no shard messages enqueued.
 
 ## 3) Verify Stored Outcomes
 
@@ -72,7 +72,7 @@ Check that each shard exports only Parquet objects across:
 - `dataset=snapshot_counts`
 - `dataset=shard_outcomes`
 
-For local verification of parent/child contract behavior, run:
+For local verification of runtime contract behavior, run:
 
 ```bash
 cargo test -p sim_serverless_sweep_lambda
@@ -115,13 +115,12 @@ Run `query_run_level_profile.sql` and `query_failure_diagnostics.sql` with your 
 
 If a new Rust runtime deployment regresses:
 
-1. Re-package a known-good artifact pair (`parent.zip`, `child.zip`) or retrieve prior build outputs.
-2. Re-apply Terraform with the known-good zip paths:
+1. Re-package a known-good runtime artifact (`runtime.zip`) or retrieve prior build output.
+2. Re-apply Terraform with the known-good zip path:
 
 ```bash
 terraform -chdir=infra/aws_serverless_sweep/terraform apply \
-  -var "parent_lambda_zip=<known-good-parent.zip>" \
-  -var "child_lambda_zip=<known-good-child.zip>"
+  -var "runtime_lambda_zip=<known-good-runtime.zip>"
 ```
 
 3. Re-run the invocation and Athena checks above.
@@ -130,13 +129,13 @@ terraform -chdir=infra/aws_serverless_sweep/terraform apply \
 
 - Local Rust tests validate contracts, deterministic sharding, and handler behavior.
 - Cloud validation confirms deployment wiring, S3 persistence, and Athena queryability against real IAM and API Gateway.
-- The active deployment path is Rust-only (legacy Python runtime module removed).
+- The active deployment path is a unified Rust runtime (legacy split parent/child module removed).
 
 ## 7) Migration Sign-off Criteria
 
 The migration is considered complete when all are true:
 
-1. Rust parent/child handlers pass local crate tests.
+1. Unified Rust runtime handlers pass local crate tests.
 2. Deploy script succeeds with temporary credentials only.
 3. Results land in partitioned `dataset=shard_*` S3 paths for the run.
 4. Athena queries return success/failure aggregation for the run.
