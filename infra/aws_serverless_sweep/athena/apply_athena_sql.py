@@ -17,14 +17,25 @@ from urllib.parse import urlparse
 
 
 def parse_args() -> argparse.Namespace:
-    script_dir = Path(__file__).resolve().parent
     parser = argparse.ArgumentParser(
         description="Apply ordered Athena SQL files via AWS CLI",
     )
     parser.add_argument(
+        "--execution-mode",
+        choices=("bootstrap", "partitions-only"),
+        default="bootstrap",
+        help=(
+            "Execution profile: bootstrap creates/updates DB and tables before repairing "
+            "partitions, partitions-only runs just partition repair SQL"
+        ),
+    )
+    parser.add_argument(
         "--plan-file",
-        default=str(script_dir / "athena_bootstrap.plan"),
-        help="Path to ordered SQL plan file (default: athena_bootstrap.plan)",
+        default=None,
+        help=(
+            "Path to ordered SQL plan file (default depends on --execution-mode: "
+            "athena_bootstrap.plan or athena_partitions.plan)"
+        ),
     )
     parser.add_argument(
         "--query-results-s3",
@@ -33,7 +44,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--results-bucket",
-        required=True,
+        default=None,
         help="S3 bucket (or s3://bucket[/prefix]) containing serverless sweep outcome datasets",
     )
     parser.add_argument(
@@ -63,11 +74,33 @@ def parse_args() -> argparse.Namespace:
         help="Polling interval while waiting for query completion",
     )
     parser.add_argument(
+        "--max-concurrent",
+        type=int,
+        default=4,
+        help=(
+            "Maximum concurrent Athena queries when --execution-mode=partitions-only "
+            "(default: 4)"
+        ),
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Print resolved SQL execution order without calling AWS",
     )
     return parser.parse_args()
+
+
+def resolve_plan_file(
+    script_dir: Path, execution_mode: str, plan_file_arg: str | None
+) -> Path:
+    if plan_file_arg:
+        return Path(plan_file_arg).resolve()
+
+    default_plans = {
+        "bootstrap": "athena_bootstrap.plan",
+        "partitions-only": "athena_partitions.plan",
+    }
+    return (script_dir / default_plans[execution_mode]).resolve()
 
 
 def normalize_s3_inputs(results_bucket: str, results_prefix: str) -> tuple[str, str]:
@@ -178,60 +211,43 @@ def start_query(
     return query_execution_id
 
 
+def get_query_status(query_execution_id: str, *, region: str | None) -> tuple[str, str]:
+    cmd = [
+        "aws",
+        "athena",
+        "get-query-execution",
+        "--query-execution-id",
+        query_execution_id,
+        "--output",
+        "json",
+    ]
+    if region:
+        cmd.extend(["--region", region])
+
+    payload = run_aws_json(cmd)
+    status = payload["QueryExecution"]["Status"].get("State", "UNKNOWN")
+    reason = payload["QueryExecution"]["Status"].get("StateChangeReason", "")
+    return status, reason
+
+
 def wait_for_query(
     query_execution_id: str, *, poll_interval: float, region: str | None
 ) -> tuple[str, str]:
     while True:
-        cmd = [
-            "aws",
-            "athena",
-            "get-query-execution",
-            "--query-execution-id",
-            query_execution_id,
-            "--output",
-            "json",
-        ]
-        if region:
-            cmd.extend(["--region", region])
-
-        payload = run_aws_json(cmd)
-        status = payload["QueryExecution"]["Status"].get("State", "UNKNOWN")
-        reason = payload["QueryExecution"]["Status"].get("StateChangeReason", "")
-
+        status, reason = get_query_status(query_execution_id, region=region)
         if status in {"SUCCEEDED", "FAILED", "CANCELLED"}:
             return status, reason
 
         time.sleep(poll_interval)
 
 
-def main() -> int:
-    args = parse_args()
-    plan_file = Path(args.plan_file).resolve()
-
-    try:
-        resolved_results_bucket, resolved_results_prefix = normalize_s3_inputs(
-            args.results_bucket,
-            args.results_prefix,
-        )
-    except ValueError as error:
-        print(f"Argument error: {error}", file=sys.stderr)
-        return 2
-
-    try:
-        sql_paths = read_plan(plan_file)
-    except (FileNotFoundError, ValueError) as error:
-        print(f"Plan error: {error}", file=sys.stderr)
-        return 2
-
-    print(f"Using plan: {plan_file}")
-    print("Execution order:")
-    for idx, sql_path in enumerate(sql_paths, start=1):
-        print(f"  {idx:02d}. {sql_path}")
-
-    if args.dry_run:
-        print("Dry run only; no Athena queries executed.")
-        return 0
-
+def execute_sequential(
+    sql_paths: list[Path],
+    *,
+    resolved_results_bucket: str,
+    resolved_results_prefix: str,
+    args: argparse.Namespace,
+) -> int:
     for idx, sql_path in enumerate(sql_paths, start=1):
         sql_template = sql_path.read_text(encoding="utf-8")
         sql = apply_substitutions(
@@ -272,7 +288,145 @@ def main() -> int:
 
         print(f"    {sql_path.name} -> SUCCEEDED")
 
-    print("Athena bootstrap completed successfully.")
+    return 0
+
+
+def execute_partitions_parallel(
+    sql_paths: list[Path],
+    *,
+    resolved_results_bucket: str,
+    resolved_results_prefix: str,
+    args: argparse.Namespace,
+) -> int:
+    rendered_sql: list[tuple[int, Path, str]] = []
+    for idx, sql_path in enumerate(sql_paths, start=1):
+        sql_template = sql_path.read_text(encoding="utf-8")
+        sql = apply_substitutions(
+            sql_template,
+            results_bucket=resolved_results_bucket,
+            results_prefix=resolved_results_prefix,
+            database=args.database,
+        )
+        rendered_sql.append((idx, sql_path, sql))
+
+    active_queries: dict[str, tuple[int, Path]] = {}
+    cursor = 0
+    total = len(rendered_sql)
+
+    while cursor < total or active_queries:
+        while cursor < total and len(active_queries) < args.max_concurrent:
+            idx, sql_path, sql = rendered_sql[cursor]
+            cursor += 1
+            print(f"[{idx:02d}/{total:02d}] Launching {sql_path.name}...")
+            try:
+                query_execution_id = start_query(
+                    sql,
+                    workgroup=args.workgroup,
+                    query_results_s3=args.query_results_s3,
+                    region=args.region,
+                )
+            except RuntimeError as error:
+                print(
+                    f"Athena invocation failed for {sql_path.name}: {error}",
+                    file=sys.stderr,
+                )
+                return 1
+
+            active_queries[query_execution_id] = (idx, sql_path)
+            print(f"    QueryExecutionId={query_execution_id}")
+
+        completed_ids: list[str] = []
+        for query_execution_id, (_, sql_path) in active_queries.items():
+            try:
+                state, reason = get_query_status(query_execution_id, region=args.region)
+            except RuntimeError as error:
+                print(
+                    f"Athena status check failed for {sql_path.name}: {error}",
+                    file=sys.stderr,
+                )
+                return 1
+
+            if state in {"SUCCEEDED", "FAILED", "CANCELLED"}:
+                completed_ids.append(query_execution_id)
+                if state != "SUCCEEDED":
+                    print(
+                        f"Athena query failed for {sql_path.name}: state={state}, "
+                        f"query_execution_id={query_execution_id}, reason={reason}",
+                        file=sys.stderr,
+                    )
+                    return 1
+                print(f"    {sql_path.name} -> SUCCEEDED")
+
+        for query_execution_id in completed_ids:
+            active_queries.pop(query_execution_id, None)
+
+        if active_queries:
+            time.sleep(args.poll_interval_seconds)
+
+    return 0
+
+
+def main() -> int:
+    args = parse_args()
+    if args.max_concurrent < 1:
+        print("Argument error: --max-concurrent must be >= 1", file=sys.stderr)
+        return 2
+
+    script_dir = Path(__file__).resolve().parent
+    plan_file = resolve_plan_file(script_dir, args.execution_mode, args.plan_file)
+
+    if args.execution_mode == "bootstrap" and not args.results_bucket:
+        print(
+            "Argument error: --results-bucket is required in bootstrap mode",
+            file=sys.stderr,
+        )
+        return 2
+
+    results_bucket_input = args.results_bucket or "_unused_bucket"
+
+    try:
+        resolved_results_bucket, resolved_results_prefix = normalize_s3_inputs(
+            results_bucket_input,
+            args.results_prefix,
+        )
+    except ValueError as error:
+        print(f"Argument error: {error}", file=sys.stderr)
+        return 2
+
+    try:
+        sql_paths = read_plan(plan_file)
+    except (FileNotFoundError, ValueError) as error:
+        print(f"Plan error: {error}", file=sys.stderr)
+        return 2
+
+    print(f"Using plan: {plan_file}")
+    print("Execution order:")
+    for idx, sql_path in enumerate(sql_paths, start=1):
+        print(f"  {idx:02d}. {sql_path}")
+
+    if args.dry_run:
+        print("Dry run only; no Athena queries executed.")
+        return 0
+
+    if args.execution_mode == "partitions-only":
+        exit_code = execute_partitions_parallel(
+            sql_paths,
+            resolved_results_bucket=resolved_results_bucket,
+            resolved_results_prefix=resolved_results_prefix,
+            args=args,
+        )
+    else:
+        exit_code = execute_sequential(
+            sql_paths,
+            resolved_results_bucket=resolved_results_bucket,
+            resolved_results_prefix=resolved_results_prefix,
+            args=args,
+        )
+
+    if exit_code != 0:
+        return exit_code
+
+    print("Athena SQL execution completed successfully.")
     return 0
 
 

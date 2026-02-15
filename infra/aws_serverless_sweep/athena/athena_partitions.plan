@@ -1,0 +1,7 @@
+# Athena partition refresh workflow (no table/database creation)
+repair_table.sql
+repair_table_run_context.sql
+repair_table_effective_parameters.sql
+repair_table_shard_metrics.sql
+repair_table_trip_data.sql
+repair_table_snapshot_counts.sql

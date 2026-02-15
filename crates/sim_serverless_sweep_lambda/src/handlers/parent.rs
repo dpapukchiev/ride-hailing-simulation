@@ -1,4 +1,5 @@
 use std::fs;
+use std::time::Instant;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::runtime::contract::{
@@ -75,6 +76,7 @@ fn handle_parent_event_impl(
     dispatch: &dyn Fn(&[u8]) -> Result<(), String>,
     run_context_export: Option<RunContextExportConfig<'_>>,
 ) -> ApiGatewayResponse {
+    let dispatch_started_at = Instant::now();
     let payload = match normalize_apigw_event(event) {
         Ok(value) => value,
         Err(message) => return validation_error_response(&message),
@@ -93,6 +95,12 @@ fn handle_parent_event_impl(
     let dispatch_target = match dispatch_target {
         Some(value) if !value.trim().is_empty() => value,
         _ => {
+            log_parent_error(
+                "misconfiguration",
+                json!({
+                    "message": "SHARD_QUEUE_URL must be configured",
+                }),
+            );
             return error_response(
                 500,
                 json!({
@@ -130,6 +138,17 @@ fn handle_parent_event_impl(
         max_shards: normalized.max_shards,
     };
 
+    log_parent_info(
+        "run_accepted",
+        json!({
+            "run_id": run_context_record.run_id.clone(),
+            "total_points": run_context_record.total_points,
+            "shard_count": run_context_record.shard_count,
+            "shard_strategy": run_context_record.shard_strategy.clone(),
+            "max_shards": run_context_record.max_shards,
+        }),
+    );
+
     if let Some(export) = run_context_export {
         let run_context_key = run_context_object_key(
             export.prefix,
@@ -151,6 +170,14 @@ fn handle_parent_event_impl(
         };
 
         if let Err(error) = (export.persist_object)(&run_context_key, &payload) {
+            log_parent_error(
+                "run_context_persist_failed",
+                json!({
+                    "run_id": run_context_record.run_id.clone(),
+                    "run_context_key": run_context_key.clone(),
+                    "error": error.clone(),
+                }),
+            );
             return error_response(
                 502,
                 json!({
@@ -195,6 +222,15 @@ fn handle_parent_event_impl(
         match dispatch_result {
             Ok(Ok(())) => {}
             Ok(Err(error)) => {
+                log_parent_error(
+                    "dispatch_failed",
+                    json!({
+                        "run_id": run_context.run_id.clone(),
+                        "shard_id": child_payload.shard_id,
+                        "dispatch_target": dispatch_target,
+                        "error": error.clone(),
+                    }),
+                );
                 return error_response(
                     502,
                     json!({
@@ -206,12 +242,22 @@ fn handle_parent_event_impl(
                 );
             }
             Err(panic_payload) => {
+                let details = panic_payload_message(panic_payload);
+                log_parent_error(
+                    "dispatch_panicked",
+                    json!({
+                        "run_id": run_context.run_id.clone(),
+                        "shard_id": child_payload.shard_id,
+                        "dispatch_target": dispatch_target,
+                        "details": details.clone(),
+                    }),
+                );
                 return error_response(
                     500,
                     json!({
                         "error": "dispatch_panicked",
                         "message": "Child dispatch panicked before completion",
-                        "details": panic_payload_message(panic_payload),
+                        "details": details,
                         "dispatch_target": dispatch_target,
                         "run_context": run_context,
                     }),
@@ -225,6 +271,24 @@ fn handle_parent_event_impl(
         });
     }
 
+    let dispatch_duration_ms = dispatch_started_at.elapsed().as_millis();
+    let shard_count = dispatches.len();
+    let shard_dispatch_per_second = if dispatch_duration_ms == 0 {
+        shard_count as f64
+    } else {
+        (shard_count as f64) / ((dispatch_duration_ms as f64) / 1_000.0)
+    };
+    log_parent_info(
+        "dispatch_completed",
+        json!({
+            "run_id": run_context.run_id,
+            "shards_dispatched": shard_count,
+            "dispatch_duration_ms": dispatch_duration_ms,
+            "shard_dispatch_per_second": shard_dispatch_per_second,
+            "dispatch_target": dispatch_target,
+        }),
+    );
+
     let response = ParentAcceptedResponse {
         run_id: normalized.run_id,
         total_points: normalized.total_points,
@@ -234,6 +298,31 @@ fn handle_parent_event_impl(
         schema_version: ORCHESTRATION_SCHEMA_VERSION.to_string(),
     };
     success_response(202, response)
+}
+
+fn log_parent_info(event: &str, details: Value) {
+    eprintln!(
+        "{}",
+        json!({
+            "component": "parent_handler",
+            "event": event,
+            "timestamp": Utc::now().to_rfc3339(),
+            "details": details,
+        })
+    );
+}
+
+fn log_parent_error(event: &str, details: Value) {
+    eprintln!(
+        "{}",
+        json!({
+            "component": "parent_handler",
+            "level": "error",
+            "event": event,
+            "timestamp": Utc::now().to_rfc3339(),
+            "details": details,
+        })
+    );
 }
 
 fn panic_payload_message(panic_payload: Box<dyn std::any::Any + Send>) -> String {

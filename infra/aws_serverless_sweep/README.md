@@ -20,6 +20,35 @@ Runtime behavior is owned by Rust crates under `crates/`:
 Terraform in this directory wires infrastructure only (API Gateway, Lambda resources, SQS, IAM, env vars, and artifact paths).
 Lambda resources use the Rust custom runtime (`provided.al2023`) and packaged `bootstrap` binaries.
 
+## Runtime Observability
+
+The runtime writes structured JSON logs to CloudWatch via stderr for each major lifecycle step:
+
+- `sweep_runtime`: request classification (`api_gateway` vs `sqs_batch`), payload decode counts, and handler duration
+- `parent_handler`: run acceptance metadata (`run_id`, `total_points`, `shard_count`) and dispatch throughput
+- `child_handler`: shard start/completion/failure including per-shard `points_processed`, `duration_ms`, and `points_per_second`
+
+Example CloudWatch Logs Insights query to trace one run across parent and child phases:
+
+```sql
+fields @timestamp, @message
+| filter @message like /"run_id":"demo-run-001"/
+| sort @timestamp asc
+| limit 200
+```
+
+Example CloudWatch Logs Insights query for shard throughput during a run:
+
+```sql
+fields @timestamp, @message
+| filter @message like /"component":"child_handler"/
+| filter @message like /"event":"shard_completed"/
+| parse @message '"points_processed":*,' as points_processed
+| parse @message '"points_per_second":*,' as points_per_second
+| stats avg(to_double(points_per_second)) as avg_points_per_second,
+        sum(to_bigint(points_processed)) as total_points
+```
+
 ## Required Deploy-Time Inputs
 
 Set these as Terraform variables (`*.tfvars`, environment, or CI secrets):
@@ -130,9 +159,21 @@ python3 infra/aws_serverless_sweep/athena/apply_athena_sql.py \
   --workgroup "primary"
 ```
 
+To only discover newly written partitions without recreating or touching database/table DDL, run:
+
+```bash
+python3 infra/aws_serverless_sweep/athena/apply_athena_sql.py \
+  --execution-mode "partitions-only" \
+  --query-results-s3 "s3://<athena-query-results-bucket>/queries/" \
+  --workgroup "primary"
+```
+
+`partitions-only` mode launches partition repair statements concurrently (default `--max-concurrent 4`; tune based on Athena workgroup limits).
+
 `--results-bucket` accepts either a plain bucket name (`my-bucket`) or an S3 URI (`s3://my-bucket[/optional/prefix]`).
 
 To add or reorder setup queries, edit `infra/aws_serverless_sweep/athena/athena_bootstrap.plan`.
+To customize partition-only refresh order, edit `infra/aws_serverless_sweep/athena/athena_partitions.plan`.
 
 Athena SQL assets live in `infra/aws_serverless_sweep/athena/`:
 
@@ -145,3 +186,5 @@ Athena SQL assets live in `infra/aws_serverless_sweep/athena/`:
 - `query_run_level_profile.sql`, `query_failure_diagnostics.sql`, `query_shard_coverage.sql`
 - `query_trip_snapshot_join.sql`: joins per-point metrics with trip and snapshot datasets
 - `query_outcome_configuration_smoke.sql`: validates joins across outcomes, run context, and effective parameters for one run
+
+`query_run_level_profile.sql` now includes run-level throughput columns (`successful_points`, `run_window_seconds`, `points_per_second`) so you can estimate scaling and end-to-end runtime for future experiment sizes.

@@ -1,4 +1,5 @@
 use std::fs;
+use std::time::Instant;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::runtime::contract::{
@@ -15,6 +16,7 @@ use arrow::record_batch::RecordBatch;
 use parquet::arrow::ArrowWriter;
 use parquet::file::properties::WriterProperties;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use sim_experiments::{export_to_parquet, SimulationResult};
 
 use crate::adapters::object_store::OutcomeStore;
@@ -65,6 +67,18 @@ pub fn handle_child_payload(
     executor: &impl ShardExecutor,
     outcome_store: &impl OutcomeStore,
 ) -> Result<ChildSuccessResponse, ChildHandlerError> {
+    let started_at = Instant::now();
+    log_child_info(
+        "shard_started",
+        json!({
+            "run_id": payload.run_id.clone(),
+            "shard_id": payload.shard_id,
+            "start_index": payload.start_index,
+            "end_index_exclusive": payload.end_index_exclusive,
+            "planned_points": payload.end_index_exclusive.saturating_sub(payload.start_index),
+        }),
+    );
+
     if payload.start_index >= payload.end_index_exclusive {
         return Err(ChildHandlerError {
             message: "Invalid shard bounds".to_string(),
@@ -80,10 +94,38 @@ pub fn handle_child_payload(
     }
 
     match write_success(payload, config, executor, outcome_store) {
-        Ok(response) => Ok(response),
+        Ok((response, points_processed)) => {
+            let elapsed_ms = started_at.elapsed().as_millis();
+            let points_per_second = if elapsed_ms == 0 {
+                points_processed as f64
+            } else {
+                (points_processed as f64) / ((elapsed_ms as f64) / 1_000.0)
+            };
+            log_child_info(
+                "shard_completed",
+                json!({
+                    "run_id": payload.run_id.clone(),
+                    "shard_id": payload.shard_id,
+                    "points_processed": points_processed,
+                    "duration_ms": elapsed_ms,
+                    "points_per_second": points_per_second,
+                    "outcome_key": response.outcome_key.clone(),
+                }),
+            );
+            Ok(response)
+        }
         Err(success_error) => {
             let error_message = success_error.message;
             write_failure(payload, config, &error_message, outcome_store)?;
+            log_child_error(
+                "shard_failed",
+                json!({
+                    "run_id": payload.run_id.clone(),
+                    "shard_id": payload.shard_id,
+                    "duration_ms": started_at.elapsed().as_millis(),
+                    "error": error_message.clone(),
+                }),
+            );
             Err(ChildHandlerError {
                 message: error_message,
                 failure_key: Some(error_object_key(
@@ -110,7 +152,7 @@ fn write_success(
     config: &ChildHandlerConfig,
     executor: &impl ShardExecutor,
     outcome_store: &impl OutcomeStore,
-) -> Result<ChildSuccessResponse, ChildHandlerError> {
+) -> Result<(ChildSuccessResponse, usize), ChildHandlerError> {
     let mut first_metrics_key: Option<String> = None;
 
     let mut on_point_result = |point_result: ShardPointResult| -> Result<(), String> {
@@ -243,11 +285,39 @@ fn write_success(
             failure_key: None,
         })?;
 
-    Ok(ChildSuccessResponse {
-        status: "ok".to_string(),
-        shard_id: payload.shard_id,
-        outcome_key,
-    })
+    Ok((
+        ChildSuccessResponse {
+            status: "ok".to_string(),
+            shard_id: payload.shard_id,
+            outcome_key,
+        },
+        points_processed,
+    ))
+}
+
+fn log_child_info(event: &str, details: serde_json::Value) {
+    eprintln!(
+        "{}",
+        json!({
+            "component": "child_handler",
+            "event": event,
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+            "details": details,
+        })
+    );
+}
+
+fn log_child_error(event: &str, details: serde_json::Value) {
+    eprintln!(
+        "{}",
+        json!({
+            "component": "child_handler",
+            "level": "error",
+            "event": event,
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+            "details": details,
+        })
+    );
 }
 
 fn serialize_metrics_parquet(

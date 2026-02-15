@@ -10,6 +10,7 @@ use sim_serverless_sweep_lambda::handlers::parent::{
     handle_parent_event_with_context_export, ApiGatewayResponse, RunContextExportConfig,
 };
 use sim_serverless_sweep_lambda::runtime::contract::ChildShardPayload;
+use std::time::Instant;
 
 struct S3OutcomeStore {
     bucket: String,
@@ -49,6 +50,21 @@ struct RuntimeDependencies {
 }
 
 async fn handle_request(event: LambdaEvent<Value>) -> Result<Value, Error> {
+    let started_at = Instant::now();
+    let request_id = event.context.request_id.clone();
+    let event_kind = if is_sqs_event(&event.payload) {
+        "sqs_batch"
+    } else {
+        "api_gateway"
+    };
+    log_runtime_info(
+        "request_received",
+        json!({
+            "request_id": request_id,
+            "event_kind": event_kind,
+        }),
+    );
+
     let aws_config = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
     let deps = RuntimeDependencies {
         queue_url: std::env::var("SHARD_QUEUE_URL")
@@ -62,7 +78,30 @@ async fn handle_request(event: LambdaEvent<Value>) -> Result<Value, Error> {
     };
 
     if is_sqs_event(&event.payload) {
-        handle_sqs_event(&event.payload, &deps)?;
+        let decoded_payloads = match handle_sqs_event(&event.payload, &deps) {
+            Ok(value) => value,
+            Err(error) => {
+                log_runtime_error(
+                    "request_failed",
+                    json!({
+                        "request_id": event.context.request_id,
+                        "event_kind": "sqs_batch",
+                        "duration_ms": started_at.elapsed().as_millis(),
+                        "error": error.to_string(),
+                    }),
+                );
+                return Err(error);
+            }
+        };
+        log_runtime_info(
+            "request_completed",
+            json!({
+                "request_id": event.context.request_id,
+                "event_kind": "sqs_batch",
+                "decoded_payloads": decoded_payloads,
+                "duration_ms": started_at.elapsed().as_millis(),
+            }),
+        );
         Ok(json!({ "status": "ok" }))
     } else {
         let sqs_client = deps.sqs_client.clone();
@@ -97,8 +136,27 @@ async fn handle_request(event: LambdaEvent<Value>) -> Result<Value, Error> {
                 persist_object: &|key, body| outcome_store.write_object(key, body),
             }),
         );
-        serde_json::to_value(response)
-            .map_err(|error| Error::from(format!("failed to serialize api response: {error}")))
+        log_runtime_info(
+            "request_completed",
+            json!({
+                "request_id": event.context.request_id,
+                "event_kind": "api_gateway",
+                "status_code": response.status_code,
+                "duration_ms": started_at.elapsed().as_millis(),
+            }),
+        );
+        serde_json::to_value(response).map_err(|error| {
+            log_runtime_error(
+                "request_failed",
+                json!({
+                    "request_id": event.context.request_id,
+                    "event_kind": "api_gateway",
+                    "duration_ms": started_at.elapsed().as_millis(),
+                    "error": format!("failed to serialize api response: {error}"),
+                }),
+            );
+            Error::from(format!("failed to serialize api response: {error}"))
+        })
     }
 }
 
@@ -119,8 +177,15 @@ fn is_sqs_event(event: &Value) -> bool {
         .unwrap_or(false)
 }
 
-fn handle_sqs_event(event: &Value, deps: &RuntimeDependencies) -> Result<(), Error> {
+fn handle_sqs_event(event: &Value, deps: &RuntimeDependencies) -> Result<usize, Error> {
     let payloads = decode_sqs_payloads(event)?;
+    let payload_count = payloads.len();
+    log_runtime_info(
+        "sqs_payloads_decoded",
+        json!({
+            "payload_count": payload_count,
+        }),
+    );
 
     let now = Utc::now();
     let fallback_run_date = now.format("%Y-%m-%d").to_string();
@@ -142,7 +207,32 @@ fn handle_sqs_event(event: &Value, deps: &RuntimeDependencies) -> Result<(), Err
             .map_err(|error| Error::from(error.message))?;
     }
 
-    Ok(())
+    Ok(payload_count)
+}
+
+fn log_runtime_info(event: &str, details: Value) {
+    eprintln!(
+        "{}",
+        json!({
+            "component": "sweep_runtime",
+            "event": event,
+            "timestamp": Utc::now().to_rfc3339(),
+            "details": details,
+        })
+    );
+}
+
+fn log_runtime_error(event: &str, details: Value) {
+    eprintln!(
+        "{}",
+        json!({
+            "component": "sweep_runtime",
+            "level": "error",
+            "event": event,
+            "timestamp": Utc::now().to_rfc3339(),
+            "details": details,
+        })
+    );
 }
 
 fn resolve_run_date(payload: &ChildShardPayload, fallback_run_date: &str) -> String {
