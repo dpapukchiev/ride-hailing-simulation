@@ -53,7 +53,11 @@ Run a single local command to build the Rust Lambda binary, package zip artifact
   -var "results_bucket_name=<bucket>"
 ```
 
-The script preflights required tooling (`docker`, `aws`, `terraform`) and validates an active temporary AWS session via `aws sts get-caller-identity` before building. Rust compilation and packaging run inside the configured Docker Rust toolchain image (`SWEEP_DOCKER_IMAGE`). If your session is missing or expired, re-run AWS login first:
+The script preflights required tooling (`docker`, `aws`, `terraform`) and validates an active temporary AWS session via `aws sts get-caller-identity` before building. Rust compilation and packaging run inside a reusable Docker builder image derived from the configured Rust toolchain image (`SWEEP_DOCKER_IMAGE`).
+
+On the first run, the script builds runtime artifacts and records metadata in `infra/aws_serverless_sweep/dist/runtime-build.metadata`. On subsequent runs, if target/profile/toolchain/source fingerprint are unchanged, it reuses `dist/runtime.zip` and skips rebuild work.
+
+If your session is missing or expired, re-run AWS login first:
 
 ```bash
 aws sso login
@@ -68,6 +72,12 @@ Optional overrides:
 - `SWEEP_LAMBDA_TARGET` (default `x86_64-unknown-linux-gnu`)
 - `SWEEP_LAMBDA_PROFILE` (default `release`)
 - `SWEEP_DOCKER_IMAGE` (default `docker.io/library/rust:1-bullseye`)
+- `SWEEP_BUILDER_IMAGE` (default derived local tag, e.g. `ride-sweep-builder:<image-slug>`)
+- `SWEEP_DOCKER_PULL_POLICY` (`if-missing` default; also supports `always` and `never`)
+- `SWEEP_FORCE_REBUILD=1` to ignore cache and rebuild artifacts
+- `--force-rebuild` CLI flag (same behavior as `SWEEP_FORCE_REBUILD=1`)
+
+Use `--force-rebuild` after toolchain updates or when diagnosing stale local build state.
 
 After deploy, copy the output `api_url` and invoke with a sweep request payload.
 
