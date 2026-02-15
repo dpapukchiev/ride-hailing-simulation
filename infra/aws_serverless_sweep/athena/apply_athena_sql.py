@@ -13,6 +13,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 
 def parse_args() -> argparse.Namespace:
@@ -33,7 +34,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--results-bucket",
         required=True,
-        help="S3 bucket containing serverless sweep outcome datasets",
+        help="S3 bucket (or s3://bucket[/prefix]) containing serverless sweep outcome datasets",
     )
     parser.add_argument(
         "--results-prefix",
@@ -69,6 +70,35 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def normalize_s3_inputs(results_bucket: str, results_prefix: str) -> tuple[str, str]:
+    bucket_input = results_bucket.strip()
+    if not bucket_input:
+        raise ValueError("--results-bucket cannot be empty")
+
+    normalized_prefix = results_prefix.strip("/")
+    if bucket_input.startswith("s3://"):
+        parsed = urlparse(bucket_input)
+        if parsed.scheme != "s3" or not parsed.netloc:
+            raise ValueError(
+                "--results-bucket must be a bucket name or valid s3://bucket[/prefix] URI"
+            )
+
+        bucket_name = parsed.netloc.strip()
+        uri_prefix = parsed.path.strip("/")
+        if uri_prefix:
+            normalized_prefix = "/".join(
+                part for part in (uri_prefix, normalized_prefix) if part
+            )
+        return bucket_name, normalized_prefix
+
+    if "/" in bucket_input:
+        raise ValueError(
+            "--results-bucket should be a bucket name (no slashes) unless using s3://bucket[/prefix]"
+        )
+
+    return bucket_input, normalized_prefix
+
+
 def read_plan(plan_file: Path) -> list[Path]:
     if not plan_file.exists():
         raise FileNotFoundError(f"Plan file not found: {plan_file}")
@@ -79,7 +109,11 @@ def read_plan(plan_file: Path) -> list[Path]:
         if not entry or entry.startswith("#"):
             continue
 
-        candidate = (plan_file.parent / entry).resolve() if not Path(entry).is_absolute() else Path(entry)
+        candidate = (
+            (plan_file.parent / entry).resolve()
+            if not Path(entry).is_absolute()
+            else Path(entry)
+        )
         if candidate.suffix.lower() != ".sql":
             raise ValueError(f"Plan entries must point to .sql files, got: {entry}")
         if not candidate.exists():
@@ -92,12 +126,13 @@ def read_plan(plan_file: Path) -> list[Path]:
     return sql_paths
 
 
-def apply_substitutions(sql_text: str, *, results_bucket: str, results_prefix: str, database: str) -> str:
-    normalized_prefix = results_prefix.strip("/")
+def apply_substitutions(
+    sql_text: str, *, results_bucket: str, results_prefix: str, database: str
+) -> str:
     substitutions = {
         "<results-bucket>": results_bucket,
         "ride_sim_analytics": database,
-        "serverless-sweeps/outcomes": normalized_prefix,
+        "serverless-sweeps/outcomes": results_prefix,
     }
 
     rendered = sql_text
@@ -117,7 +152,9 @@ def run_aws_json(command: list[str]) -> dict:
     return json.loads(completed.stdout)
 
 
-def start_query(sql: str, *, workgroup: str, query_results_s3: str, region: str | None) -> str:
+def start_query(
+    sql: str, *, workgroup: str, query_results_s3: str, region: str | None
+) -> str:
     cmd = [
         "aws",
         "athena",
@@ -141,7 +178,9 @@ def start_query(sql: str, *, workgroup: str, query_results_s3: str, region: str 
     return query_execution_id
 
 
-def wait_for_query(query_execution_id: str, *, poll_interval: float, region: str | None) -> tuple[str, str]:
+def wait_for_query(
+    query_execution_id: str, *, poll_interval: float, region: str | None
+) -> tuple[str, str]:
     while True:
         cmd = [
             "aws",
@@ -170,6 +209,15 @@ def main() -> int:
     plan_file = Path(args.plan_file).resolve()
 
     try:
+        resolved_results_bucket, resolved_results_prefix = normalize_s3_inputs(
+            args.results_bucket,
+            args.results_prefix,
+        )
+    except ValueError as error:
+        print(f"Argument error: {error}", file=sys.stderr)
+        return 2
+
+    try:
         sql_paths = read_plan(plan_file)
     except (FileNotFoundError, ValueError) as error:
         print(f"Plan error: {error}", file=sys.stderr)
@@ -188,8 +236,8 @@ def main() -> int:
         sql_template = sql_path.read_text(encoding="utf-8")
         sql = apply_substitutions(
             sql_template,
-            results_bucket=args.results_bucket,
-            results_prefix=args.results_prefix,
+            results_bucket=resolved_results_bucket,
+            results_prefix=resolved_results_prefix,
             database=args.database,
         )
 
@@ -208,7 +256,10 @@ def main() -> int:
                 region=args.region,
             )
         except RuntimeError as error:
-            print(f"Athena invocation failed for {sql_path.name}: {error}", file=sys.stderr)
+            print(
+                f"Athena invocation failed for {sql_path.name}: {error}",
+                file=sys.stderr,
+            )
             return 1
 
         if state != "SUCCEEDED":
