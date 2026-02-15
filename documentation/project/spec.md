@@ -6,6 +6,12 @@
 README.md
 Cargo.toml
 infra/
+  aws_serverless_sweep/
+    README.md
+    deploy_local.sh
+    terraform/
+      main.tf
+      variables.tf
   osrm/
     docker-compose.yml
     setup.sh
@@ -71,6 +77,21 @@ crates/
       export.rs
     examples/
       parameter_sweep.rs
+  sim_serverless_sweep_core/
+    Cargo.toml
+    src/
+      lib.rs
+      contract.rs
+      sharding.rs
+      storage_keys.rs
+  sim_serverless_sweep_lambda/
+    Cargo.toml
+    src/
+      lib.rs
+      handlers/
+        mod.rs
+        parent.rs
+        child.rs
   sim_ui/
     Cargo.toml
     src/
@@ -132,6 +153,7 @@ workspace member. Run `cargo run -p xtask -- --help` to list all commands.
 | `cargo run -p xtask -- bench-compare` | Stash changes, create baseline, restore, compare benchmarks |
 | `cargo run -p xtask -- ci [check\|examples\|bench\|all]` | Run CI checks (default: `check`) |
 | `cargo run -p xtask -- load-test` | Run load tests (ignored tests in sim_core) |
+| `cargo run -p xtask -- serverless-package` | Build and package Rust Lambda artifacts for Terraform (`parent.zip`, `child.zip`) |
 
 **Dependencies** (`xtask/Cargo.toml`): `clap = "4"` (with `derive` feature).
 

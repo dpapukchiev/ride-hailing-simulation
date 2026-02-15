@@ -21,6 +21,7 @@ pub(super) fn spawn_rider(
 ) -> bevy_ecs::prelude::Entity {
     let mut rng = create_spawn_rng(spawner.config.seed, spawner.spawned_count());
 
+    #[cfg(feature = "osrm")]
     let spawn_location = resolve_spawn_location(
         &mut rng,
         weighting,
@@ -30,6 +31,18 @@ pub(super) fn spawn_rider(
         spawner.config.lng_min,
         spawner.config.lng_max,
         spawner.osrm_spawn_client(),
+        osrm_metrics,
+    );
+    #[cfg(not(feature = "osrm"))]
+    let spawn_location = resolve_spawn_location(
+        &mut rng,
+        weighting,
+        |w, rng| w.sample_rider_cell(rng),
+        spawner.config.lat_min,
+        spawner.config.lat_max,
+        spawner.config.lng_min,
+        spawner.config.lng_max,
+        (),
         osrm_metrics,
     );
     let position = spawn_location.cell;
@@ -82,6 +95,7 @@ pub(super) fn spawn_driver(
 ) {
     let mut rng = create_spawn_rng(spawner.config.seed, spawner.spawned_count());
 
+    #[cfg(feature = "osrm")]
     let spawn_location = resolve_spawn_location(
         &mut rng,
         weighting,
@@ -91,6 +105,18 @@ pub(super) fn spawn_driver(
         spawner.config.lng_min,
         spawner.config.lng_max,
         spawner.osrm_spawn_client(),
+        osrm_metrics,
+    );
+    #[cfg(not(feature = "osrm"))]
+    let spawn_location = resolve_spawn_location(
+        &mut rng,
+        weighting,
+        |w, rng| w.sample_driver_cell(rng),
+        spawner.config.lat_min,
+        spawner.config.lat_max,
+        spawner.config.lng_min,
+        spawner.config.lng_max,
+        (),
         osrm_metrics,
     );
 

@@ -53,7 +53,7 @@ Run a single local command to build the Rust Lambda binary, package zip artifact
   -var "results_bucket_name=<bucket>"
 ```
 
-The script preflights required tooling (`cargo`, `aws`, `terraform`) and validates an active temporary AWS session via `aws sts get-caller-identity` before building. If your session is missing or expired, re-run AWS login first:
+The script preflights required tooling (`docker`, `aws`, `terraform`) and validates an active temporary AWS session via `aws sts get-caller-identity` before building. Rust compilation and packaging run inside the configured Docker Rust toolchain image (`SWEEP_DOCKER_IMAGE`). If your session is missing or expired, re-run AWS login first:
 
 ```bash
 aws sso login
@@ -62,6 +62,14 @@ aws sso login
 The script wires:
 
 - `runtime_lambda_zip=infra/aws_serverless_sweep/dist/runtime.zip`
+
+Optional overrides:
+
+- `SWEEP_LAMBDA_TARGET` (default `x86_64-unknown-linux-gnu`)
+- `SWEEP_LAMBDA_PROFILE` (default `release`)
+- `SWEEP_DOCKER_IMAGE` (default `docker.io/library/rust:1-bullseye`)
+
+After deploy, copy the output `api_url` and invoke with a sweep request payload.
 
 ## Request Contract
 
@@ -91,3 +99,28 @@ Outcomes are written as Parquet-only datasets under partitioned keys:
 - `<results_prefix>/dataset=shard_outcomes/run_date=<yyyy-mm-dd>/run_id=<run_id>/status=<success|failure>/shard_id=<id>/part-0.parquet`
 
 All datasets are joinable by `run_id`, `shard_id`, and `point_index` (where applicable).
+
+## Athena Analytics
+
+Bootstrap the Athena data layer in one command:
+
+```bash
+python3 infra/aws_serverless_sweep/athena/apply_athena_sql.py \
+  --query-results-s3 "s3://<athena-query-results-bucket>/queries/" \
+  --results-bucket "<results-bucket>" \
+  --results-prefix "serverless-sweeps/outcomes" \
+  --workgroup "primary"
+```
+
+`--results-bucket` accepts either a plain bucket name (`my-bucket`) or an S3 URI (`s3://my-bucket[/optional/prefix]`).
+
+To add or reorder setup queries, edit `infra/aws_serverless_sweep/athena/athena_bootstrap.plan`.
+
+Athena SQL assets live in `infra/aws_serverless_sweep/athena/`:
+
+- `create_table.sql`: creates outcomes/metrics/trip/snapshot external tables
+- `create_table_shard_metrics.sql`, `create_table_trip_data.sql`, `create_table_snapshot_counts.sql`
+- `repair_table.sql`: discovers partitions for outcomes table
+- `repair_table_shard_metrics.sql`, `repair_table_trip_data.sql`, `repair_table_snapshot_counts.sql`
+- `query_run_level_profile.sql`, `query_failure_diagnostics.sql`, `query_shard_coverage.sql`
+- `query_trip_snapshot_join.sql`: joins per-point metrics with trip and snapshot datasets
