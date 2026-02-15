@@ -110,12 +110,8 @@ fn handle_sqs_event(event: &Value, deps: &RuntimeDependencies) -> Result<(), Err
     let payloads = decode_sqs_payloads(event)?;
 
     let now = Utc::now();
-    let config = ChildHandlerConfig {
-        bucket: deps.bucket.clone(),
-        prefix: deps.prefix.clone(),
-        run_date: now.format("%Y-%m-%d").to_string(),
-        event_time: now.to_rfc3339(),
-    };
+    let fallback_run_date = now.format("%Y-%m-%d").to_string();
+    let event_time = now.to_rfc3339();
 
     let outcome_store = S3OutcomeStore {
         bucket: deps.bucket.clone(),
@@ -123,11 +119,24 @@ fn handle_sqs_event(event: &Value, deps: &RuntimeDependencies) -> Result<(), Err
     };
 
     for payload in payloads {
+        let config = ChildHandlerConfig {
+            bucket: deps.bucket.clone(),
+            prefix: deps.prefix.clone(),
+            run_date: resolve_run_date(&payload, &fallback_run_date),
+            event_time: event_time.clone(),
+        };
         handle_child_payload_with_sim_runtime(&payload, &config, &outcome_store)
             .map_err(|error| Error::from(error.message))?;
     }
 
     Ok(())
+}
+
+fn resolve_run_date(payload: &ChildShardPayload, fallback_run_date: &str) -> String {
+    payload
+        .run_date
+        .clone()
+        .unwrap_or_else(|| fallback_run_date.to_string())
 }
 
 fn decode_sqs_payloads(event: &Value) -> Result<Vec<ChildShardPayload>, Error> {
@@ -203,5 +212,41 @@ mod tests {
 
         let error = decode_sqs_payloads(&event).expect_err("invalid child payload should fail");
         assert!(error.to_string().contains("invalid child shard payload"));
+    }
+
+    #[test]
+    fn run_date_prefers_payload_value() {
+        let payload = ChildShardPayload {
+            run_id: "run-123".to_string(),
+            run_date: Some("2026-02-14".to_string()),
+            dimensions: std::collections::BTreeMap::new(),
+            total_points: 1,
+            shard_id: 0,
+            start_index: 0,
+            end_index_exclusive: 1,
+            seed: 0,
+            failure_injection_shards: Vec::new(),
+        };
+
+        let resolved = resolve_run_date(&payload, "2026-02-15");
+        assert_eq!(resolved, "2026-02-14");
+    }
+
+    #[test]
+    fn run_date_falls_back_when_payload_missing() {
+        let payload = ChildShardPayload {
+            run_id: "run-123".to_string(),
+            run_date: None,
+            dimensions: std::collections::BTreeMap::new(),
+            total_points: 1,
+            shard_id: 0,
+            start_index: 0,
+            end_index_exclusive: 1,
+            seed: 0,
+            failure_injection_shards: Vec::new(),
+        };
+
+        let resolved = resolve_run_date(&payload, "2026-02-15");
+        assert_eq!(resolved, "2026-02-15");
     }
 }

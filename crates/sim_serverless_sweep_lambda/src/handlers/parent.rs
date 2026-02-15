@@ -3,6 +3,7 @@ use crate::runtime::contract::{
     ParentAcceptedResponse, RunContext, SweepRequest, ORCHESTRATION_SCHEMA_VERSION,
 };
 use crate::runtime::sharding::compute_shard_plan;
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -79,6 +80,7 @@ fn handle_parent_event_impl(
 
     let run_context =
         build_run_context(normalized.run_id.clone(), request_fingerprint(&normalized));
+    let run_date = Utc::now().format("%Y-%m-%d").to_string();
     let shard_plan = match compute_shard_plan(&normalized) {
         Ok(value) => value,
         Err(error) => return validation_error_response(error.message()),
@@ -88,6 +90,7 @@ fn handle_parent_event_impl(
     for assignment in shard_plan {
         let child_payload = ChildShardPayload {
             run_id: normalized.run_id.clone(),
+            run_date: Some(run_date.clone()),
             dimensions: normalized.dimensions.clone(),
             total_points: normalized.total_points,
             shard_id: assignment.shard_id,
@@ -275,6 +278,8 @@ mod tests {
             serde_json::from_slice(&payloads[1]).expect("payload should parse");
 
         assert_eq!(first.run_id, "dispatch-run");
+        assert_eq!(first.run_date, second.run_date);
+        assert!(first.run_date.is_some());
         assert_eq!(first.end_index_exclusive, second.start_index);
         assert_eq!(second.failure_injection_shards, vec![1]);
     }

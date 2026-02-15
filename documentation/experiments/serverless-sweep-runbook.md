@@ -72,6 +72,10 @@ Check that each shard exports only Parquet objects across:
 - `dataset=snapshot_counts`
 - `dataset=shard_outcomes`
 
+Retry idempotency check:
+
+- Reprocess or redrive a known shard message and confirm outputs remain under the original `run_date` partition for that `run_id`/`shard_id` instead of creating a second date partition.
+
 For local verification of runtime contract behavior, run:
 
 ```bash

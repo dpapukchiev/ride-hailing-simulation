@@ -231,6 +231,7 @@ mod tests {
     fn sample_payload() -> ChildShardPayload {
         ChildShardPayload {
             run_id: "run-456".to_string(),
+            run_date: Some("2026-02-14".to_string()),
             dimensions: BTreeMap::from([
                 (
                     "commission_rate".to_string(),

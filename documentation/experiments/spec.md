@@ -37,6 +37,7 @@ The repository also includes a deployed AWS serverless sweep path for distribute
   - `crates/sim_serverless_sweep_lambda`: unified runtime handlers plus AWS adapter boundaries
 - **Infrastructure wiring**: `infra/aws_serverless_sweep/terraform` provisions API Gateway, Lambda, SQS, IAM, and environment wiring only.
 - **Outcome storage**: Queue-driven worker execution writes partitioned Parquet datasets to S3 for Athena analytics (shard outcomes, shard metrics, trip data, snapshot counts).
+- **Retry idempotency**: `run_date` is assigned once during parent dispatch and propagated in each shard payload so SQS retries/DLQ redrives keep writing to the same `run_id`/`shard_id` partition.
 - **Operator docs**:
   - Deploy and infra details: `infra/aws_serverless_sweep/README.md`
   - Deploy/invoke/verify/rollback runbook: `documentation/experiments/serverless-sweep-runbook.md`

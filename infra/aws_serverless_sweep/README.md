@@ -98,6 +98,8 @@ Outcomes are written as Parquet-only datasets under partitioned keys:
 - `<results_prefix>/dataset=snapshot_counts/run_date=<yyyy-mm-dd>/run_id=<run_id>/status=success/shard_id=<id>/point_index=<point>/part-0.parquet`
 - `<results_prefix>/dataset=shard_outcomes/run_date=<yyyy-mm-dd>/run_id=<run_id>/status=<success|failure>/shard_id=<id>/part-0.parquet`
 
+`run_date` is set once when the parent request dispatches shard messages and is carried in each shard payload. SQS retries or DLQ redrives for the same `run_id`/`shard_id` therefore overwrite the same partition path instead of creating a new date partition.
+
 All datasets are joinable by `run_id`, `shard_id`, and `point_index` (where applicable).
 
 ## Athena Analytics
