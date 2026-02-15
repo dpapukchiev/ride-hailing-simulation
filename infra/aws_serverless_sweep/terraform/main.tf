@@ -118,14 +118,15 @@ resource "aws_iam_role_policy" "child_s3_policy" {
 }
 
 resource "aws_lambda_function" "child_lambda" {
-  function_name    = local.child_lambda_name
-  role             = aws_iam_role.child_lambda_role.arn
-  runtime          = "provided.al2023"
-  handler          = "bootstrap"
-  filename         = var.child_lambda_zip
-  source_code_hash = filebase64sha256(var.child_lambda_zip)
-  timeout          = 900
-  memory_size      = 1024
+  function_name                  = local.child_lambda_name
+  role                           = aws_iam_role.child_lambda_role.arn
+  runtime                        = "provided.al2023"
+  handler                        = "bootstrap"
+  filename                       = var.child_lambda_zip
+  source_code_hash               = filebase64sha256(var.child_lambda_zip)
+  timeout                        = 60
+  memory_size                    = 1024
+  reserved_concurrent_executions = 10
 
   environment {
     variables = {
