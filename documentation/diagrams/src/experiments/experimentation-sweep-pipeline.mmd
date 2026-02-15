@@ -1,0 +1,24 @@
+sequenceDiagram
+    autonumber
+    participant User as Analyst/Operator
+    participant Space as ParameterSpace
+    participant Runner as run_parallel_experiments
+    participant Single as run_single_simulation_with_artifacts
+    participant Metrics as extract_metrics
+    participant Health as calculate_health_scores
+    participant Rank as find_best_result_index
+    participant Export as export_to_{csv,json,parquet}
+
+    User->>Space: define grid or preset parameter space
+    Space->>Space: generate() combinations + validity filtering
+    Space-->>Runner: Vec<ParameterSet>
+
+    Runner->>Single: execute each parameter set in rayon pool
+    Single->>Metrics: extract SimulationResult from world telemetry
+    Single-->>Runner: metrics + parquet artifacts
+
+    Runner-->>Health: vector of SimulationResult
+    Health->>Rank: weighted scoring by HealthWeights
+    Rank-->>User: best result index / best parameters
+
+    User->>Export: persist outputs for offline analysis

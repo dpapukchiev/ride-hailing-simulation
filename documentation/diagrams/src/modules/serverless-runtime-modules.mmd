@@ -1,0 +1,24 @@
+sequenceDiagram
+    autonumber
+    participant API as API Gateway
+    participant Runtime as sim_serverless_sweep_lambda::runtime
+    participant Contracts as sim_serverless_sweep_core::contracts
+    participant Sharding as sim_serverless_sweep_core::sharding
+    participant Queue as SQS
+    participant Worker as sim_serverless_sweep_lambda::worker
+    participant Core as sim_core
+    participant Storage as S3 outcomes
+    participant Query as Athena
+
+    API->>Runtime: Sweep request payload
+    Runtime->>Contracts: Validate request contract
+    Contracts-->>Runtime: Typed request
+    Runtime->>Sharding: Build deterministic shard plan
+    Sharding-->>Runtime: Shard messages
+    Runtime->>Queue: Enqueue shard work
+    Queue->>Worker: Deliver shard event
+    Worker->>Core: Run simulation shard
+    Core-->>Worker: Outcomes + metrics
+    Worker->>Storage: Persist partitioned artifacts
+    Query->>Storage: Query run partitions
+    Storage-->>Query: Aggregated results

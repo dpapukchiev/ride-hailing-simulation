@@ -1,0 +1,21 @@
+sequenceDiagram
+    autonumber
+    participant Operator
+    participant API as API Gateway
+    participant Runtime as sweep lambda runtime
+    participant Queue as SQS
+    participant Worker as worker lambda handler
+    participant Storage as S3 outcomes dataset
+    participant Athena
+
+    Operator->>API: Submit sweep request
+    API->>Runtime: Invoke request handler
+    Runtime->>Runtime: Validate request + build shard plan
+    Runtime->>Queue: Enqueue shard messages
+    Queue->>Worker: Deliver shard message
+    Worker->>Worker: Resolve parameters + run simulation
+    Worker->>Storage: Persist shard outcomes
+    Worker-->>Queue: Ack message
+    Operator->>Athena: Query run analytics
+    Athena->>Storage: Read partitioned outcomes
+    Athena-->>Operator: Return aggregated results

@@ -1,0 +1,19 @@
+sequenceDiagram
+    autonumber
+    participant Operator
+    participant Runner as sim_core::runner
+    participant Clock as SimulationClock
+    participant Event as CurrentEvent
+    participant Systems as ECS Systems
+    participant Telemetry
+
+    Operator->>Runner: Start scenario run
+    Runner->>Clock: pop next scheduled event
+    Clock-->>Runner: event subject + timestamp
+    Runner->>Event: insert CurrentEvent resource
+    Runner->>Systems: execute fixed schedule (sequential)
+    Systems->>Systems: mutate riders/drivers/trips
+    Systems->>Clock: schedule follow-up events
+    Systems->>Telemetry: emit metrics and snapshots
+    Runner->>Clock: repeat until queue empty or end time reached
+    Runner-->>Operator: return outcomes and summary metrics

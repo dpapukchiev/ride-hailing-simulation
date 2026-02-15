@@ -1,0 +1,22 @@
+sequenceDiagram
+    autonumber
+    participant UI as sim_ui
+    participant Runner as sim_core::runner
+    participant Clock as sim_core::clock
+    participant Systems as sim_core::systems
+    participant Matching as sim_core::matching
+    participant Pricing as sim_core::pricing
+    participant Telemetry as sim_core::telemetry
+
+    UI->>Runner: Start simulation run
+    Runner->>Clock: Pop next event
+    Clock-->>Runner: Event + timestamp
+    Runner->>Systems: Dispatch event to schedule
+    Systems->>Matching: Resolve rider-driver pairing
+    Matching-->>Systems: Match decisions
+    Systems->>Pricing: Quote/fare updates
+    Pricing-->>Systems: Fare + earnings deltas
+    Systems->>Telemetry: Emit metrics/snapshots
+    Telemetry-->>Runner: Outcome counters
+    Runner->>Clock: Schedule follow-up events
+    Runner-->>UI: State snapshot + progress

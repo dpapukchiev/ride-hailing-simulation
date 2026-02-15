@@ -20,6 +20,7 @@ The simulation supports thousands of concurrent riders and drivers, realistic ti
 - **[SPEC.md](./SPEC.md)** -- High-level specification and system overview
 - **[CONFIG.md](./CONFIG.md)** -- All configurable parameters, formulas, and rules
 - **[documentation/](./documentation/)** -- Per-topic technical docs and user stories (core-sim, drivers, riders, matching, pricing, telemetry, experiments, ui, testing, project)
+- **[documentation/diagrams/](./documentation/diagrams/)** -- Architecture diagrams as code (module and runtime sequence sources with rendered SVGs)
 - **[DEVELOPMENT.md](./DEVELOPMENT.md)** -- Development narrative and methodology
 
 ## Development Story

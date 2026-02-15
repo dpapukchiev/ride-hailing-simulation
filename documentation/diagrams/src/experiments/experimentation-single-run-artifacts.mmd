@@ -1,0 +1,21 @@
+sequenceDiagram
+    autonumber
+    participant Run as run_single_simulation_with_artifacts
+    participant World as bevy_ecs::World
+    participant Scenario as build_scenario
+    participant Sim as sim_core::runner
+    participant Telemetry as SimTelemetry + SimSnapshots
+    participant Parquet as telemetry_export parquet writers
+    participant Result as SimulationArtifacts
+
+    Run->>World: create world
+    Run->>Scenario: apply ParameterSet.scenario_params()
+    Run->>Sim: initialize_simulation()
+    Run->>Sim: simulation_schedule() + run_until_empty()
+
+    Sim->>Telemetry: accumulate completed trips, counters, snapshots
+    Run->>Parquet: write trips parquet
+    Run->>Parquet: write snapshot counts parquet
+
+    Run->>Result: package metrics + parquet bytes
+    Result-->>Run: SimulationArtifacts

@@ -23,6 +23,9 @@ job_check() {
     step "Cloud secret scan"
     bash ./scripts/check_no_cloud_secrets.sh
 
+    step "Diagram render freshness"
+    bash ./scripts/check_rendered_diagrams.sh
+
     step "Check formatting"
     cargo fmt --all -- --check
 
