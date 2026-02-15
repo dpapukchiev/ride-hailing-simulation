@@ -14,3 +14,4 @@ infra/aws_serverless_sweep/dist/
 .terraform.**
 infra/aws_serverless_sweep/terraform/terraform.tfstate.backup
 infra/aws_serverless_sweep/terraform/terraform.tfstate
+**/__pycache__/**
