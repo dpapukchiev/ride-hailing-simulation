@@ -20,5 +20,5 @@
 ## 4. Validation
 
 - [x] 4.1 Run script shell syntax and lint checks.
-- [ ] 4.2 Run one cold deploy build and one hot repeat run; capture timing deltas.
-- [ ] 4.3 Confirm Terraform apply path still receives correct runtime artifact input.
+- [x] 4.2 Run one cold deploy build and one hot repeat run; capture timing deltas.
+- [x] 4.3 Confirm Terraform apply path still receives correct runtime artifact input.
