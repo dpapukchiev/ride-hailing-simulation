@@ -2,7 +2,7 @@ use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::runtime::contract::{
-    normalize_request, request_fingerprint, ChildShardPayload, DispatchRecord,
+    config_fingerprint, normalize_request, request_fingerprint, ChildShardPayload, DispatchRecord,
     ParentAcceptedResponse, RunContext, RunContextRecord, SweepRequest,
     ORCHESTRATION_SCHEMA_VERSION, RUN_CONTEXT_RECORD_SCHEMA_VERSION,
 };
@@ -104,6 +104,7 @@ fn handle_parent_event_impl(
     };
 
     let request_fingerprint = request_fingerprint(&normalized);
+    let config_fingerprint = config_fingerprint(&normalized);
     let run_context = build_run_context(normalized.run_id.clone(), request_fingerprint.clone());
     let run_date = Utc::now().format("%Y-%m-%d").to_string();
     let shard_plan = match compute_shard_plan(&normalized) {
@@ -118,7 +119,7 @@ fn handle_parent_event_impl(
         request_source: "api_gateway".to_string(),
         record_schema: RUN_CONTEXT_RECORD_SCHEMA_VERSION.to_string(),
         request_fingerprint: request_fingerprint.clone(),
-        config_fingerprint: request_fingerprint,
+        config_fingerprint,
         total_points: normalized.total_points,
         shard_count: shard_plan.len(),
         shard_strategy: if normalized.shard_count.is_some() {

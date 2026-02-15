@@ -245,6 +245,19 @@ pub fn request_fingerprint(request: &NormalizedSweepRequest) -> String {
     contract_fingerprint(request)
 }
 
+pub fn config_fingerprint(request: &NormalizedSweepRequest) -> String {
+    #[derive(Serialize)]
+    struct ConfigFingerprintPayload<'a> {
+        dimensions: &'a Dimensions,
+        seed: i64,
+    }
+
+    contract_fingerprint(ConfigFingerprintPayload {
+        dimensions: &request.dimensions,
+        seed: request.seed,
+    })
+}
+
 pub fn contract_fingerprint(value: impl Serialize) -> String {
     let mut hasher = Sha256::new();
     hasher.update(stable_contract_json(value));
@@ -296,5 +309,51 @@ mod tests {
         let normalized = normalize_request(request).expect("request should pass");
         assert_eq!(normalized.total_points, 2);
         assert_eq!(normalized.failure_injection_shards, vec![1, 3]);
+    }
+
+    #[test]
+    fn config_fingerprint_ignores_run_id_and_sharding_controls() {
+        let request_a = SweepRequest {
+            run_id: "run-a".to_string(),
+            dimensions: BTreeMap::from([
+                (
+                    "num_riders".to_string(),
+                    vec![Value::from(100), Value::from(200)],
+                ),
+                ("num_drivers".to_string(), vec![Value::from(20)]),
+            ]),
+            shard_count: Some(2),
+            shard_size: None,
+            max_shards: 10,
+            seed: 11,
+            failure_injection_shards: vec![1],
+        };
+        let request_b = SweepRequest {
+            run_id: "run-b".to_string(),
+            dimensions: BTreeMap::from([
+                (
+                    "num_riders".to_string(),
+                    vec![Value::from(100), Value::from(200)],
+                ),
+                ("num_drivers".to_string(), vec![Value::from(20)]),
+            ]),
+            shard_count: None,
+            shard_size: Some(3),
+            max_shards: 99,
+            seed: 11,
+            failure_injection_shards: vec![7, 8],
+        };
+
+        let normalized_a = normalize_request(request_a).expect("request a should pass");
+        let normalized_b = normalize_request(request_b).expect("request b should pass");
+
+        assert_eq!(
+            config_fingerprint(&normalized_a),
+            config_fingerprint(&normalized_b)
+        );
+        assert_ne!(
+            request_fingerprint(&normalized_a),
+            request_fingerprint(&normalized_b)
+        );
     }
 }
