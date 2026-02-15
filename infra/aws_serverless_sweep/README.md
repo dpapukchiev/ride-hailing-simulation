@@ -106,11 +106,17 @@ Outcomes are written as Parquet-only datasets under partitioned keys:
 - `<results_prefix>/dataset=shard_metrics/run_date=<yyyy-mm-dd>/run_id=<run_id>/status=success/shard_id=<id>/point_index=<point>/part-0.parquet`
 - `<results_prefix>/dataset=trip_data/run_date=<yyyy-mm-dd>/run_id=<run_id>/status=success/shard_id=<id>/point_index=<point>/part-0.parquet`
 - `<results_prefix>/dataset=snapshot_counts/run_date=<yyyy-mm-dd>/run_id=<run_id>/status=success/shard_id=<id>/point_index=<point>/part-0.parquet`
-- `<results_prefix>/dataset=shard_outcomes/run_date=<yyyy-mm-dd>/run_id=<run_id>/status=<success|failure>/shard_id=<id>/part-0.parquet`
+- `<results_prefix>/dataset=shard_outcomes/run_date=<yyyy-mm-dd>/run_id_partition=<run_id>/status_partition=<success|failure>/shard_id_partition=<id>/part-0.parquet`
+- `<results_prefix>/dataset=run_context/run_date=<yyyy-mm-dd>/run_id_partition=<run_id>/status_partition=accepted/part-0.parquet`
+- `<results_prefix>/dataset=effective_parameters/run_date=<yyyy-mm-dd>/run_id_partition=<run_id>/status_partition=success/shard_id_partition=<id>/point_index_partition=<point>/part-0.parquet`
 
 `run_date` is set once when the parent request dispatches shard messages and is carried in each shard payload. SQS retries or DLQ redrives for the same `run_id`/`shard_id` therefore overwrite the same partition path instead of creating a new date partition.
 
 All datasets are joinable by `run_id`, `shard_id`, and `point_index` (where applicable).
+
+Run-context records are emitted once when orchestration accepts a request, so they remain available even if one or more shard executions later fail. Effective-parameter records are emitted per successful point write and use deterministic object keys, so retries overwrite the same S3 object for the same run/shard/point identity.
+
+Each exported analytics record includes a `record_schema` version field (`v1` today). Downstream queries should filter or branch on `record_schema` when reading across multiple deployment versions.
 
 ## Athena Analytics
 
@@ -131,8 +137,11 @@ To add or reorder setup queries, edit `infra/aws_serverless_sweep/athena/athena_
 Athena SQL assets live in `infra/aws_serverless_sweep/athena/`:
 
 - `create_table.sql`: creates outcomes/metrics/trip/snapshot external tables
+- `create_table_run_context.sql`, `create_table_effective_parameters.sql`
 - `create_table_shard_metrics.sql`, `create_table_trip_data.sql`, `create_table_snapshot_counts.sql`
 - `repair_table.sql`: discovers partitions for outcomes table
+- `repair_table_run_context.sql`, `repair_table_effective_parameters.sql`
 - `repair_table_shard_metrics.sql`, `repair_table_trip_data.sql`, `repair_table_snapshot_counts.sql`
 - `query_run_level_profile.sql`, `query_failure_diagnostics.sql`, `query_shard_coverage.sql`
 - `query_trip_snapshot_join.sql`: joins per-point metrics with trip and snapshot datasets
+- `query_outcome_configuration_smoke.sql`: validates joins across outcomes, run context, and effective parameters for one run

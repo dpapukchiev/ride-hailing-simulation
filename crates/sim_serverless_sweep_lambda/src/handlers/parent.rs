@@ -1,9 +1,19 @@
+use std::fs;
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use crate::runtime::contract::{
-    normalize_request, request_fingerprint, ChildShardPayload, DispatchRecord,
-    ParentAcceptedResponse, RunContext, SweepRequest, ORCHESTRATION_SCHEMA_VERSION,
+    config_fingerprint, normalize_request, request_fingerprint, ChildShardPayload, DispatchRecord,
+    ParentAcceptedResponse, RunContext, RunContextRecord, SweepRequest,
+    ORCHESTRATION_SCHEMA_VERSION, RUN_CONTEXT_RECORD_SCHEMA_VERSION,
 };
 use crate::runtime::sharding::compute_shard_plan;
+use crate::runtime::storage_keys::run_context_object_key;
+use arrow::array::{ArrayRef, StringArray, UInt64Array};
+use arrow::datatypes::{DataType, Field, Schema};
+use arrow::record_batch::RecordBatch;
 use chrono::Utc;
+use parquet::arrow::ArrowWriter;
+use parquet::file::properties::WriterProperties;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -13,6 +23,11 @@ pub struct ApiGatewayResponse {
     pub status_code: u16,
     pub headers: Value,
     pub body: String,
+}
+
+pub struct RunContextExportConfig<'a> {
+    pub prefix: &'a str,
+    pub persist_object: &'a dyn Fn(&str, &[u8]) -> Result<(), String>,
 }
 
 pub fn build_run_context(run_id: impl Into<String>, request_fingerprint: String) -> RunContext {
@@ -28,8 +43,17 @@ pub fn handle_parent_event(
     dispatch_target: Option<&str>,
     dispatch: &dyn Fn(&[u8]) -> Result<(), String>,
 ) -> ApiGatewayResponse {
+    handle_parent_event_with_context_export(event, dispatch_target, dispatch, None)
+}
+
+pub fn handle_parent_event_with_context_export(
+    event: Value,
+    dispatch_target: Option<&str>,
+    dispatch: &dyn Fn(&[u8]) -> Result<(), String>,
+    run_context_export: Option<RunContextExportConfig<'_>>,
+) -> ApiGatewayResponse {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        handle_parent_event_impl(event, dispatch_target, dispatch)
+        handle_parent_event_impl(event, dispatch_target, dispatch, run_context_export)
     }));
 
     match result {
@@ -49,6 +73,7 @@ fn handle_parent_event_impl(
     event: Value,
     dispatch_target: Option<&str>,
     dispatch: &dyn Fn(&[u8]) -> Result<(), String>,
+    run_context_export: Option<RunContextExportConfig<'_>>,
 ) -> ApiGatewayResponse {
     let payload = match normalize_apigw_event(event) {
         Ok(value) => value,
@@ -78,13 +103,64 @@ fn handle_parent_event_impl(
         }
     };
 
-    let run_context =
-        build_run_context(normalized.run_id.clone(), request_fingerprint(&normalized));
+    let request_fingerprint = request_fingerprint(&normalized);
+    let config_fingerprint = config_fingerprint(&normalized);
+    let run_context = build_run_context(normalized.run_id.clone(), request_fingerprint.clone());
     let run_date = Utc::now().format("%Y-%m-%d").to_string();
     let shard_plan = match compute_shard_plan(&normalized) {
         Ok(value) => value,
         Err(error) => return validation_error_response(error.message()),
     };
+
+    let run_context_record = RunContextRecord {
+        run_id: normalized.run_id.clone(),
+        run_date: run_date.clone(),
+        status: "accepted".to_string(),
+        request_source: "api_gateway".to_string(),
+        record_schema: RUN_CONTEXT_RECORD_SCHEMA_VERSION.to_string(),
+        request_fingerprint: request_fingerprint.clone(),
+        config_fingerprint,
+        total_points: normalized.total_points,
+        shard_count: shard_plan.len(),
+        shard_strategy: if normalized.shard_count.is_some() {
+            "explicit_shard_count".to_string()
+        } else {
+            "derived_from_shard_size".to_string()
+        },
+        max_shards: normalized.max_shards,
+    };
+
+    if let Some(export) = run_context_export {
+        let run_context_key = run_context_object_key(
+            export.prefix,
+            &run_context_record.run_date,
+            &run_context_record.run_id,
+            &run_context_record.status,
+        );
+        let payload = match serialize_run_context_parquet(&run_context_record) {
+            Ok(value) => value,
+            Err(error) => {
+                return error_response(
+                    500,
+                    json!({
+                        "error": "run_context_serialization_error",
+                        "message": error,
+                    }),
+                );
+            }
+        };
+
+        if let Err(error) = (export.persist_object)(&run_context_key, &payload) {
+            return error_response(
+                502,
+                json!({
+                    "error": "run_context_persist_failed",
+                    "message": error,
+                    "run_context_key": run_context_key,
+                }),
+            );
+        }
+    }
 
     let mut dispatches = Vec::with_capacity(shard_plan.len());
     for assignment in shard_plan {
@@ -170,6 +246,64 @@ fn panic_payload_message(panic_payload: Box<dyn std::any::Any + Send>) -> String
     "panic payload was not a string".to_string()
 }
 
+fn serialize_run_context_parquet(record: &RunContextRecord) -> Result<Vec<u8>, String> {
+    let mut temp_path = std::env::temp_dir();
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| format!("Failed to read clock for parquet export: {error}"))?
+        .as_nanos();
+    temp_path.push(format!("serverless-run-context-{timestamp}.parquet"));
+
+    let schema = std::sync::Arc::new(Schema::new(vec![
+        Field::new("run_id", DataType::Utf8, false),
+        Field::new("run_date", DataType::Utf8, false),
+        Field::new("status", DataType::Utf8, false),
+        Field::new("request_source", DataType::Utf8, false),
+        Field::new("record_schema", DataType::Utf8, false),
+        Field::new("request_fingerprint", DataType::Utf8, false),
+        Field::new("config_fingerprint", DataType::Utf8, false),
+        Field::new("total_points", DataType::UInt64, false),
+        Field::new("shard_count", DataType::UInt64, false),
+        Field::new("shard_strategy", DataType::Utf8, false),
+        Field::new("max_shards", DataType::UInt64, false),
+    ]));
+
+    let batch = RecordBatch::try_new(
+        schema.clone(),
+        vec![
+            std::sync::Arc::new(StringArray::from(vec![record.run_id.clone()])) as ArrayRef,
+            std::sync::Arc::new(StringArray::from(vec![record.run_date.clone()])),
+            std::sync::Arc::new(StringArray::from(vec![record.status.clone()])),
+            std::sync::Arc::new(StringArray::from(vec![record.request_source.clone()])),
+            std::sync::Arc::new(StringArray::from(vec![record.record_schema.clone()])),
+            std::sync::Arc::new(StringArray::from(vec![record.request_fingerprint.clone()])),
+            std::sync::Arc::new(StringArray::from(vec![record.config_fingerprint.clone()])),
+            std::sync::Arc::new(UInt64Array::from(vec![record.total_points as u64])),
+            std::sync::Arc::new(UInt64Array::from(vec![record.shard_count as u64])),
+            std::sync::Arc::new(StringArray::from(vec![record.shard_strategy.clone()])),
+            std::sync::Arc::new(UInt64Array::from(vec![record.max_shards as u64])),
+        ],
+    )
+    .map_err(|error| format!("Failed to build run-context parquet record batch: {error}"))?;
+
+    let file = fs::File::create(&temp_path)
+        .map_err(|error| format!("Failed to create temporary parquet file: {error}"))?;
+    let props = WriterProperties::builder().build();
+    let mut writer =
+        ArrowWriter::try_new(file, schema, Some(props)).map_err(|error| error.to_string())?;
+    writer
+        .write(&batch)
+        .map_err(|error| format!("Failed to write run-context parquet batch: {error}"))?;
+    writer
+        .close()
+        .map_err(|error| format!("Failed to close run-context parquet writer: {error}"))?;
+
+    let bytes = fs::read(&temp_path)
+        .map_err(|error| format!("Failed to read exported parquet file: {error}"))?;
+    let _ = fs::remove_file(&temp_path);
+    Ok(bytes)
+}
+
 fn normalize_apigw_event(event: Value) -> Result<Value, String> {
     let Some(object) = event.as_object() else {
         return Err("Request payload must be a JSON object".to_string());
@@ -217,6 +351,7 @@ fn error_response(status_code: u16, payload: Value) -> ApiGatewayResponse {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
 
     use super::*;
@@ -224,7 +359,10 @@ mod tests {
     #[test]
     fn rejects_invalid_payload_without_dispatching() {
         let payloads: Arc<Mutex<Vec<Vec<u8>>>> = Arc::new(Mutex::new(Vec::new()));
+        let run_context_writes: Arc<Mutex<HashMap<String, Vec<u8>>>> =
+            Arc::new(Mutex::new(HashMap::new()));
         let payloads_for_dispatch = Arc::clone(&payloads);
+        let writes_for_export = Arc::clone(&run_context_writes);
         let response = handle_parent_event(
             json!({"body": "{\"run_id\":\"missing-dimensions\"}"}),
             Some("arn:aws:lambda:example:child"),
@@ -237,8 +375,73 @@ mod tests {
             },
         );
 
+        let _ = handle_parent_event_with_context_export(
+            json!({"body": "{\"run_id\":\"missing-dimensions\"}"}),
+            Some("arn:aws:lambda:example:child"),
+            &|_payload| Ok(()),
+            Some(RunContextExportConfig {
+                prefix: "serverless-sweeps/outcomes",
+                persist_object: &move |key, body| {
+                    writes_for_export
+                        .lock()
+                        .expect("poisoned mutex")
+                        .insert(key.to_string(), body.to_vec());
+                    Ok(())
+                },
+            }),
+        );
+
         assert_eq!(response.status_code, 400);
         assert!(payloads.lock().expect("poisoned mutex").is_empty());
+        assert!(run_context_writes
+            .lock()
+            .expect("poisoned mutex")
+            .is_empty());
+    }
+
+    #[test]
+    fn accepted_run_persists_run_context_once() {
+        let run_context_writes: Arc<Mutex<HashMap<String, Vec<u8>>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        let writes_for_export = Arc::clone(&run_context_writes);
+
+        let response = handle_parent_event_with_context_export(
+            json!({
+                "body": {
+                    "run_id": "context-run",
+                    "dimensions": {
+                        "commission_rate": [0.1, 0.2],
+                        "num_drivers": [100]
+                    },
+                    "shard_count": 2,
+                    "seed": 7
+                }
+            }),
+            Some("arn:aws:lambda:example:child"),
+            &|_payload| Ok(()),
+            Some(RunContextExportConfig {
+                prefix: "serverless-sweeps/outcomes",
+                persist_object: &move |key, body| {
+                    writes_for_export
+                        .lock()
+                        .expect("poisoned mutex")
+                        .insert(key.to_string(), body.to_vec());
+                    Ok(())
+                },
+            }),
+        );
+
+        assert_eq!(response.status_code, 202);
+        let writes = run_context_writes.lock().expect("poisoned mutex");
+        assert_eq!(writes.len(), 1);
+        let key = writes
+            .keys()
+            .next()
+            .expect("run-context key should exist")
+            .clone();
+        assert!(key.contains("dataset=run_context"));
+        assert!(key.contains("run_id_partition=context-run"));
+        assert!(key.contains("status_partition=accepted"));
     }
 
     #[test]

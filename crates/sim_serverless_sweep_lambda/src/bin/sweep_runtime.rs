@@ -6,7 +6,9 @@ use sim_serverless_sweep_lambda::adapters::object_store::OutcomeStore;
 use sim_serverless_sweep_lambda::handlers::child::{
     handle_child_payload_with_sim_runtime, ChildHandlerConfig,
 };
-use sim_serverless_sweep_lambda::handlers::parent::{handle_parent_event, ApiGatewayResponse};
+use sim_serverless_sweep_lambda::handlers::parent::{
+    handle_parent_event_with_context_export, ApiGatewayResponse, RunContextExportConfig,
+};
 use sim_serverless_sweep_lambda::runtime::contract::ChildShardPayload;
 
 struct S3OutcomeStore {
@@ -65,8 +67,14 @@ async fn handle_request(event: LambdaEvent<Value>) -> Result<Value, Error> {
     } else {
         let sqs_client = deps.sqs_client.clone();
         let queue_url = deps.queue_url.clone();
-        let response: ApiGatewayResponse =
-            handle_parent_event(event.payload, Some(&deps.queue_url), &move |payload| {
+        let outcome_store = S3OutcomeStore {
+            bucket: deps.bucket.clone(),
+            s3_client: deps.s3_client.clone(),
+        };
+        let response: ApiGatewayResponse = handle_parent_event_with_context_export(
+            event.payload,
+            Some(&deps.queue_url),
+            &move |payload| {
                 let body = String::from_utf8(payload.to_vec())
                     .map_err(|error| format!("invalid UTF-8 shard payload: {error}"))?;
                 let client = sqs_client.clone();
@@ -83,7 +91,12 @@ async fn handle_request(event: LambdaEvent<Value>) -> Result<Value, Error> {
                             .map_err(|error| format!("failed to enqueue shard message: {error}"))
                     })
                 })
-            });
+            },
+            Some(RunContextExportConfig {
+                prefix: &deps.prefix,
+                persist_object: &|key, body| outcome_store.write_object(key, body),
+            }),
+        );
         serde_json::to_value(response)
             .map_err(|error| Error::from(format!("failed to serialize api response: {error}")))
     }

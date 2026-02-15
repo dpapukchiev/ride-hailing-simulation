@@ -1,9 +1,14 @@
+use std::collections::BTreeMap;
+
+use sim_core::matching::DEFAULT_ETA_WEIGHT;
 use sim_core::pricing::PricingConfig;
+use sim_core::routing::RouteProviderKind;
 use sim_core::scenario::{MatchingAlgorithmType, ScenarioParams};
+use sim_core::spawner::SpawnWeightingKind;
 use sim_core::traffic::TrafficProfileKind;
 use sim_experiments::{run_single_simulation_with_artifacts, ParameterSet};
 
-use crate::runtime::contract::ChildShardPayload;
+use crate::runtime::contract::{contract_fingerprint, stable_contract_json, ChildShardPayload};
 
 use crate::handlers::child::{ShardExecutor, ShardPointResult};
 
@@ -26,13 +31,16 @@ impl ShardExecutor for SimExperimentsShardExecutor {
 
         let mut points_processed = 0usize;
         for point_index in payload.start_index..payload.end_index_exclusive {
-            let parameter_set = parameter_set_for_index(payload, point_index)?;
+            let resolved_parameters = resolve_effective_parameters(payload, point_index)?;
+            let parameter_set = resolved_parameters.parameter_set;
             let artifacts = run_single_simulation_with_artifacts(&parameter_set)?;
             on_point_result(ShardPointResult {
                 point_index,
                 metrics: artifacts.metrics,
                 trip_data_parquet: artifacts.trip_data_parquet,
                 snapshot_counts_parquet: artifacts.snapshot_counts_parquet,
+                effective_parameters_json: resolved_parameters.effective_parameters_json,
+                parameter_fingerprint: resolved_parameters.parameter_fingerprint,
             })?;
             points_processed += 1;
         }
@@ -41,9 +49,148 @@ impl ShardExecutor for SimExperimentsShardExecutor {
     }
 }
 
+struct ResolvedEffectiveParameters {
+    parameter_set: ParameterSet,
+    effective_parameters_json: String,
+    parameter_fingerprint: String,
+}
+
+#[derive(serde::Serialize)]
+struct EffectiveParameterPayload {
+    selected_dimensions: BTreeMap<String, serde_json::Value>,
+    resolved_scenario_parameters: ResolvedScenarioParameters,
+}
+
+#[derive(serde::Serialize)]
+struct ResolvedScenarioParameters {
+    num_riders: usize,
+    num_drivers: usize,
+    initial_rider_count: usize,
+    initial_driver_count: usize,
+    seed: u64,
+    lat_min: f64,
+    lat_max: f64,
+    lng_min: f64,
+    lng_max: f64,
+    request_window_ms: u64,
+    driver_spread_ms: u64,
+    match_radius: u32,
+    min_trip_cells: u32,
+    max_trip_cells: u32,
+    epoch_ms: i64,
+    pricing_config: PricingConfigPayload,
+    simulation_end_time_ms: u64,
+    matching_algorithm_type: String,
+    batch_matching_enabled: bool,
+    batch_interval_secs: u64,
+    eta_weight: f64,
+    route_provider_kind: RouteProviderKind,
+    traffic_profile: TrafficProfileKind,
+    congestion_zones_enabled: bool,
+    dynamic_congestion_enabled: bool,
+    base_speed_kmh: Option<f64>,
+    spawn_weighting: SpawnWeightingKind,
+}
+
+#[derive(serde::Serialize)]
+struct PricingConfigPayload {
+    base_fare: f64,
+    per_km_rate: f64,
+    commission_rate: f64,
+    surge_enabled: bool,
+    surge_radius_k: u32,
+    surge_max_multiplier: f64,
+}
+
+fn resolve_effective_parameters(
+    payload: &ChildShardPayload,
+    index: usize,
+) -> Result<ResolvedEffectiveParameters, String> {
+    let mut selected_dimensions = BTreeMap::new();
+    let parameter_set = parameter_set_for_index(payload, index, &mut selected_dimensions)?;
+    let resolved_scenario_parameters = resolve_scenario_parameters(&parameter_set);
+    let effective_payload = EffectiveParameterPayload {
+        selected_dimensions,
+        resolved_scenario_parameters,
+    };
+
+    let effective_parameters_json = stable_contract_json(&effective_payload);
+    let parameter_fingerprint = contract_fingerprint(&effective_payload);
+
+    Ok(ResolvedEffectiveParameters {
+        parameter_set,
+        effective_parameters_json,
+        parameter_fingerprint,
+    })
+}
+
+fn resolve_scenario_parameters(parameter_set: &ParameterSet) -> ResolvedScenarioParameters {
+    let mut params = parameter_set.scenario_params();
+    if params.simulation_end_time_ms.is_none() {
+        let request_window_ms = params.request_window_ms;
+        let end_time_ms = request_window_ms.saturating_add(2 * 60 * 60 * 1000);
+        params.simulation_end_time_ms = Some(end_time_ms);
+    }
+
+    let pricing = params.pricing_config.unwrap_or_default();
+
+    ResolvedScenarioParameters {
+        num_riders: params.num_riders,
+        num_drivers: params.num_drivers,
+        initial_rider_count: params.initial_rider_count,
+        initial_driver_count: params.initial_driver_count,
+        seed: parameter_set.seed,
+        lat_min: params.lat_min,
+        lat_max: params.lat_max,
+        lng_min: params.lng_min,
+        lng_max: params.lng_max,
+        request_window_ms: params.request_window_ms,
+        driver_spread_ms: params.driver_spread_ms,
+        match_radius: params.match_radius,
+        min_trip_cells: params.min_trip_cells,
+        max_trip_cells: params.max_trip_cells,
+        epoch_ms: params.epoch_ms.unwrap_or(0),
+        pricing_config: PricingConfigPayload {
+            base_fare: pricing.base_fare,
+            per_km_rate: pricing.per_km_rate,
+            commission_rate: pricing.commission_rate,
+            surge_enabled: pricing.surge_enabled,
+            surge_radius_k: pricing.surge_radius_k,
+            surge_max_multiplier: pricing.surge_max_multiplier,
+        },
+        simulation_end_time_ms: params
+            .simulation_end_time_ms
+            .expect("simulation_end_time_ms should always be resolved"),
+        matching_algorithm_type: matching_algorithm_type_name(
+            params
+                .matching_algorithm_type
+                .unwrap_or(MatchingAlgorithmType::Hungarian),
+        )
+        .to_string(),
+        batch_matching_enabled: params.batch_matching_enabled.unwrap_or(true),
+        batch_interval_secs: params.batch_interval_secs.unwrap_or(5),
+        eta_weight: params.eta_weight.unwrap_or(DEFAULT_ETA_WEIGHT),
+        route_provider_kind: params.route_provider_kind.clone(),
+        traffic_profile: params.traffic_profile.clone(),
+        congestion_zones_enabled: params.congestion_zones_enabled,
+        dynamic_congestion_enabled: params.dynamic_congestion_enabled,
+        base_speed_kmh: params.base_speed_kmh,
+        spawn_weighting: params.spawn_weighting.clone(),
+    }
+}
+
+fn matching_algorithm_type_name(value: MatchingAlgorithmType) -> &'static str {
+    match value {
+        MatchingAlgorithmType::Simple => "simple",
+        MatchingAlgorithmType::CostBased => "cost_based",
+        MatchingAlgorithmType::Hungarian => "hungarian",
+    }
+}
+
 fn parameter_set_for_index(
     payload: &ChildShardPayload,
     index: usize,
+    selected_dimensions: &mut BTreeMap<String, serde_json::Value>,
 ) -> Result<ParameterSet, String> {
     let mut params = ScenarioParams::default();
     let dims: Vec<(&str, &Vec<serde_json::Value>)> = payload
@@ -60,7 +207,9 @@ fn parameter_set_for_index(
         }
         let value_idx = remainder % radix;
         remainder /= radix;
-        apply_dimension(&mut params, name, &values[value_idx])?;
+        let selected_value = values[value_idx].clone();
+        selected_dimensions.insert((*name).to_string(), selected_value.clone());
+        apply_dimension(&mut params, name, &selected_value)?;
     }
 
     if remainder != 0 {
@@ -280,5 +429,32 @@ mod tests {
             .expect_err("unsupported dimension should fail");
 
         assert!(error.contains("Unsupported dimension 'unknown_dimension'"));
+    }
+
+    #[test]
+    fn effective_parameters_include_resolved_runtime_defaults() {
+        let payload = sample_payload();
+
+        let resolved =
+            resolve_effective_parameters(&payload, 0).expect("effective parameters should resolve");
+        let effective_json: Value = serde_json::from_str(&resolved.effective_parameters_json)
+            .expect("effective payload should be valid json");
+
+        assert_eq!(
+            effective_json["selected_dimensions"]["num_riders"],
+            Value::from(4)
+        );
+        assert_eq!(
+            effective_json["resolved_scenario_parameters"]["simulation_end_time_ms"],
+            Value::from(10_800_000u64)
+        );
+        assert_eq!(
+            effective_json["resolved_scenario_parameters"]["matching_algorithm_type"],
+            Value::from("hungarian")
+        );
+        assert_eq!(
+            effective_json["resolved_scenario_parameters"]["batch_matching_enabled"],
+            Value::from(true)
+        );
     }
 }
