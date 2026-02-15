@@ -1,0 +1,10 @@
+# Athena data-layer readiness pipeline (executed top-to-bottom)
+create_database.sql
+create_table.sql
+create_table_shard_metrics.sql
+create_table_trip_data.sql
+create_table_snapshot_counts.sql
+repair_table.sql
+repair_table_shard_metrics.sql
+repair_table_trip_data.sql
+repair_table_snapshot_counts.sql
