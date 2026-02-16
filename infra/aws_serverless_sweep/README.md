@@ -9,6 +9,7 @@ This directory contains a minimal sandbox deployment for distributed parameter s
 - SQS queue for shard fan-out and retry buffering
 - S3 partitioned outcomes for Athena analytics
 - Least-privilege IAM policies for runtime, queue access, and analytics reads
+- S3 bucket guardrails that block all public access and deny requests from principals outside the current AWS account
 
 ## Runtime Ownership
 

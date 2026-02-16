@@ -24,6 +24,39 @@ resource "aws_s3_bucket" "results" {
   bucket = var.results_bucket_name
 }
 
+resource "aws_s3_bucket_public_access_block" "results" {
+  bucket = aws_s3_bucket.results.id
+
+  block_public_acls       = true
+  ignore_public_acls      = true
+  block_public_policy     = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_policy" "results" {
+  bucket = aws_s3_bucket.results.id
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Sid       = "DenyRequestsFromOutsideAccount",
+        Effect    = "Deny",
+        Principal = "*",
+        Action    = "s3:*",
+        Resource = [
+          aws_s3_bucket.results.arn,
+          "${aws_s3_bucket.results.arn}/*"
+        ],
+        Condition = {
+          StringNotEquals = {
+            "aws:PrincipalAccount" = data.aws_caller_identity.current.account_id
+          }
+        }
+      }
+    ]
+  })
+}
+
 resource "aws_s3_bucket_versioning" "results" {
   bucket = aws_s3_bucket.results.id
   versioning_configuration {
