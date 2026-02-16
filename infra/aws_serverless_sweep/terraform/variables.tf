@@ -11,7 +11,7 @@ variable "project_name" {
 }
 
 variable "results_bucket_name" {
-  description = "S3 bucket for partitioned sweep outcomes"
+  description = "Base S3 bucket name for partitioned sweep outcomes (Terraform adds a UUID prefix)"
   type        = string
   default     = "ride-hailing-simulation-dpapukchiev"
 }

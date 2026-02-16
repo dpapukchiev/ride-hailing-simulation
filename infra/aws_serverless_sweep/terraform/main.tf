@@ -5,6 +5,10 @@ terraform {
       source  = "hashicorp/aws"
       version = ">= 5.0"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = ">= 3.6"
+    }
   }
 }
 
@@ -16,12 +20,21 @@ locals {
   runtime_lambda_name = "${var.project_name}-runtime"
   shard_queue_name    = "${var.project_name}-shards"
   shard_dlq_name      = "${var.project_name}-shards-dlq"
+  max_bucket_name_len = 63
 }
 
 data "aws_caller_identity" "current" {}
 
+resource "random_uuid" "results_bucket_prefix" {}
+
+locals {
+  results_bucket_base_max_len = local.max_bucket_name_len - length(random_uuid.results_bucket_prefix.result) - 1
+  results_bucket_base_name    = substr(var.results_bucket_name, 0, local.results_bucket_base_max_len)
+  results_bucket_name         = "${random_uuid.results_bucket_prefix.result}-${local.results_bucket_base_name}"
+}
+
 resource "aws_s3_bucket" "results" {
-  bucket = var.results_bucket_name
+  bucket = local.results_bucket_name
 }
 
 resource "aws_s3_bucket_public_access_block" "results" {

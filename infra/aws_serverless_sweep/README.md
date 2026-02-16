@@ -56,7 +56,7 @@ Set these as Terraform variables (`*.tfvars`, environment, or CI secrets):
 
 - `aws_region`: target region
 - `project_name`: resource name prefix
-- `results_bucket_name`: S3 bucket name for outcomes
+- `results_bucket_name`: base S3 bucket name for outcomes (Terraform prefixes it with a generated UUID)
 - `results_prefix`: S3 key prefix for partitioned output
 - `runtime_lambda_zip`: packaged runtime lambda zip path
 - `max_shards`: upper bound on fan-out per run
