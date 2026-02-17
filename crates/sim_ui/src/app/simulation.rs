@@ -1035,4 +1035,143 @@ mod tests {
 
         let _ = fs::remove_file(path);
     }
+
+    #[test]
+    fn export_library_writes_transfer_file() {
+        let store_path = unique_test_path("export_store");
+        let transfer_path = unique_test_path("export_transfer");
+        let mut app = SimUiApp::new();
+        app.preset_file_path = Some(store_path.clone());
+
+        app.preset_name_input = "alpha".to_string();
+        app.save_named_preset();
+        app.preset_transfer_path_input = transfer_path.display().to_string();
+
+        app.export_preset_library();
+
+        let transfer_contents =
+            fs::read_to_string(&transfer_path).expect("transfer file should be written");
+        assert!(transfer_contents.contains("\"presets\""));
+        assert!(transfer_contents.contains("\"alpha\""));
+        let expected = format!("Exported preset library to '{}'.", transfer_path.display());
+        assert_eq!(
+            app.preset_status_message.as_deref(),
+            Some(expected.as_str())
+        );
+
+        let _ = fs::remove_file(store_path);
+        let _ = fs::remove_file(transfer_path);
+    }
+
+    #[test]
+    fn import_library_success_refreshes_names_and_active_selection() {
+        let source_store_path = unique_test_path("import_source_store");
+        let target_store_path = unique_test_path("import_target_store");
+        let transfer_path = unique_test_path("import_transfer");
+
+        let mut source_app = SimUiApp::new();
+        source_app.preset_file_path = Some(source_store_path.clone());
+        source_app.preset_name_input = "baseline".to_string();
+        source_app.save_named_preset();
+        source_app.preset_name_input = "imported".to_string();
+        source_app.save_named_preset();
+        source_app.selected_preset_name = Some("imported".to_string());
+        source_app.load_selected_preset();
+        source_app.preset_transfer_path_input = transfer_path.display().to_string();
+        source_app.export_preset_library();
+
+        let mut target_app = SimUiApp::new();
+        target_app.preset_file_path = Some(target_store_path.clone());
+        target_app.preset_name_input = "stale".to_string();
+        target_app.save_named_preset();
+        target_app.selected_preset_name = Some("stale".to_string());
+        target_app.load_selected_preset();
+
+        target_app.preset_transfer_path_input = transfer_path.display().to_string();
+        target_app.import_preset_library();
+
+        assert!(target_app
+            .preset_names
+            .iter()
+            .any(|preset_name| preset_name == "baseline"));
+        assert!(target_app
+            .preset_names
+            .iter()
+            .any(|preset_name| preset_name == "imported"));
+        assert!(target_app
+            .preset_names
+            .iter()
+            .all(|preset_name| preset_name != "stale"));
+        assert_eq!(target_app.active_preset_name.as_deref(), Some("imported"));
+        assert_eq!(target_app.selected_preset_name.as_deref(), Some("imported"));
+        let expected = format!(
+            "Imported preset library from '{}'.",
+            transfer_path.display()
+        );
+        assert_eq!(
+            target_app.preset_status_message.as_deref(),
+            Some(expected.as_str())
+        );
+
+        let _ = fs::remove_file(source_store_path);
+        let _ = fs::remove_file(target_store_path);
+        let _ = fs::remove_file(transfer_path);
+    }
+
+    #[test]
+    fn invalid_import_reports_warning_without_mutating_current_presets() {
+        let store_path = unique_test_path("invalid_import_store");
+        let transfer_path = unique_test_path("invalid_import_transfer");
+        let mut app = SimUiApp::new();
+        app.preset_file_path = Some(store_path.clone());
+
+        app.preset_name_input = "kept".to_string();
+        app.save_named_preset();
+        app.selected_preset_name = Some("kept".to_string());
+        app.load_selected_preset();
+
+        fs::write(&transfer_path, "{}").expect("invalid transfer payload should be written");
+        app.preset_transfer_path_input = transfer_path.display().to_string();
+
+        let preset_names_before = app.preset_names.clone();
+        let active_before = app.active_preset_name.clone();
+        let selected_before = app.selected_preset_name.clone();
+
+        app.import_preset_library();
+
+        assert!(app
+            .preset_status_message
+            .as_deref()
+            .unwrap_or_default()
+            .starts_with("Preset import warning:"));
+        assert_eq!(app.preset_names, preset_names_before);
+        assert_eq!(app.active_preset_name, active_before);
+        assert_eq!(app.selected_preset_name, selected_before);
+
+        let metadata = list_named_presets(&store_path).expect("metadata should still be readable");
+        assert!(metadata.iter().any(|entry| entry.name == "kept"));
+
+        let _ = fs::remove_file(store_path);
+        let _ = fs::remove_file(transfer_path);
+    }
+
+    #[test]
+    fn import_library_is_blocked_while_simulation_is_running() {
+        let store_path = unique_test_path("running_import_store");
+        let transfer_path = unique_test_path("running_import_transfer");
+        let mut app = SimUiApp::new();
+        app.preset_file_path = Some(store_path.clone());
+        app.started = true;
+        app.preset_transfer_path_input = transfer_path.display().to_string();
+
+        app.import_preset_library();
+
+        assert_eq!(
+            app.preset_status_message.as_deref(),
+            Some("Preset actions are disabled while simulation is running.")
+        );
+
+        let _ = fs::remove_file(store_path);
+        let _ = fs::remove_file(transfer_path);
+    }
 }
