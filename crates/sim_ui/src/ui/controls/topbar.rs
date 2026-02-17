@@ -71,6 +71,8 @@ pub(super) fn render_top_controls(ui: &mut egui::Ui, app: &mut SimUiApp) {
         ui.checkbox(&mut app.hide_off_duty_drivers, "Hide off-duty drivers");
         ui.checkbox(&mut app.grid_enabled, "Grid");
         ui.label(format!("Steps executed: {}", app.steps_executed));
+        let active = app.active_preset_name.as_deref().unwrap_or("(none)");
+        ui.label(format!("Preset: {active}"));
     });
 
     let (sim_now_ms, sim_epoch_ms) = app
@@ -90,4 +92,17 @@ pub(super) fn render_top_controls(ui: &mut egui::Ui, app: &mut SimUiApp) {
             format_datetime_from_unix_ms(now_unix_ms())
         ));
     });
+
+    if let Some(message) = app.preset_load_error.as_ref() {
+        ui.colored_label(egui::Color32::from_rgb(220, 180, 80), message);
+    }
+    if let Some(message) = app.preset_save_error.as_ref() {
+        ui.colored_label(egui::Color32::from_rgb(220, 180, 80), message);
+    }
+    if app.started {
+        ui.colored_label(
+            egui::Color32::from_rgb(170, 170, 170),
+            "Preset save/overwrite/delete actions are disabled while simulation is running.",
+        );
+    }
 }

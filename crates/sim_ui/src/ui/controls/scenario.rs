@@ -7,6 +7,116 @@ use crate::ui::utils::{datetime_from_unix_ms, now_unix_ms};
 pub(super) fn render_scenario_parameters(ui: &mut egui::Ui, app: &mut SimUiApp) {
     let can_edit = !app.started;
 
+    ui.group(|ui| {
+        ui.horizontal(|ui| {
+            ui.label("Presets");
+            if let Some(active) = app.active_preset_name.as_ref() {
+                ui.label(format!("Active: {active}"));
+            } else {
+                ui.label("Active: (none)");
+            }
+        });
+
+        ui.horizontal(|ui| {
+            ui.label("Name");
+            ui.add_enabled(
+                can_edit,
+                egui::TextEdit::singleline(&mut app.preset_name_input).desired_width(180.0),
+            );
+
+            let selected_text = app
+                .selected_preset_name
+                .as_deref()
+                .unwrap_or("Select preset")
+                .to_string();
+            egui::ComboBox::from_id_salt("preset_selector")
+                .selected_text(selected_text)
+                .show_ui(ui, |ui| {
+                    for preset_name in &app.preset_names {
+                        ui.selectable_value(
+                            &mut app.selected_preset_name,
+                            Some(preset_name.clone()),
+                            preset_name,
+                        );
+                    }
+                });
+
+            if ui
+                .add_enabled(can_edit, egui::Button::new("Save preset"))
+                .clicked()
+            {
+                app.save_named_preset();
+            }
+            if ui
+                .add_enabled(
+                    can_edit && app.selected_preset_name.is_some(),
+                    egui::Button::new("Load preset"),
+                )
+                .clicked()
+            {
+                app.load_selected_preset();
+            }
+            if ui
+                .add_enabled(
+                    can_edit && app.selected_preset_name.is_some(),
+                    egui::Button::new("Delete preset"),
+                )
+                .clicked()
+            {
+                app.delete_selected_preset();
+            }
+        });
+
+        ui.horizontal(|ui| {
+            ui.label("Transfer path").on_hover_text(
+                "Path to a full-library preset transfer JSON file for export/import.",
+            );
+            ui.add_enabled(
+                can_edit,
+                egui::TextEdit::singleline(&mut app.preset_transfer_path_input)
+                    .desired_width(260.0)
+                    .hint_text("./preset-library-transfer.json"),
+            );
+            if ui
+                .add_enabled(can_edit, egui::Button::new("Export library"))
+                .clicked()
+            {
+                app.export_preset_library();
+            }
+            if ui
+                .add_enabled(can_edit, egui::Button::new("Import library"))
+                .clicked()
+            {
+                app.import_preset_library();
+            }
+        });
+        ui.small("Export/import applies to the full preset library. Import replaces current library after validation succeeds.");
+
+        if let Some(message) = app.preset_status_message.as_ref() {
+            ui.colored_label(egui::Color32::from_rgb(220, 180, 80), message);
+        }
+    });
+    ui.add_space(6.0);
+
+    if let Some(overwrite_target) = app.pending_overwrite_name.clone() {
+        egui::Window::new("Overwrite preset?")
+            .collapsible(false)
+            .resizable(false)
+            .show(ui.ctx(), |ui| {
+                ui.label(format!(
+                    "Preset '{overwrite_target}' already exists. Overwrite it?"
+                ));
+                ui.horizontal(|ui| {
+                    if ui.button("Overwrite").clicked() {
+                        app.confirm_overwrite_named_preset();
+                    }
+                    if ui.button("Cancel").clicked() {
+                        app.cancel_overwrite_named_preset();
+                    }
+                });
+            });
+    }
+
     ui.columns(8, |columns| {
         // Col 1: Supply (drivers - initial, spawn count, spread)
         columns[0].vertical(|ui| {
