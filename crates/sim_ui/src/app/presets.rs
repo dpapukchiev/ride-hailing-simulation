@@ -1088,4 +1088,45 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn export_import_round_trip_preserves_library_and_active_marker() {
+        let source_store_path = unique_test_path("round_trip_source").join(PRESETS_FILE_NAME);
+        let target_store_path = unique_test_path("round_trip_target").join(PRESETS_FILE_NAME);
+        let transfer_path = unique_test_path("round_trip_transfer").join("library.json");
+        let defaults = AppDefaults::new();
+
+        let mut morning = ScenarioPresetV1::from_defaults(&defaults);
+        morning.num_riders = morning.num_riders.saturating_add(10);
+        let mut evening = ScenarioPresetV1::from_defaults(&defaults);
+        evening.num_drivers = evening.num_drivers.saturating_add(20);
+
+        save_named_preset(&source_store_path, "morning", &morning, false)
+            .expect("morning save should succeed");
+        save_named_preset(&source_store_path, "evening", &evening, false)
+            .expect("evening save should succeed");
+        let _ = load_named_preset(&source_store_path, "evening")
+            .expect("load should succeed")
+            .expect("evening preset should exist");
+
+        export_library(&source_store_path, &transfer_path).expect("export should succeed");
+        import_library(&target_store_path, &transfer_path).expect("import should succeed");
+
+        let metadata = list_named_presets(&target_store_path).expect("list should succeed");
+        assert_eq!(metadata.len(), 2);
+        assert_eq!(metadata[0].name, "evening");
+        assert!(metadata[0].is_active);
+        assert_eq!(metadata[1].name, "morning");
+        assert!(!metadata[1].is_active);
+
+        let loaded_evening = load_named_preset(&target_store_path, "evening")
+            .expect("load should succeed")
+            .expect("evening preset should exist");
+        assert_eq!(loaded_evening, evening);
+
+        let loaded_morning = load_named_preset(&target_store_path, "morning")
+            .expect("load should succeed")
+            .expect("morning preset should exist");
+        assert_eq!(loaded_morning, morning);
+    }
 }
