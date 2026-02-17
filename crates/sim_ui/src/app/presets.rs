@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fmt;
 use std::fs::{self, File};
 use std::io::Write;
@@ -31,6 +32,7 @@ impl fmt::Display for PresetStoreError {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct PresetLibraryV1 {
     version: u32,
     active_preset: Option<String>,
@@ -67,6 +69,7 @@ impl PresetLibraryV1 {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct NamedPresetV1 {
     name: String,
     scenario: ScenarioPresetV1,
@@ -176,6 +179,7 @@ impl From<SpawnModePresetV1> for SpawnMode {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct ScenarioPresetV1 {
     num_riders: usize,
     num_drivers: usize,
@@ -599,6 +603,51 @@ fn validate_import(
         )));
     }
 
+    let mut names = HashSet::with_capacity(library.presets.len());
+    for preset in &library.presets {
+        if preset.name.trim().is_empty() {
+            return Err(PresetStoreError::InvalidFormat(format!(
+                "preset names must not be empty in '{}'",
+                import_path.display()
+            )));
+        }
+        if preset.name.trim() != preset.name {
+            return Err(PresetStoreError::InvalidFormat(format!(
+                "preset names must not have surrounding whitespace in '{}'",
+                import_path.display()
+            )));
+        }
+        if !names.insert(preset.name.clone()) {
+            return Err(PresetStoreError::InvalidFormat(format!(
+                "duplicate preset name '{}' in '{}'",
+                preset.name,
+                import_path.display()
+            )));
+        }
+    }
+
+    if let Some(active_name) = library.active_preset.as_ref() {
+        if active_name.trim().is_empty() {
+            return Err(PresetStoreError::InvalidFormat(format!(
+                "active preset must not be empty in '{}'",
+                import_path.display()
+            )));
+        }
+        if active_name.trim() != active_name {
+            return Err(PresetStoreError::InvalidFormat(format!(
+                "active preset must not have surrounding whitespace in '{}'",
+                import_path.display()
+            )));
+        }
+        if !names.contains(active_name) {
+            return Err(PresetStoreError::InvalidFormat(format!(
+                "active preset '{}' not found in import file '{}'",
+                active_name,
+                import_path.display()
+            )));
+        }
+    }
+
     Ok(library)
 }
 
@@ -940,5 +989,103 @@ mod tests {
             .expect("load should succeed")
             .expect("imported preset should exist");
         assert_eq!(loaded, imported_scenario);
+    }
+
+    #[test]
+    fn strict_import_validation_rejects_invalid_payloads_without_mutating_store() {
+        let store_path = unique_test_path("strict_validation_store").join(PRESETS_FILE_NAME);
+        let import_path = unique_test_path("strict_validation_import").join("library.json");
+        let defaults = AppDefaults::new();
+        let baseline_scenario = ScenarioPresetV1::from_defaults(&defaults);
+
+        save_named_preset(&store_path, "baseline", &baseline_scenario, false)
+            .expect("baseline save should succeed");
+
+        let invalid_payloads = vec![
+            (
+                "unknown_field",
+                r#"{
+  "version": 1,
+  "active_preset": null,
+  "presets": [],
+  "unexpected": true
+}"#
+                .to_string(),
+            ),
+            (
+                "trimmed_name",
+                serde_json::to_string_pretty(&PresetLibraryV1 {
+                    version: PRESET_FILE_VERSION,
+                    active_preset: Some(" baseline ".to_string()),
+                    presets: vec![NamedPresetV1 {
+                        name: " baseline ".to_string(),
+                        scenario: baseline_scenario.clone(),
+                    }],
+                })
+                .expect("payload should serialize"),
+            ),
+            (
+                "duplicate_name",
+                serde_json::to_string_pretty(&PresetLibraryV1 {
+                    version: PRESET_FILE_VERSION,
+                    active_preset: Some("dup".to_string()),
+                    presets: vec![
+                        NamedPresetV1 {
+                            name: "dup".to_string(),
+                            scenario: baseline_scenario.clone(),
+                        },
+                        NamedPresetV1 {
+                            name: "dup".to_string(),
+                            scenario: baseline_scenario.clone(),
+                        },
+                    ],
+                })
+                .expect("payload should serialize"),
+            ),
+            (
+                "missing_active_reference",
+                serde_json::to_string_pretty(&PresetLibraryV1 {
+                    version: PRESET_FILE_VERSION,
+                    active_preset: Some("missing".to_string()),
+                    presets: vec![NamedPresetV1 {
+                        name: "present".to_string(),
+                        scenario: baseline_scenario.clone(),
+                    }],
+                })
+                .expect("payload should serialize"),
+            ),
+        ];
+
+        for (label, payload) in invalid_payloads {
+            if let Some(parent) = import_path.parent() {
+                fs::create_dir_all(parent).expect("import fixture directory should be creatable");
+            }
+            fs::write(&import_path, payload).expect("import fixture should be written");
+
+            let result = import_library(&store_path, &import_path);
+            assert!(
+                matches!(result, Err(PresetStoreError::InvalidFormat(_))),
+                "case '{label}' should reject invalid import"
+            );
+
+            let listed = list_named_presets(&store_path).expect("list should still succeed");
+            assert_eq!(listed.len(), 1, "case '{label}' should keep preset count");
+            assert_eq!(
+                listed[0].name, "baseline",
+                "case '{label}' should keep name"
+            );
+            assert!(
+                listed[0].is_active,
+                "case '{label}' should keep active marker"
+            );
+
+            let loaded = load_named_preset(&store_path, "baseline")
+                .expect("load should succeed")
+                .expect("baseline should still exist");
+            assert_eq!(
+                loaded, baseline_scenario,
+                "case '{label}' should keep baseline data"
+            );
+        }
     }
 }
