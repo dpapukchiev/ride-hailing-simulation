@@ -15,6 +15,8 @@ This simulation models a ride-hailing marketplace (similar to Uber/Bolt) with re
 
 The simulation supports thousands of concurrent riders and drivers, realistic time-of-day demand patterns (rush hours, day/night variations), and multiple matching algorithms for driver-rider pairing.
 
+![Configuration Panel](ui-screenshots/map-osrm.png)
+
 ## Documentation
 
 - **[SPEC.md](./SPEC.md)** -- High-level specification and system overview
